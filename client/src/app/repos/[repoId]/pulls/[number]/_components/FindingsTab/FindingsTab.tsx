@@ -71,6 +71,15 @@ export function FindingsTab({
     setTarget((p) => ({ runId, n: (p?.n ?? 0) + 1 }));
   }, []);
 
+  // Cost lives on the RUN (agent_runs), not on the review — but the accordion
+  // renders from ReviewRecord. Both are already on this page, joined by run_id,
+  // so we index here instead of widening ReviewRecord or adding a server join.
+  const costByRun = React.useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const r of prRuns ?? []) m.set(r.run_id, r.cost_usd);
+    return m;
+  }, [prRuns]);
+
   return (
     <section>
       {liveRunIds.length > 0 && (
@@ -160,6 +169,7 @@ export function FindingsTab({
             review={review}
             prId={prId}
             defaultOpen={i === 0}
+            costUsd={review.run_id ? costByRun.get(review.run_id) ?? null : null}
             repoFullName={repoFullName}
             headSha={headSha}
             targetRunId={target?.runId ?? null}

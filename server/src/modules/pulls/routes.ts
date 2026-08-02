@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
@@ -129,6 +129,28 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
+    // TOTAL cost per PR for the list's cost column: every run ever made against
+    // the PR, summed. The column answers "what have I spent on this PR so far",
+    // so re-running an agent ADDS to it rather than replacing it — a much-
+    // iterated PR is genuinely more expensive and should read that way.
+    //
+    // Runs with a null cost (failed, or pre-dating the cost restore) are
+    // filtered out in SQL rather than coerced to 0, so they contribute nothing
+    // and a PR whose runs ALL lack cost keeps an empty map entry → "—" rather
+    // than a false "$0.0000".
+    const totalCostByPr = new Map<string, number>();
+    if (prIds.length > 0) {
+      const runRows = await container.db
+        .select({ prId: t.agentRuns.prId, costUsd: t.agentRuns.costUsd })
+        .from(t.agentRuns)
+        .where(and(inArray(t.agentRuns.prId, prIds), isNotNull(t.agentRuns.costUsd)));
+      for (const run of runRows) {
+        if (run.prId) {
+          totalCostByPr.set(run.prId, (totalCostByPr.get(run.prId) ?? 0) + run.costUsd!);
+        }
+      }
+    }
+
     const now = Date.now();
     return rows.map((r) => {
       const review = latestReviewByPr.get(r.id);
@@ -153,6 +175,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
+        cost_usd: totalCostByPr.get(r.id) ?? null,
       };
     });
   });

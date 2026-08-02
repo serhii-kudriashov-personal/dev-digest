@@ -209,6 +209,102 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(run!.findingsCount).toBe(1);
     expect(run!.grounding).toBe('1/2 passed');
 
+    // L01 cost badge: the engine's accumulated costUsd is persisted on the run,
+    // mirrored into the trace document, and served on the run-history endpoint.
+    // The mock LLM bills 0.001 per call, and DIFF touches a single file, so
+    // 'auto' picks single-pass ⇒ exactly one call ⇒ 0.001.
+    expect(run!.costUsd).toBeCloseTo(0.001, 6);
+    expect(trace.stats.cost_usd).toBeCloseTo(0.001, 6);
+    const runList = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/runs` })).json();
+    expect(runList[0].cost_usd).toBeCloseTo(0.001, 6);
+
+    await app.close();
+  });
+
+  it('the PR-list cost column SUMS every run against the PR, not just the latest', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sec-sum', provider: 'openai', model: 'gpt-4.1', system_prompt: 'sec' },
+      })
+    ).json();
+
+    // Two separate reviews of the SAME PR — a re-run must ADD to the total.
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } });
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } });
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 2 });
+
+    // No GitHub token in tests → the list route falls back to persisted rows.
+    const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const row = pulls.find((p: { id: string }) => p.id === pr.id);
+    // 2 runs × 0.001 each. The superseded "latest run only" rule would report
+    // 0.001 here — this assertion is what pins the sum semantics.
+    expect(row.cost_usd).toBeCloseTo(0.002, 6);
+
+    await app.close();
+  });
+
+  it('a PR whose runs all lack a cost stays null (never 0)', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    // An `anthropic` agent with only `openai` mocked → ConfigError → failed run
+    // with cost_usd NULL. Summing must not coerce that absence into 0.
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Broken-sum', provider: 'anthropic', model: 'claude-x', system_prompt: 'x' },
+      })
+    ).json();
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } });
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+
+    const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const row = pulls.find((p: { id: string }) => p.id === pr.id);
+    expect(row.cost_usd).toBeNull();
+
+    await app.close();
+  });
+
+  it('a failed run records cost_usd = NULL, not 0', async () => {
+    // Only the `openai` provider is mocked, so an `anthropic` agent falls
+    // through to container.llm('anthropic') → ConfigError (no key) → failed run.
+    const app = await appWith(REVIEW_FIXTURE, 'openai');
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Broken', provider: 'anthropic', model: 'claude-x', system_prompt: 'x' },
+      })
+    ).json();
+
+    const body = (
+      await app.inject({
+        method: 'POST',
+        url: `/pulls/${pr.id}/review`,
+        payload: { agentId: agent.id },
+      })
+    ).json();
+    const runId = body.runs[0].run_id;
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+
+    const [run] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, runId));
+    expect(run!.status).toBe('failed');
+    // The distinction the UI depends on: null renders "—" (unknown), whereas 0
+    // would render "$0.0000" and claim the run was free.
+    expect(run!.costUsd).toBeNull();
+
+    const runList = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/runs` })).json();
+    expect(runList[0].cost_usd).toBeNull();
+
     await app.close();
   });
 

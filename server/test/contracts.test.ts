@@ -166,6 +166,53 @@ describe('AI contracts parse fixtures', () => {
       log: [{ t: '00.00', kind: 'info', msg: 'started' }],
     });
     expect(trace.tool_calls).toHaveLength(1);
+    // The fixture above carries no `cost_usd` — the on-disk shape of every
+    // trace written before the L01 cost restore. RunStats.cost_usd MUST stay
+    // nullish (not nullable): `.nullable()` rejects a MISSING key and would
+    // make every historical run_traces document unparseable.
+    expect(trace.stats.cost_usd).toBeUndefined();
+  });
+
+  it('RunTrace carries cost_usd when the run recorded one', () => {
+    const trace = RunTrace.parse({
+      config: { agent: 'Security Reviewer', model: 'gpt-4.1', source: 'local' },
+      stats: {
+        duration_ms: 8200,
+        tokens_in: 14820,
+        tokens_out: 1240,
+        cost_usd: 0.06,
+        findings: 3,
+        grounding: '3/3 passed',
+      },
+      prompt_assembly: { system: 's', user: 'u' },
+      tool_calls: [],
+      raw_output: '{}',
+      memory_pulled: [],
+      specs_read: [],
+      log: [],
+    });
+    expect(trace.stats.cost_usd).toBe(0.06);
+  });
+
+  it('RunTrace accepts an explicitly null cost (failed run)', () => {
+    const trace = RunTrace.parse({
+      config: { agent: 'Security Reviewer', model: 'gpt-4.1', source: 'local' },
+      stats: {
+        duration_ms: 0,
+        tokens_in: 0,
+        tokens_out: 0,
+        cost_usd: null,
+        findings: 0,
+        grounding: '0/0 passed',
+      },
+      prompt_assembly: { system: 's', user: '' },
+      tool_calls: [],
+      raw_output: '',
+      memory_pulled: [],
+      specs_read: [],
+      log: [],
+    });
+    expect(trace.stats.cost_usd).toBeNull();
   });
 });
 
