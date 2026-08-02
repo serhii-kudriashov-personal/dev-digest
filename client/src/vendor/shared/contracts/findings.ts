@@ -11,6 +11,19 @@ import { z } from 'zod';
 export const Severity = z.enum(['CRITICAL', 'WARNING', 'SUGGESTION']);
 export type Severity = z.infer<typeof Severity>;
 
+/**
+ * A tally of findings per severity. One definition for every aggregate that
+ * reports a breakdown — the PR list column, `AgentStats`, `AgentPerfRow`, and
+ * the server-side `rollupSeverities` helper. Keys match the `Severity` enum.
+ * See specs/findings-by-severity.md.
+ */
+export const SeverityCounts = z.object({
+  CRITICAL: z.number().int(),
+  WARNING: z.number().int(),
+  SUGGESTION: z.number().int(),
+});
+export type SeverityCounts = z.infer<typeof SeverityCounts>;
+
 export const FindingCategory = z.enum(['bug', 'security', 'perf', 'style', 'test']);
 export type FindingCategory = z.infer<typeof FindingCategory>;
 

@@ -1,0 +1,18 @@
+{
+  "name": "PR findings can be counted and filtered by severity",
+  "description": "From PR #482's Agent runs tab, confirm the per-run SeverityFilterBar renders its three chips, then click WARNING and confirm the selection lands in the URL (?severity=WARNING) and the list narrows to the warning-level finding ('N+1 query in user list endpoint'), leaving the critical one behind. The seeded run holds exactly one CRITICAL ('Hardcoded Stripe secret key in commit') and one WARNING, so the filter's effect is visible as a positive assertion rather than an absence. Exercises SeverityFilterBar / FindingsPanel and the ?severity= round-trip. Read-only seeded data (no model call). Assumes a freshly-seeded DB where acme/payments-api (PR #482) is the first repo — guaranteed by e2e-web.yml; run locally via the hermetic stack (see e2e/README.md).",
+  "steps": [
+    { "cmd": ["open", "{BASE}/"], "label": "load the app root" },
+    { "cmd": ["wait", "--url", "/pulls"], "label": "land on the PR list" },
+    { "cmd": ["find", "text", "Add rate limiting to public API endpoints", "click"], "label": "open the PR row" },
+    { "cmd": ["wait", "--url", "/pulls/482"], "label": "navigate to the PR detail route" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "PR detail data settles" },
+    { "cmd": ["find", "role", "button", "click", "--name", "Agent runs"], "label": "switch to the Agent runs tab" },
+    { "cmd": ["wait", "--url", "tab=findings"], "label": "findings tab is active in the URL" },
+    { "cmd": ["wait", "--text", "Hardcoded Stripe secret key in commit"], "label": "unfiltered: the critical finding is visible" },
+    { "cmd": ["wait", "--text", "Suggestion"], "label": "the severity filter bar rendered all three chips" },
+    { "cmd": ["find", "text", "Warning", "click"], "label": "light the WARNING chip" },
+    { "cmd": ["wait", "--url", "severity=WARNING"], "label": "the selection round-trips into the query string" },
+    { "cmd": ["wait", "--text", "N+1 query in user list endpoint"], "label": "the warning-level finding survives the filter" }
+  ]
+}

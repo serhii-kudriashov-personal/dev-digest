@@ -1,13 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
-import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
+import type {
+  PrMeta,
+  PrDetail,
+  GitHubClient,
+  PrReviewComment,
+  SeverityCounts,
+} from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
-import { deriveReviewStatus } from './status.js';
+import { deriveReviewStatus, rollupSeverities } from './status.js';
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -113,8 +119,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
 
     // Latest-review SCORE per PR for the list's score ring. Computed on read
     // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
+    // grouping is cheap.
     const prIds = rows.map((r) => r.id);
     const latestReviewByPr = new Map<string, { score: number | null }>();
     if (prIds.length > 0) {
@@ -151,6 +156,38 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
+    // FINDINGS per severity for the list's findings column: every finding of
+    // every review of the PR, tallied. Same "all runs" reading as the cost
+    // column above, and the same union the PR detail page renders — a re-run
+    // ADDS to the breakdown rather than replacing it.
+    //
+    // A PR with no reviews gets no map entry at all, so it renders "—"
+    // (never reviewed), which is distinct from a reviewed PR that produced no
+    // findings and gets an object of zeros.
+    const severitiesByPr = new Map<string, SeverityCounts>();
+    if (prIds.length > 0) {
+      const findingRows = await container.db
+        .select({ prId: t.reviews.prId, severity: t.findings.severity })
+        .from(t.findings)
+        .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+        .where(inArray(t.reviews.prId, prIds));
+      const byPr = new Map<string, { severity: string }[]>();
+      for (const f of findingRows) {
+        const list = byPr.get(f.prId);
+        if (list) list.push(f);
+        else byPr.set(f.prId, [f]);
+      }
+      // Reviewed-but-clean PRs have no finding rows, so seed from the reviews
+      // we already fetched — otherwise they'd be indistinguishable from
+      // never-reviewed and render "—".
+      for (const prId of latestReviewByPr.keys()) {
+        severitiesByPr.set(prId, rollupSeverities(byPr.get(prId) ?? []));
+      }
+      for (const [prId, list] of byPr) {
+        if (!severitiesByPr.has(prId)) severitiesByPr.set(prId, rollupSeverities(list));
+      }
+    }
+
     const now = Date.now();
     return rows.map((r) => {
       const review = latestReviewByPr.get(r.id);
@@ -176,6 +213,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
         cost_usd: totalCostByPr.get(r.id) ?? null,
+        findings_by_severity: severitiesByPr.get(r.id) ?? null,
       };
     });
   });

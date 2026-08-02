@@ -15,13 +15,19 @@ import { OverviewTab } from "./_components/OverviewTab";
 import { FindingsTab } from "./_components/FindingsTab";
 import { DiffTab } from "./_components/DiffTab";
 import RunTraceDrawer from "./_components/RunTraceDrawer";
+import {
+  SEVERITY_PARAM,
+  parseSeverityParam,
+  serializeSeverityParam,
+  toggleSeverity,
+} from "./_components/SeverityFilterBar";
 import { usePullDetail, usePulls } from "../../../../../lib/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePrReviews, useCancelRun, usePrActiveRuns, usePrRuns, useDeleteRun } from "../../../../../lib/hooks/reviews";
 import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context";
 import { ApiError } from "../../../../../lib/api";
 import { githubPrUrl } from "../../../../../lib/github-urls";
-import type { FindingRecord } from "@devdigest/shared";
+import type { FindingRecord, Severity } from "@devdigest/shared";
 
 export default function PRDetailPage() {
   const params = useParams<{ repoId: string; number: string }>();
@@ -66,6 +72,16 @@ export default function PRDetailPage() {
     router.replace(`/repos/${repoId}/pulls/${number}${sp.toString() ? `?${sp.toString()}` : ""}`);
   };
   const setTab = (t: string) => setParam("tab", t);
+
+  // Severity filter: ONE selection for the whole page (each run's accordion
+  // still shows its own counts). Living in the query makes it survive reload
+  // and travel in a shared link, like ?tab and ?trace.
+  const severities = React.useMemo(
+    () => parseSeverityParam(search.get(SEVERITY_PARAM)),
+    [search],
+  );
+  const onToggleSeverity = (sev: Severity) =>
+    setParam(SEVERITY_PARAM, serializeSeverityParam(toggleSeverity(severities, sev)));
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -147,6 +163,8 @@ export default function PRDetailPage() {
             prCommits={pr.commits}
             repoFullName={repoFullName}
             headSha={pr.head_sha}
+            severities={severities}
+            onToggleSeverity={onToggleSeverity}
             cancelMutation={cancel}
             onOpenTrace={(id) => setParam("trace", id)}
             onDelete={(id) => {

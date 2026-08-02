@@ -1,4 +1,4 @@
-import type { PrStatus } from '@devdigest/shared';
+import type { PrStatus, SeverityCounts } from '@devdigest/shared';
 
 /**
  * PR-list rollup helpers (pure — no DB / `this`, so they unit-test cleanly).
@@ -13,19 +13,20 @@ import type { PrStatus } from '@devdigest/shared';
 /** Open PRs whose current head was reviewed but untouched this long read "stale". */
 export const STALE_DAYS = 7;
 
-export interface SeverityCounts {
-  critical: number;
-  warning: number;
-  suggestion: number;
-}
-
-/** Tally finding severities (CRITICAL / WARNING / SUGGESTION) for one review. */
+/**
+ * Tally finding severities (CRITICAL / WARNING / SUGGESTION).
+ *
+ * The shape is the shared `SeverityCounts` contract, so the PR list column,
+ * `AgentStats` and `AgentPerfRow` all report the same keys. An unrecognised
+ * severity is ignored rather than throwing — `findings.severity` is a plain
+ * text column with no check constraint.
+ */
 export function rollupSeverities(rows: { severity: string }[]): SeverityCounts {
-  const c: SeverityCounts = { critical: 0, warning: 0, suggestion: 0 };
+  const c: SeverityCounts = { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 };
   for (const r of rows) {
-    if (r.severity === 'CRITICAL') c.critical += 1;
-    else if (r.severity === 'WARNING') c.warning += 1;
-    else if (r.severity === 'SUGGESTION') c.suggestion += 1;
+    if (r.severity === 'CRITICAL') c.CRITICAL += 1;
+    else if (r.severity === 'WARNING') c.WARNING += 1;
+    else if (r.severity === 'SUGGESTION') c.SUGGESTION += 1;
   }
   return c;
 }

@@ -6,7 +6,7 @@ import { RunStatus } from "../RunStatus";
 import { RunHistory } from "../RunHistory/RunHistory";
 import { ReviewRunAccordion } from "../ReviewRunAccordion";
 import { s } from "./styles";
-import type { FindingRecord, ReviewRecord, RunSummary, PrCommit } from "@devdigest/shared";
+import type { FindingRecord, ReviewRecord, RunSummary, PrCommit, Severity } from "@devdigest/shared";
 import type { UseMutationResult } from "@tanstack/react-query";
 
 interface FindingsTabProps {
@@ -21,6 +21,9 @@ interface FindingsTabProps {
   /** owner/repo + head sha — used to deep-link a finding's file:line to GitHub. */
   repoFullName?: string | null;
   headSha?: string | null;
+  /** Page-wide severity selection (`?severity=`); counts stay per-run. */
+  severities: Severity[];
+  onToggleSeverity: (sev: Severity) => void;
   onOpenTrace: (id: string) => void;
   onDelete: (id: string) => void;
   onRunDone: () => void;
@@ -37,6 +40,8 @@ export function FindingsTab({
   cancelMutation,
   repoFullName,
   headSha,
+  severities,
+  onToggleSeverity,
   onOpenTrace,
   onDelete,
   onRunDone,
@@ -79,6 +84,16 @@ export function FindingsTab({
     for (const r of prRuns ?? []) m.set(r.run_id, r.cost_usd);
     return m;
   }, [prRuns]);
+
+  // The mirror image, for the Timeline's severity badges: `RunSummary` carries
+  // only `findings_count`, so the breakdown comes from the reviews already on
+  // this page, indexed the same way. A run with no review record (its review
+  // was deleted) is simply absent — the timeline falls back to its own count.
+  const findingsByRun = React.useMemo(() => {
+    const m = new Map<string, FindingRecord[]>();
+    for (const rev of runs) if (rev.run_id) m.set(rev.run_id, rev.findings);
+    return m;
+  }, [runs]);
 
   return (
     <section>
@@ -140,6 +155,7 @@ export function FindingsTab({
           <RunHistory
             runs={prRuns ?? []}
             commits={prCommits}
+            findingsByRun={findingsByRun}
             onOpenTrace={handleOpenTrace}
             onGoToReview={handleGoToReview}
             onDelete={handleDelete}
@@ -174,6 +190,8 @@ export function FindingsTab({
             headSha={headSha}
             targetRunId={target?.runId ?? null}
             targetNonce={target?.n ?? 0}
+            severities={severities}
+            onToggleSeverity={onToggleSeverity}
           />
         ))
       )}
