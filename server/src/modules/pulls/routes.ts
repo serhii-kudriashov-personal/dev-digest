@@ -1,13 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { and, desc, eq, inArray } from 'drizzle-orm';
-import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
+import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import type {
+  PrMeta,
+  PrDetail,
+  GitHubClient,
+  PrReviewComment,
+  SeverityCounts,
+} from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
-import { deriveReviewStatus } from './status.js';
+import { deriveReviewStatus, rollupSeverities } from './status.js';
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -113,8 +119,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
 
     // Latest-review SCORE per PR for the list's score ring. Computed on read
     // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
+    // grouping is cheap.
     const prIds = rows.map((r) => r.id);
     const latestReviewByPr = new Map<string, { score: number | null }>();
     if (prIds.length > 0) {
@@ -126,6 +131,60 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       // Rows are newest-first → first seen per PR is the latest review.
       for (const rv of reviewRows) {
         if (!latestReviewByPr.has(rv.prId)) latestReviewByPr.set(rv.prId, { score: rv.score });
+      }
+    }
+
+    // TOTAL cost per PR for the list's cost column: every run ever made against
+    // the PR, summed. The column answers "what have I spent on this PR so far",
+    // so re-running an agent ADDS to it rather than replacing it — a much-
+    // iterated PR is genuinely more expensive and should read that way.
+    //
+    // Runs with a null cost (failed, or pre-dating the cost restore) are
+    // filtered out in SQL rather than coerced to 0, so they contribute nothing
+    // and a PR whose runs ALL lack cost keeps an empty map entry → "—" rather
+    // than a false "$0.0000".
+    const totalCostByPr = new Map<string, number>();
+    if (prIds.length > 0) {
+      const runRows = await container.db
+        .select({ prId: t.agentRuns.prId, costUsd: t.agentRuns.costUsd })
+        .from(t.agentRuns)
+        .where(and(inArray(t.agentRuns.prId, prIds), isNotNull(t.agentRuns.costUsd)));
+      for (const run of runRows) {
+        if (run.prId) {
+          totalCostByPr.set(run.prId, (totalCostByPr.get(run.prId) ?? 0) + run.costUsd!);
+        }
+      }
+    }
+
+    // FINDINGS per severity for the list's findings column: every finding of
+    // every review of the PR, tallied. Same "all runs" reading as the cost
+    // column above, and the same union the PR detail page renders — a re-run
+    // ADDS to the breakdown rather than replacing it.
+    //
+    // A PR with no reviews gets no map entry at all, so it renders "—"
+    // (never reviewed), which is distinct from a reviewed PR that produced no
+    // findings and gets an object of zeros.
+    const severitiesByPr = new Map<string, SeverityCounts>();
+    if (prIds.length > 0) {
+      const findingRows = await container.db
+        .select({ prId: t.reviews.prId, severity: t.findings.severity })
+        .from(t.findings)
+        .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+        .where(inArray(t.reviews.prId, prIds));
+      const byPr = new Map<string, { severity: string }[]>();
+      for (const f of findingRows) {
+        const list = byPr.get(f.prId);
+        if (list) list.push(f);
+        else byPr.set(f.prId, [f]);
+      }
+      // Reviewed-but-clean PRs have no finding rows, so seed from the reviews
+      // we already fetched — otherwise they'd be indistinguishable from
+      // never-reviewed and render "—".
+      for (const prId of latestReviewByPr.keys()) {
+        severitiesByPr.set(prId, rollupSeverities(byPr.get(prId) ?? []));
+      }
+      for (const [prId, list] of byPr) {
+        if (!severitiesByPr.has(prId)) severitiesByPr.set(prId, rollupSeverities(list));
       }
     }
 
@@ -153,6 +212,8 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
+        cost_usd: totalCostByPr.get(r.id) ?? null,
+        findings_by_severity: severitiesByPr.get(r.id) ?? null,
       };
     });
   });

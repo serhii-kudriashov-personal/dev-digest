@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:claude.com)",
+      "WebFetch(domain:www.mindstudio.ai)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

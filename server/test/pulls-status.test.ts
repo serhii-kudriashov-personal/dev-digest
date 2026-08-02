@@ -59,10 +59,17 @@ describe('rollupSeverities', () => {
         { severity: 'SUGGESTION' },
         { severity: 'WEIRD' },
       ]),
-    ).toEqual({ critical: 2, warning: 1, suggestion: 1 });
+    ).toEqual({ CRITICAL: 2, WARNING: 1, SUGGESTION: 1 });
   });
 
   it('is all-zero for no findings', () => {
-    expect(rollupSeverities([])).toEqual({ critical: 0, warning: 0, suggestion: 0 });
+    expect(rollupSeverities([])).toEqual({ CRITICAL: 0, WARNING: 0, SUGGESTION: 0 });
+  });
+
+  // Keys are UPPERCASE to match the `Severity` enum and the shared
+  // `SeverityCounts` contract the PR list serves — not the lowercase shape this
+  // helper carried while it had no callers. See specs/findings-by-severity.md.
+  it('returns the shared SeverityCounts key casing', () => {
+    expect(Object.keys(rollupSeverities([]))).toEqual(['CRITICAL', 'WARNING', 'SUGGESTION']);
   });
 });

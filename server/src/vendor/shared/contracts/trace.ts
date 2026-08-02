@@ -64,6 +64,13 @@ export const RunStats = z.object({
   tokens_out: z.number().int(),
   findings: z.number().int(),
   grounding: z.string(),
+  /**
+   * Attributed USD cost of the run. NULLISH, not nullable: RunTrace is
+   * persisted as a single jsonb document, and every trace written before the
+   * L01 cost restore has no `cost_usd` key at all — `.nullable()` would reject
+   * a MISSING key and break parsing of the entire history.
+   */
+  cost_usd: z.number().nullish(),
 });
 export type RunStats = z.infer<typeof RunStats>;
 
@@ -102,6 +109,9 @@ export const RunSummary = z.object({
   duration_ms: z.number().int().nullable(),
   tokens_in: z.number().int().nullable(),
   tokens_out: z.number().int().nullable(),
+  /** Attributed USD cost; null = unknown (failed run, or pre-L01 row) — the
+   *  UI renders "—" for it, never "$0.00". */
+  cost_usd: z.number().nullable(),
   findings_count: z.number().int().nullable(),
   grounding: z.string().nullable(),
   ran_at: z.string().nullable(),

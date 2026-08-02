@@ -46,6 +46,11 @@ export const s = {
     textAlign: "right",
   } satisfies CSSProperties,
   muted: { color: "var(--text-muted)" } satisfies CSSProperties,
+  costCell: {
+    fontSize: 12,
+    color: "var(--text-secondary)",
+    textAlign: "right",
+  } satisfies CSSProperties,
   filterBar: {
     display: "flex",
     alignItems: "center",
