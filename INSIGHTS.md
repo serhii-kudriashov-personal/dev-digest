@@ -3,19 +3,40 @@
 Lessons that span the whole repo: what broke, why, and how not to step on it
 twice. Package-level lessons live in `<pkg>/INSIGHTS.md`.
 
-**Append-only, newest first.** Only write down what is NOT visible from the code
-and what cost real time. Format:
-
-```
-## YYYY-MM-DD — title
-**Symptom:** what was observed
-**Cause:** what was actually going on
-**Takeaway:** what to do next time
-```
+**Append-only, newest first.** Only what is NOT visible from the code and what
+cost real time. Sections are fixed; entry format and routing rules live in
+`.claude/skills/engineering-insights/SKILL.md`.
 
 ---
 
-## 2026-08-01 — `@devdigest/shared` drifts silently between server and client
+## What Works
+
+_Empty so far._
+
+## What Doesn't Work
+
+_Empty so far._
+
+## Codebase Patterns
+
+### 2026-08-01 — `costUsd` reaches the server and dies there
+
+**Symptom:** cost is computed in the adapters and accumulated by the engine, but
+never surfaces anywhere.
+
+**Cause:** commit `d45ab0d` removed the consumer (per-run cost) and left the
+producer in place. This is intentional — the cost badge returns in L01.
+
+**Takeaway:** don't "fix" it as a forgotten wire and don't delete it as dead
+code.
+
+## Tool & Library Notes
+
+_Empty so far._
+
+## Recurring Errors & Fixes
+
+### 2026-08-01 — `@devdigest/shared` drifts silently between server and client
 
 **Symptom:** the client's types don't know about the `openrouter` provider even
 though the server fully supports it; `AgentManifest`, `AgentVersionConfig`,
@@ -29,15 +50,10 @@ catch the divergence because each package typechecks in isolation and both pass.
 Before touching contracts, check: `diff -r server/src/vendor/shared
 client/src/vendor/shared`.
 
----
+## Session Notes
 
-## 2026-08-01 — `costUsd` reaches the server and dies there
+_Empty so far._
 
-**Symptom:** cost is computed in the adapters and accumulated by the engine, but
-never surfaces anywhere.
+## Open Questions
 
-**Cause:** commit `d45ab0d` removed the consumer (per-run cost) and left the
-producer in place. This is intentional — the cost badge returns in L01.
-
-**Takeaway:** don't "fix" it as a forgotten wire and don't delete it as dead
-code.
+_Empty so far._

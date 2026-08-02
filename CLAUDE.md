@@ -51,8 +51,20 @@ Vitest 2 · testcontainers · agent-browser
 - **Migrations are not applied on boot** — run `pnpm db:migrate` yourself.
 - **A DB-backed test must be named `*.it.test.ts`**, or the CI split breaks
   silently.
-- Hit a non-obvious trap? Add a paragraph to the relevant `INSIGHTS.md` before
-  you call the task done.
+- Hit a non-obvious trap? Capture it with the `engineering-insights` skill,
+  which appends it to the right `INSIGHTS.md`, before you call the task done.
+
+## Session protocol
+
+- **Start:** read the `INSIGHTS.md` of the package you are about to touch, plus
+  the root one. Say which entries are relevant to today's work — one line each.
+  Treat them as high-confidence guidance unless told otherwise.
+- **During:** the moment something non-obvious surfaces, use the
+  `engineering-insights` skill. Do not wait for the end of the session.
+- **End:** before reporting a non-trivial task done, run the skill's wrap-up
+  pass. Do not skip this step.
+- Append only. Never rewrite or delete an existing entry — supersede it with a
+  new dated one.
 
 ## Do not touch
 
@@ -64,7 +76,10 @@ Vitest 2 · testcontainers · agent-browser
 - `*/src/vendor/**` — vendored code, do not refactor.
 - Empty tables (`ci_*`, `eval_*`, `memory`, `digests`, `onboarding`, …) are
   intentional, reserved for later lessons. Do not drop or "clean up".
-- `.claude/skills/**` — vendored externally, governed by `skills-lock.json`.
+- Vendored skills under `.claude/skills/**` — the ones listed in
+  `skills-lock.json` are pulled from upstream; edits are overwritten on sync.
+  Skills authored in this repo (`engineering-insights`) are not in the lock and
+  are ours to change.
 
 ## Read when
 
@@ -76,4 +91,5 @@ Vitest 2 · testcontainers · agent-browser
 | `docs/agent-prompts/` | editing a review agent's `system_prompt` |
 | `docs/` | asking "why was it decided this way" |
 | `specs/` | implementing a new feature — read its spec first |
-| `INSIGHTS.md` | before any non-trivial change: the traps are written down |
+| `INSIGHTS.md` | at the start of every session, and before any non-trivial change: the traps are written down |
+| `.claude/skills/engineering-insights/SKILL.md` | writing an insight — entry format, sections, routing |
