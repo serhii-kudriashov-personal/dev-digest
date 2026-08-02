@@ -55,7 +55,7 @@ list. Note the two naming conventions differ and both are load-bearing:
 `src/components/` dirs are kebab-case, `_components/` dirs are PascalCase.
 
 **Where:** `src/components/findings-hover-card/`; the convention is stated for
-`_components/` in `client/CLAUDE.md` but not for the shared case.
+`_components/` in `client/AGENTS.md` but not for the shared case.
 
 ### 2026-08-02 — A facet counter is computed between the filters, never around them
 

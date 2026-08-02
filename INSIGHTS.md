@@ -99,6 +99,26 @@ historical drift is its own task.
 
 ## Codebase Patterns
 
+### 2026-08-02 — `CLAUDE.md` is a symlink; the real instruction file is `AGENTS.md`
+
+**Rule:** edit `AGENTS.md`. Each of the five `CLAUDE.md` (root, `server/`,
+`client/`, `reviewer-core/`, `e2e/`) is a symlink to the `AGENTS.md` beside it,
+and it has to stay one. Never `Write` a fresh `CLAUDE.md` over a link, and never
+"resolve the duplication" by deleting one of the two names.
+
+**Why:** Claude Code loads only `CLAUDE.md` — `AGENTS.md` is not read natively,
+by design or by setting. So the link is load-bearing, not cosmetic: turn it into
+a real file and you get two instruction files that drift silently, with Claude
+reading the stale one. Both names must exist, and exactly one of them can hold
+content.
+
+**Where:** links at `CLAUDE.md`, `server/CLAUDE.md`, `client/CLAUDE.md`,
+`reviewer-core/CLAUDE.md`, `e2e/CLAUDE.md`; rule stated in `AGENTS.md:40`
+(Repo rules). Renaming across the repo: a blanket
+`sed -i 's/CLAUDE.md/AGENTS.md/g'` must exclude `.claude/skills/zod/` (that
+vendored skill ships its own unrelated `AGENTS.md`) and `server/clones/` (a
+gitignored stale clone of this repo).
+
 ### 2026-08-02 — An `agent_runs` row and its `reviews` row can each outlive the other
 
 **Rule:** when rendering runs and reviews together — they are both on the PR
@@ -213,6 +233,27 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 "fix" there.
 
 ## Tool & Library Notes
+
+### 2026-08-02 — A committed symlink survives macOS/Linux clones and dies silently on Windows
+
+**Quirk:** git stores a symlink as mode `120000` with no `.gitattributes` and no
+config — a fresh checkout materializes a real link. But a Windows checkout
+WITHOUT `core.symlinks=true` (or Developer Mode) writes a regular file whose
+entire content is the target path. For `CLAUDE.md` that means Claude Code loads a
+one-line memory file reading `AGENTS.md` — no error, no warning, the project
+instructions are simply gone and the session looks like the repo has no
+conventions.
+
+**Workaround:** on Windows clone with `git clone -c core.symlinks=true`. To
+verify a checkout anywhere: `git ls-files -s '*CLAUDE.md'` must print `120000`
+on every row (`100644` means the link was flattened or a tool dereferenced it),
+and `/context` must show a non-trivial token count for the memory file — ~1.8k
+for root, not ~10. To test the staged links before committing, use
+`git checkout-index -a -f --prefix=/tmp/check/`; a plain `git clone .` only
+reflects HEAD and will show the pre-rename layout.
+
+**Where:** `CLAUDE.md` and `<pkg>/CLAUDE.md`; no `.gitattributes` exists in this
+repo and none is needed.
 
 ### 2026-08-02 — `findings.confidence` is not calibrated — never gate on it
 
