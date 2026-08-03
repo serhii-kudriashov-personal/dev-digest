@@ -11,13 +11,112 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
-_Empty so far._
+### 2026-08-03 — A `'use client'` page becomes a server wrapper with NO Suspense, because every `useSearchParams` route here is dynamic
+
+**Pattern:** when you thin a page down to `return <TheView />` and move
+`'use client'` into the view, do **not** pre-emptively wrap it in `<Suspense>`.
+Check the `pnpm build` route table instead: a route marked `ƒ` (server-rendered
+on demand) is never statically prerendered, so `useSearchParams` inside its
+client subtree needs no boundary. Only a `○` (static) route would.
+
+**Why:** the well-known Next rule — "`useSearchParams()` should be wrapped in a
+suspense boundary" — fires *during static prerendering only*, and it is the
+reason to expect this refactor to break. It didn't, for a reason worth writing
+down: all three converted screens that call `useSearchParams` sit under a dynamic
+segment (`[repoId]`, `[number]`, `[id]`), so Next already renders them on demand.
+The one route that IS static, `/`, uses `useRouter` and no search params. Adding
+Suspense "to be safe" would have bought nothing and put a loading boundary where
+the design has none.
+
+**The trap is that none of the three gates catch this.** `pnpm typecheck`,
+`pnpm lint` and `pnpm test` all pass whether or not the boundary is needed —
+only `pnpm build` knows, and it is not in the gate list. So after moving a
+`'use client'` directive off a page, run `pnpm build` and read the `○`/`ƒ`
+column; the build is the only place the RSC boundary is actually decided.
+
+**Where:** the four thinned pages are `client/src/app/page.tsx` (`○`),
+`client/src/app/repos/[repoId]/pulls/page.tsx`,
+`client/src/app/repos/[repoId]/pulls/[number]/page.tsx` and
+`client/src/app/agents/[id]/page.tsx` (all `ƒ`); the views that now carry
+`'use client'` are the matching `_components/<Name>/<Name>.tsx`.
 
 ## What Doesn't Work
 
 _Empty so far._
 
 ## Codebase Patterns
+
+### 2026-08-03 — Extracting a page into a View does NOT move the route's shared `constants.ts` / `styles.ts` / `helpers.ts`
+
+**Rule:** when you thin `<route>/page.tsx` into
+`<route>/_components/<Name>View/`, leave any `constants.ts` / `styles.ts` /
+`helpers.ts` that already sits **at the route level** exactly where it is. Give
+the new View its own narrow pair for what only it uses. Two files named
+`constants.ts` at two depths is the correct outcome, not duplication to tidy up.
+
+**Why:** the two extractions in this repo look alike and are not. `agents/` had
+nothing at the route level, so `AgentsListView/` owns its `constants.ts`
+(`TEMPLATES`) and `helpers.ts` (`filterAgents`) outright. `pulls/` is the other
+shape: its route-level `constants.ts`, `styles.ts` and `helpers.ts` are imported
+by **three** sibling components as `../../constants` — so the route folder *is*
+their nearest shared ancestor. Dragging them into `_components/PullsView/` would
+have forced `PRRow`, `FilterBar` and `FindingsCell` to reach sideways into
+another `_components/` subtree, which is precisely the smell
+`frontend-ui-architecture` §3 names ("reaching across two sibling trees is the
+signal you picked the wrong home"). The typecheck would still have been green.
+
+So the split is by consumer count, not by nesting level: shared by the route →
+route level; used only by the View → beside the View.
+
+**Where:** shared at `src/app/repos/[repoId]/pulls/constants.ts`, `styles.ts`,
+`helpers.ts`; consumers `_components/PRRow/PRRow.tsx:9,11,13`,
+`_components/FilterBar/FilterBar.tsx:7-8`,
+`_components/FindingsCell/FindingsCell.tsx:16`. View-local at
+`_components/PullsView/constants.ts` (`OPEN_STATUSES`, `DEFAULT_STATUS`) and
+`_components/PullsView/helpers.ts` (`filterAndSortPulls`, `countOpen`,
+`countNeedsReview`); `PullsView.tsx:19-24` imports from both depths. The
+contrasting case is `src/app/agents/_components/AgentsListView/`.
+
+### 2026-08-02 — Casing encodes WHAT a folder is: kebab = module, Pascal = component
+
+**Rule:** there is one naming rule in this package, not two competing ones.
+kebab-case names a **module or segment** — something you import *from*, or a bag
+of things. PascalCase names a **component** — a folder that is one, or a file
+that exports one.
+
+| Kind | Case | Examples |
+|---|---|---|
+| Route segment (becomes a URL) | lowercase | `repos/`, `pulls/`, `[repoId]` |
+| Module (imported as `@/components/x`) | kebab | `diff-viewer/`, `app-shell/`, `findings-hover-card/` |
+| Segment inside a module/route | kebab | `_components/`, `hooks/`, `primitives/` |
+| Folder that IS one component | Pascal | `FindingsPanel/`, `FileCard/`, `AgentEditor/` |
+| File exporting a component | Pascal | `AppShell.tsx`, `SeverityBadges.tsx` |
+| Everything else | lowercase | `helpers.ts`, `constants.ts`, `styles.ts`, `github-urls.ts` |
+
+**Why:** stated as "`src/components/` is kebab, `_components/` is Pascal" it
+reads like an arbitrary split you must memorize per location, and invites a
+"let's unify it" refactor. It isn't a split — those two compare different
+levels. `diff-viewer/` is kebab because it is a module; the component folders
+*inside* it (`FileCard/`, `CodeLine/`, `DiffViewer/`) are Pascal, exactly like
+`_components/FindingsPanel/`. Verified mechanically at the time of writing: 39
+PascalCase component dirs, 7 kebab modules under `src/components/`, 70
+PascalCase `.tsx` files, and **zero** violations. The only nested lowercase dir
+is `components/app-shell/hooks` — a segment, so also per the rule.
+
+Cost of "unifying" to all-kebab, for the record: 39 folder renames, ~70 file
+renames if applied consistently, and it buys nothing — JSX tags stay
+`<FindingsPanel />`, so mixed casing does not disappear, it just moves. It also
+cannot reach `src/vendor/ui/` (PascalCase files, do-not-refactor), so the result
+would be *less* uniform than today.
+
+**Known exception:** `lib/providers.tsx`, `lib/theme.tsx`, `lib/toast.tsx`,
+`lib/repo-context.tsx` export provider components but are lowercase. Intentional
+— `lib/` is infrastructure; the Pascal rule applies inside `components/` and
+`_components/` only.
+
+**Where:** `src/components/` (7 modules), `src/app/**/_components/` (39
+component dirs), `src/lib/` (the exception). To re-verify:
+`find app components -type d | grep -E '/[A-Z][A-Za-z]*$' | wc -l`.
 
 ### 2026-08-02 — A component shared by a fetching and a non-fetching caller takes DATA, not an id
 
@@ -57,6 +156,11 @@ list. Note the two naming conventions differ and both are load-bearing:
 **Where:** `src/components/findings-hover-card/`; the convention is stated for
 `_components/` in `client/AGENTS.md` but not for the shared case.
 
+**Superseded by:** 2026-08-02 — the placement rule stands, but the naming note
+("the two naming conventions differ and both are load-bearing") compares two
+different levels and reads as a conflict. There is one rule: kebab = module,
+Pascal = component. See the entry at the top of this section.
+
 ### 2026-08-02 — A facet counter is computed between the filters, never around them
 
 **Rule:** when a toolbar shows counts next to a filter (the severity chips in
@@ -94,7 +198,58 @@ opacity, no `pointerEvents`); selection owner is
 `.../pulls/[number]/page.tsx` (`parseSeverityParam` on `?severity=`), drilled
 through `FindingsTab` → `ReviewRunAccordion` → `FindingsPanel`.
 
+**Superseded by:** 2026-08-03 — the rule and the drill path are unchanged, but
+the address moved: the page is now an 8-line wrapper and the selection owner is
+`.../pulls/[number]/_components/PrDetailView/PrDetailView.tsx`
+(`severities` / `onToggleSeverity`).
+
 ## Tool & Library Notes
+
+### 2026-08-03 — `pnpm lint` UNDER-reports deep relative imports: the rule is switched off in test files
+
+**Quirk:** `no-restricted-imports` is turned `off` for `**/*.test.{ts,tsx}` by
+the last block of `eslint.config.mjs`, so the lint report is not a census of deep
+relative imports — it is a census of them in **production** files. The gap is not
+marginal: the deepest relatives in this package are in tests
+(`../` × 8 to `messages/en/prReview.json`), and none of them appear in the
+report. Phase 2a cleared "39 deep imports" per `pnpm lint`; a raw
+`grep -rnE 'from "(\.\./){3,}'` still returns ~13 hits afterwards, all of them
+test files, all of them correct.
+
+**Workaround:** trust the lint count for what you must fix, and grep when you
+want the true number — the two answers differ by design. Do **not** try to "fix"
+the test ones with `@/`: `messages/` lives outside `src/`, so the `@/*` alias
+cannot reach it and there is no alias that can (see the 2026-08-02 entry on
+counting `../` for `messages/en/*.json` from the file itself). They are relative
+by necessity, which is part of why the rule is off there.
+
+**Where:** the override is `client/eslint.config.mjs:126-130`
+(`files: ['**/*.test.{ts,tsx}', '**/test/**']` → `'no-restricted-imports': 'off'`);
+the rule itself is at `:91`. Both `no-restricted-imports` and
+`react-hooks/exhaustive-deps` are now `'error'` (`:38`, `:91`).
+
+### 2026-08-03 — `import/no-cycle` makes `eslint .` unusable in this package (>5 min → 25s without it)
+
+**Quirk:** with `import/no-cycle` enabled at `maxDepth: Infinity` plus the
+TypeScript resolver, a full `eslint .` over this package's 259 files did not
+finish inside a 5-minute timeout. Dropping that single rule brought the same run
+to **25 seconds**. The cost is the rule walking the whole module graph through
+`eslint-import-resolver-typescript`, not the file count on its own.
+
+**Workaround:** leave `import/no-cycle` off in `eslint.config.mjs`. It is the
+natural guard for the barrel cycles `frontend-ui-architecture` §7 warns about, so
+the check still belongs somewhere — but its cheap home is a periodic
+`dependency-cruiser` run (the server already has one wired as `pnpm arch`), not a
+per-commit lint gate. As of this writing the audit found zero chained barrels in
+owned code, so nothing is currently unguarded; `src/vendor/ui/index.ts` does
+chain five barrels but is vendored and out of bounds.
+
+If you re-enable it, do not just raise the timeout — measure first, and expect
+CI minutes to go with it.
+
+**Where:** `client/eslint.config.mjs` — the rule is absent, with a `NOTE:` block
+in its place recording this measurement; `pnpm lint` is wired into
+`.github/workflows/client.yml`.
 
 ### 2026-08-02 — `SeverityBadge compact` renders NO label — icon and count only
 

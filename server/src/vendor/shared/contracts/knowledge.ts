@@ -215,6 +215,30 @@ export const AgentVersionConfig = z.object({
 });
 export type AgentVersionConfig = z.infer<typeof AgentVersionConfig>;
 
+/**
+ * The same snapshot, as it may actually be found ON DISK.
+ *
+ * `agent_versions.config_json` is a jsonb document written with whatever shape
+ * the agent had at snapshot time, and three of these fields arrived later —
+ * `strategy` in migration 0002, `ci_fail_on` in 0003, `repo_intel` in 0007. Any
+ * snapshot taken before those is MISSING the keys outright rather than carrying
+ * `null`, and `.nullable()` would reject a missing key. `.nullish()` accepts
+ * both, which is the rule for every field on a jsonb-persisted contract.
+ *
+ * Parse stored rows with THIS, then fill the columns' own defaults — see
+ * `toAgentVersionDto`. `AgentVersionConfig` above stays strict on purpose: it is
+ * the wire contract, and clients should never have to handle a missing strategy.
+ */
+export const StoredAgentVersionConfig = AgentVersionConfig.extend({
+  strategy: ReviewStrategy.nullish(),
+  ci_fail_on: CiFailOn.nullish(),
+  repo_intel: z.boolean().nullish(),
+  // Not tied to a known migration, but written from a separate join
+  // (`skillIdsForAgent`) and equally absent from early snapshots.
+  skills: z.array(z.string()).nullish(),
+});
+export type StoredAgentVersionConfig = z.infer<typeof StoredAgentVersionConfig>;
+
 export const AgentVersion = z.object({
   agent_id: z.string(),
   version: z.number().int(),

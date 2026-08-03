@@ -4,7 +4,8 @@ Fastify backend: imports repos and PRs, indexes code, stores agents, runs review
 
 ## Commands
 
-`pnpm dev` (:3001) · `pnpm db:migrate` · `pnpm db:seed` · `pnpm typecheck`
+`pnpm dev` (:3001) · `pnpm db:migrate` · `pnpm db:seed` · `pnpm typecheck` ·
+`pnpm arch` (architecture gate)
 Tests: `pnpm test` (all) · `pnpm exec vitest run --exclude '**/*.it.test.ts'`
 (hermetic) · `pnpm exec vitest run .it.test` (real Postgres)
 
@@ -23,7 +24,9 @@ Tests: `pnpm test` (all) · `pnpm exec vitest run --exclude '**/*.it.test.ts'`
 
 - **Three layers per module.** `routes.ts` — HTTP and Zod, no logic.
   `service.ts` — logic, no SQL and no HTTP. `repository.ts` — all the SQL.
-  Literals in `constants.ts`, pure transforms in `helpers.ts`.
+  Literals in `constants.ts`, pure transforms in `helpers.ts`. The full ring map,
+  the placement table and the catalogued violations are in the
+  `backend-onion-architecture` skill; `pnpm arch` enforces the boundaries.
 - **A new module** = `modules/<name>/routes.ts` (default Fastify plugin) plus
   one import and one entry in `modules/index.ts`. Registration is static, not
   autoload.
@@ -50,6 +53,7 @@ Tests: `pnpm test` (all) · `pnpm exec vitest run --exclude '**/*.it.test.ts'`
 
 | Read | When |
 |---|---|
+| `.claude/skills/backend-onion-architecture/SKILL.md` | deciding where code goes, or reviewing module layout and imports |
 | `README.md` | adding a route, touching DI, env, or error handling |
 | `src/modules/repo-intel/README.md` | working on the indexer or its facade |
 | `../docs/agent-prompts/` | editing an agent's system prompt |

@@ -2,7 +2,7 @@ import { type Repo } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
 import { AppError } from '../../platform/errors.js';
 import {
-  GITHUB_URL_REGEX,
+  GITHUB_SCP_URL_REGEX,
   GIT_TOKEN_USERNAME,
   GITHUB_HTTPS_HOST,
 } from './constants.js';
@@ -12,14 +12,48 @@ import {
  * Pure functions only — no I/O, no DB, no container.
  */
 
-/** Parse `owner`/`name` from a GitHub URL (https or ssh form). */
+/**
+ * Parse `owner`/`name` from a GitHub URL (https or scp-like ssh form).
+ *
+ * The value that reaches here is user input from `POST /repos`, and the SAME
+ * string is later handed to `git clone` — so this function is the only thing
+ * standing between the request and an arbitrary outbound clone. It therefore
+ * decides by HOST, never by substring:
+ *
+ *   https://attacker.test/github.com/owner/repo   → rejected (host is attacker.test)
+ *   https://github.com@attacker.test/owner/repo   → rejected (host is attacker.test)
+ *
+ * Both of those were accepted by the previous unanchored regex, and neither
+ * leaked the PAT (`withGitHubToken` re-checks the host), but both would clone
+ * from the attacker's server.
+ */
 export function parseRepoUrl(url: string): { owner: string; name: string } {
-  // https://github.com/owner/repo(.git)  |  git@github.com:owner/repo.git
-  const match = url.match(GITHUB_URL_REGEX);
-  if (!match?.[1] || !match[2]) {
-    throw new AppError('invalid_repo_url', `Could not parse owner/repo from '${url}'`, 400);
+  const raw = url.trim();
+  const reject = (why: string): never => {
+    throw new AppError('invalid_repo_url', why, 400);
+  };
+
+  const scp = GITHUB_SCP_URL_REGEX.exec(raw);
+  if (scp?.[1] && scp[2]) return { owner: scp[1], name: scp[2] };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return reject(`Could not parse owner/repo from '${url}'`);
   }
-  return { owner: match[1], name: match[2] };
+  if (parsed.hostname !== GITHUB_HTTPS_HOST) {
+    return reject(`Only ${GITHUB_HTTPS_HOST} repositories are supported (got '${parsed.hostname}')`);
+  }
+
+  const segments = parsed.pathname.replace(/^\/+|\/+$/g, '').split('/');
+  const [owner, repo] = segments;
+  if (segments.length !== 2 || !owner || !repo) {
+    return reject(`Could not parse owner/repo from '${url}'`);
+  }
+  // Trailing `.git` only — a dot inside the name is legitimate (`owner/foo.js`),
+  // which the previous `[^/.]+` pattern rejected outright.
+  return { owner, name: repo.replace(/\.git$/, '') };
 }
 
 /**

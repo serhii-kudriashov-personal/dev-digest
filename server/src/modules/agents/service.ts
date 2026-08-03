@@ -9,7 +9,7 @@ import type {
   ReviewStrategy,
 } from '@devdigest/shared';
 import { AgentsRepository } from './repository.js';
-import { toAgentDto, toAgentVersionDto } from './helpers.js';
+import { toAgentDto, toAgentVersionDto, toAgentVersionDtoSafe } from './helpers.js';
 
 /**
  * A2 — agents service. Business logic for the Agents tab + Agent Editor.
@@ -117,7 +117,8 @@ export class AgentsService {
     const agent = await this.repo.getById(workspaceId, agentId);
     if (!agent) return undefined;
     const rows = await this.repo.listVersions(agentId);
-    return rows.map(toAgentVersionDto);
+    // Skip rather than throw: see `toAgentVersionDtoSafe`.
+    return rows.map(toAgentVersionDtoSafe).filter((v): v is AgentVersion => v !== null);
   }
 
   /**

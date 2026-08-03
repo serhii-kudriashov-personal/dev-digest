@@ -11,9 +11,113 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
-_Empty so far._
+### 2026-08-03 — `--no-file-parallelism` makes the integration suite deterministic AND faster; re-running is the wrong fix
+
+**Pattern:** run the DB-backed suite serialized, always:
+
+```sh
+cd server && pnpm exec vitest run .it.test --no-file-parallelism
+```
+
+Three consecutive runs: `7 passed (7)` / `37 passed (37)`, every time. Measured
+against the parallel form, it is also **faster** — 87s vs 121s — because the
+Docker daemon is not thrashing seven Postgres containers into existence at once.
+There is no trade-off to weigh here: serialized is both more correct and quicker.
+
+**Why:** this supersedes the "re-run it" workaround in the entry below, which
+treats a skip as bad luck. The skip is load-dependent, not random, and the
+parallel form is *unreliable in both directions* — measured the same afternoon,
+same code, same Docker daemon:
+
+| Command | Result |
+|---|---|
+| `vitest run .it.test` (parallel) | `7 passed` — then `1 passed \| 6 skipped` on the very next run |
+| `pnpm test` (all 24 files, parallel) | `18 passed \| 6 skipped`, **exit 0** |
+| `vitest run .it.test --no-file-parallelism` | `7 passed`, ×3 runs |
+
+Note the second row: the full-suite run is the *worst* case, because the 17
+hermetic files occupy the workers while the DB-backed files are still probing.
+So `cd server && pnpm test` is the one command you should never trust for
+integration coverage — and it is the obvious one to reach for.
+
+The mechanism is narrower than "a probe loses a race". `dockerAvailable()` is
+`execSync('docker info', { timeout: 5000 })`, and its `catch` maps **timeout**
+and **no daemon** to the identical `false`. Measured directly: `docker info`
+costs 0.09–0.66s idle and ~0.84s with seven concurrent invocations — nowhere near
+5s. It only blows the timeout once testcontainers is *concurrently starting
+containers*, which is why serializing the files fixes it and why a warm-but-busy
+daemon (right after another suite tore its containers down) is the worst moment
+to probe.
+
+**Where:** probe at `server/test/helpers/pg.ts:22-33` (`dockerAvailable`, the
+5000ms `execSync` and the lossy `catch`); the seven files are
+`server/test/*.it.test.ts`. The commands are documented in `server/AGENTS.md`
+("Commands") without the flag — add it there if you touch that table.
 
 ## What Doesn't Work
+
+### 2026-08-03 — The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker
+
+**Tried:** verifying Phase-1 server changes with one batch run,
+`pnpm exec vitest run .it.test`, and reading the summary.
+
+**Failed:** the batch reported `Test Files 6 passed | 1 skipped` /
+`Tests 35 passed | 2 skipped` and **exit code 0**. An immediate re-run of the
+same command passed all 7 files (37 tests), and every file also passed when run
+alone. Nothing about the code changed between the two runs.
+
+**Instead:** treat any `N skipped` on a batch integration run as "unverified,
+re-run", not as "Docker is absent". The cause is that all 7 files evaluate
+`const hasDocker = await dockerAvailable()` at **module top level**, so the
+probe fires 7 times while 7 testcontainers Postgres instances are starting; one
+probe loses the race, and that file degrades to `describe.skip` — silently, with
+no red. To pin down which file, run the batch with
+`pnpm exec vitest run .it.test 2>&1 | grep -E "^ *[✓↓×] test/"` and compare the
+per-file list against the 7 on disk, then re-run the missing one alone.
+
+This is the mechanism behind the existing "SKIPPING silently reads as passing"
+entry below, which named the symptom but attributed it to an absent Docker
+daemon. On CI the same race is likelier than locally, not less — a green
+`server integration` job is only meaningful if the file count is 7.
+
+**Where:** probe at `server/test/helpers/pg.ts` (`dockerAvailable`); the
+top-level call is line ~13 of each of the seven
+`server/test/*.it.test.ts` files, e.g. `test/agents-versions.it.test.ts:13`.
+
+**Superseded by:** 2026-08-03 — the diagnosis (a concurrency race, not a missing
+daemon) stands, but "re-run it" is the wrong remedy and "one probe loses"
+understates it: a full `pnpm test` skipped **6 of 7**. Use
+`--no-file-parallelism`, which is deterministic and faster. See the entry in
+"What Works" above.
+
+### 2026-08-02 — A green first run of `pnpm arch` proved nothing: 8 of 9 rules were blind
+
+**Tried:** authoring `server/.dependency-cruiser.cjs` (9 ring-boundary rules) and
+taking `✔ no dependency violations found (149 modules, 349 dependencies cruised)`
+on the first run as evidence the backend was clean.
+
+**Failed:** the rules were not passing, they were not matching. Two independent
+silent-miss causes, and the run looks identical to a real pass:
+
+1. **`tsPreCompilationDeps: false` means unused imports do not exist.** depcruise
+   reads the post-TypeScript graph, and TS elides an import whose binding is
+   never used in a value position. Every probe written as
+   `import { eq } from 'drizzle-orm';` produced **zero** graph edges, so four
+   rules "didn't fire" while being perfectly correct.
+2. **An unresolvable package has no path to match.** See the Tool & Library note
+   below — `core-is-pure` happily passed a `fastify` import in `reviewer-core`.
+
+**Instead:** a depcruise rule that has never fired has not been tested. For each
+rule, introduce the violation it targets **and use the imported binding**
+(`import { eq } from 'drizzle-orm'; export const _probe = eq;`), confirm the rule
+name appears in the output, then revert. `no-circular` needs a real *value* cycle
+— a type-only one is elided too, so `import { AgentRow }` used only in a type
+position will not trip it; `import { AgentsService }` assigned to a const will.
+All 10 rules are proven this way; the procedure is written into
+`.claude/skills/backend-onion-architecture/SKILL.md` §10.
+
+**Where:** config at `server/.dependency-cruiser.cjs` (`tsPreCompilationDeps` in
+`options`, bottom of file); script at `server/package.json` (`"arch"`).
 
 ### 2026-08-02 — `*.it.test.ts` SKIPPING silently reads as passing
 
@@ -103,9 +207,121 @@ the editor field is
 
 ## Tool & Library Notes
 
-_Empty so far._
+### 2026-08-03 — A Drizzle transaction handle is NOT a `Db`, so composing repo helpers needs `DbOrTx`
+
+**Quirk:** `db.transaction(async (tx) => …)` hands the callback a
+`PgTransaction`, which is **not** assignable to
+`Db = PostgresJsDatabase<typeof schema>`. So the obvious way to make two existing
+repository helpers atomic — call them with `tx` — fails typecheck, even though
+every query method they use exists on both.
+
+**Workaround:** `DbOrTx` in `db/client.ts`, derived rather than hand-written so
+it cannot drift from Drizzle's own type:
+
+```ts
+export type DbOrTx = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
+```
+
+Widen the *helpers* to `DbOrTx`; keep the public repository method taking `Db`
+and opening the transaction itself. The boundary that matters: `DbOrTx` stays
+inside ring 3. A transaction handle must never appear in a signature a service or
+a route can see, or the "abstraction" starts leaking transaction scope — see the
+`backend-onion-architecture` skill, §5.
+
+**Where:** type at `server/src/db/client.ts:7`; the pattern in use at
+`server/src/modules/reviews/repository/review.repo.ts`
+(`insertReviewWithFindings` opens the transaction, `insertReview` /
+`insertFindings` take `DbOrTx`); second instance at
+`server/src/modules/reviews/repository/run.repo.ts` (`deleteAgentRun`).
+
+### 2026-08-02 — `octokit` and `p-queue` are UNRESOLVABLE to dependency-cruiser, so `resolved` is the bare specifier
+
+**Quirk:** a depcruise dependency normally carries
+`resolved: 'node_modules/drizzle-orm/index.js'`, but for a package the resolver
+cannot enter it carries the **bare specifier with no slashes at all**. Two are in
+that state in this package today:
+
+```
+src/adapters/github/octokit.ts        -> octokit    (couldNotResolve)
+src/platform/jobs.ts                  -> p-queue    (couldNotResolve)
+src/modules/repo-intel/pipeline/full.ts -> p-queue   (couldNotResolve)
+```
+
+So a rule written the obvious way — `to: { path: '/fastify/' }` — matches the
+resolved form and **silently misses the unresolvable one**. That is exactly how
+`core-is-pure` passed an `import Fastify from 'fastify'` planted in
+`reviewer-core/src/prompt.ts`: `fastify` is not a `reviewer-core` dependency, so
+it resolved to the bare string and the regex never matched. The rule that matters
+most for ring-1 purity is the one most likely to be blind, because the packages
+ring 1 must never import are precisely the ones it cannot resolve.
+
+**Workaround:** match packages as `(^|/)<name>(/|$)` — the `pkg()` helper at the
+top of the config. It covers the resolved path, the pnpm
+`.pnpm/<v>/node_modules/<name>/` form and the bare specifier, and the trailing
+`(/|$)` stops `fastify` matching `fastify-sse-v2`. Belt and braces: the
+`core-resolves-everything` rule fails ring 1 on **any** `couldNotResolve`
+dependency, closing the whole class. It is scoped to `reviewer-core` on purpose —
+promoting it to `src/**` would fire on the three pre-existing hits above.
+
+**Where:** `server/.dependency-cruiser.cjs` — `pkg()` and the `DRIZZLE`/`FASTIFY`
+constants near the top, `core-is-pure` and `core-resolves-everything` in
+`forbidden`.
+
+### 2026-08-02 — The depcruise config must be `.cjs`, and `depcruise --init` writes the wrong extension
+
+**Quirk:** `server/package.json` is `"type": "module"`, so a
+`.dependency-cruiser.js` config is loaded as ESM and its `module.exports` fails.
+`depcruise --init` generates exactly that filename, so the scaffolding command
+produces a config this package cannot load.
+
+**Workaround:** write `.dependency-cruiser.cjs` by hand and pass it explicitly
+(`depcruise src ../reviewer-core/src --config .dependency-cruiser.cjs`) rather
+than relying on config auto-discovery. Same trap applies to any future
+`server/`-local tool config that expects CJS.
+
+**Where:** `server/.dependency-cruiser.cjs`; script at `server/package.json`
+(`"arch"`); `"type": "module"` at `server/package.json:4`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-03 — The jsonb `.nullish()` trap, second instance — and the fix is NOT to loosen the DTO
+
+**Symptom:** `GET /agents/:id/versions` returns 500 for an agent whose history
+includes a snapshot taken before migration `0002`/`0003`/`0007`. Not one bad row
+in the list — the **whole list** fails, because the parse happens inside
+`rows.map(...)`.
+
+**Cause:** `AgentVersionConfig` declares `strategy`, `ci_fail_on` and
+`repo_intel` as required, but those columns were added by migrations `0002`,
+`0003` and `0007` respectively. `agent_versions.config_json` is a jsonb snapshot
+of whatever the agent looked like at the time, so every snapshot older than those
+migrations is **missing the keys outright** — and a missing key fails a required
+Zod field exactly as it fails `.nullable()`.
+
+**Takeaway:** this is the documented `RunStats.cost_usd` trap again, but the
+same fix does not apply, because `AgentVersionConfig` is **also the wire DTO** —
+loosening it would push "strategy might be absent" onto every client. Split the
+two roles instead:
+
+1. A lenient read schema, `StoredAgentVersionConfig =
+   AgentVersionConfig.extend({ … .nullish() })`, used to parse what is on disk.
+2. The strict `AgentVersionConfig` unchanged, as the contract going out.
+3. Backfill with the **columns' own defaults** (`'single-pass'`, `'critical'`,
+   `true`) so a replayed old version behaves the way that agent actually behaved,
+   rather than getting today's defaults or a null.
+4. `toAgentVersionDtoSafe` for the list path — one corrupt snapshot should cost
+   that row, not the endpoint. Single-version reads keep throwing: there is no
+   partial answer to give.
+
+Rule of thumb: before declaring a jsonb-persisted field required, check
+`git log --oneline -- src/db/migrations` for when its column landed. If the
+column is newer than the table, the field is `.nullish()`.
+
+**Where:** `server/src/vendor/shared/contracts/knowledge.ts:206` (strict DTO) and
+`:218` (`StoredAgentVersionConfig`); backfill at
+`server/src/modules/agents/helpers.ts` (`toAgentVersionDto`,
+`toAgentVersionDtoSafe`); list path at
+`server/src/modules/agents/service.ts:120`.
 
 ### 2026-08-02 — `completeAgentRun`'s parameter type is declared TWICE
 

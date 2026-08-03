@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import type { Db } from '../../../db/client.js';
+import type { Db, DbOrTx } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { Finding } from '@devdigest/shared';
 import type { FindingRow, PullRow } from '../../../db/rows.js';
@@ -9,7 +9,7 @@ export type ReviewRow = typeof t.reviews.$inferSelect;
 // ---- reviews + findings ---------------------------------------------------
 
 export async function insertReview(
-  db: Db,
+  db: DbOrTx,
   values: {
     workspaceId: string;
     prId: string;
@@ -27,7 +27,7 @@ export async function insertReview(
 }
 
 export async function insertFindings(
-  db: Db,
+  db: DbOrTx,
   reviewId: string,
   findings: Finding[],
 ): Promise<FindingRow[]> {
@@ -52,6 +52,29 @@ export async function insertFindings(
     )
     .returning();
   return rows;
+}
+
+/**
+ * Insert a review AND its findings as ONE unit.
+ *
+ * Prefer this over calling `insertReview` + `insertFindings` in sequence: a
+ * failure between the two commits a review carrying a verdict and a score with
+ * zero findings, which is indistinguishable from a genuinely clean review — the
+ * UI renders both as "no findings", so the corruption is invisible.
+ *
+ * The transaction stays here rather than in the caller: `Db` belongs to this
+ * ring, and a transaction handle must never cross the repository boundary.
+ */
+export async function insertReviewWithFindings(
+  db: Db,
+  values: Parameters<typeof insertReview>[1],
+  findings: Finding[],
+): Promise<{ review: ReviewRow; findingRows: FindingRow[] }> {
+  return db.transaction(async (tx) => {
+    const review = await insertReview(tx, values);
+    const findingRows = await insertFindings(tx, review.id, findings);
+    return { review, findingRows };
+  });
 }
 
 /** Reviews for a PR (newest first), each with its findings. */

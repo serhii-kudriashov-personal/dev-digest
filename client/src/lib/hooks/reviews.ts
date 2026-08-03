@@ -71,9 +71,16 @@ export function useDeleteRun(prId: string | null | undefined) {
 }
 
 /** Request cancellation of an in-flight run (takes effect at the next step). */
-export function useCancelRun() {
+export function useCancelRun(prId: string | null | undefined) {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (runId: string) => api.post<{ ok: boolean }>(`/runs/${runId}/cancel`),
+    // Without this the button appears to do nothing until `usePrActiveRuns`
+    // happens to poll (up to 4s later), which reads as a broken control.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pr-active-runs", prId] });
+      qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
+    },
   });
 }
 

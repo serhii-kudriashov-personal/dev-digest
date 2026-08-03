@@ -20,7 +20,10 @@ export function AgentEditor({ agent, tab, onTab }: { agent: Agent; tab: string; 
         <Tabs tabs={tabs} value={tab} onChange={onTab} pad="0 24px" />
       </div>
       <div style={s.body}>
-        <ConfigTab agent={agent} />
+        {/* `key` is load-bearing: ConfigTab is an uncontrolled form seeded from
+            `agent`, so switching agents must give it a FRESH instance rather
+            than leave it re-syncing nine fields in an Effect. */}
+        <ConfigTab key={agent.id} agent={agent} />
       </div>
     </div>
   );

@@ -11,9 +11,105 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
-_Empty so far._
+### 2026-08-03 — To blame a refactor for a test failure, rebuild the state just BEFORE it — `HEAD` is the wrong baseline here
+
+**Pattern:** this repo's working tree carries several uncommitted phases at once
+(Phase 0 guardrails + Phase 1 fixes + Phase 2a refactor). When a test fails and
+you need to know whether *your* phase caused it, do **not** `git show HEAD:<file>`
+to get a baseline. Reconstruct the state as of the phase immediately before yours:
+keep every earlier phase's changes, and undo only your own.
+
+**Why:** restoring `HEAD`'s `pulls/[number]/page.tsx` to test a Phase-2a
+extraction produced a file that could not compile against the tree — Phase 1 had
+changed `FindingsTab`'s props from `cancelMutation` to `onCancelRuns`/`cancelling`,
+so the 203-line `HEAD` page passed a prop that no longer exists. A baseline that
+does not build tells you nothing, and the failure it produces looks like evidence.
+The working baseline was instead built from the extracted view itself — inline its
+body back into `page.tsx`, restore `'use client'`, repoint `../X` to
+`./_components/X` — which holds Phases 0 and 1 constant and varies only the one
+thing under suspicion. `pnpm typecheck` on the baseline is the gate that proves it
+is a fair comparison.
+
+That comparison is what settled the question: on the same harness the refactor
+scored `6/8` and `7/8` while the baseline scored `4/8`, and the flow that failed
+on both (`08`) was thereby cleared. Note the second half of that — a single run
+of a flaky suite attributes nothing; flow `05` failed once and passed on the next
+run with no code change.
+
+**Where:** the phases are described in
+`~/.claude/plans/parallel-hugging-giraffe.md`; the prop change that broke the
+`HEAD` baseline is
+`client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsTab/FindingsTab.tsx`
+(Phase 1, item 1.9); the flakiness is catalogued in `e2e/INSIGHTS.md`
+(2026-08-03).
+
+### 2026-08-03 — Introducing a linter: grep its own disable directives FIRST
+
+**Pattern:** before adding a linter to a package that never had one, run
+`grep -rn "eslint-disable" src/` (or the equivalent for the tool). Every hit is a
+suppression written against a linter that never ran, so none of them were ever
+validated — and each one is a claim that a rule was considered and waived.
+
+**Why:** adding ESLint to `client/` surfaced exactly two, and they were not
+equivalent. `ConfigTab.tsx` carried
+`// eslint-disable-line react-hooks/exhaustive-deps` on the Effect that copied
+nine props into state — the CRITICAL anti-pattern of the whole audit. The comment
+made it read as deliberate and reviewed, which is why it survived; a reader sees a
+suppression and assumes someone already weighed it. The second, in
+`ReviewRunAccordion.tsx`, was simply unused — the rule reports nothing there —
+and was only detectable *because* the linter now runs and flags unused
+directives.
+
+So the order matters: audit the suppressions, then turn the rules on. Doing it the
+other way round means the pre-existing suppressions silently become part of the
+baseline you declare green.
+
+**Where:** config at `client/eslint.config.mjs`; the two directives were at
+`client/src/app/agents/[id]/_components/AgentEditor/_components/ConfigTab/ConfigTab.tsx`
+and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65`
+(both removed).
 
 ## What Doesn't Work
+
+### 2026-08-03 — A `grep -l | perl -pi` sweep fails silently here: `grep` is ugrep, and route paths contain `[brackets]`
+
+**Tried:** rewriting deep relative imports to `@/` across ~16 files with the
+usual one-liner, twice.
+
+1. `FILES=$(grep -rlE ... src) && perl -pi -e 's{...}{...}g' $FILES`
+2. `grep -rlZ ... | while IFS= read -r -d '' f; do perl -pi ... "$f"; done`
+
+**Failed:** both, for two unrelated reasons, and **neither reported failure in a
+way you would notice**.
+
+1. The unquoted `$FILES` expansion collapsed into one argument, and perl died
+   with `File name too long` — *after* printing a plausible-looking list of
+   filenames, so the output reads like partial success. Nothing was modified.
+   Every path in `src/app/repos/[repoId]/pulls/[number]/…` also carries glob
+   metacharacters, which is what makes quoting non-optional here in the first
+   place.
+2. `grep` on this machine is **ugrep**, where `-Z` means *fuzzy matching*, not
+   `--null`. So the pipeline produced no NUL-separated records, the `while` loop
+   body never ran, and the command exited **0 with no output** — indistinguishable
+   from "there was nothing to change".
+
+**Instead:** write the list to a file and loop over lines, quoting the variable:
+
+```sh
+grep -rlE 'PATTERN' src --include='*.ts' --include='*.tsx' > /tmp/f.txt
+while IFS= read -r f; do perl -pi -e 's{...}{...}g' "$f" && echo "ok $f"; done < /tmp/f.txt
+```
+
+The `echo "ok $f"` is the point: a per-file receipt is the only cheap way to tell
+"nothing matched" from "the pipeline broke". Then re-run the original `grep` to
+confirm zero hits — do not trust the sweep's own exit code. (Filenames in this
+repo contain no newlines, so line-based reading is safe; `ugrep` also accepts
+`--null` spelled out if you want NUL separation.)
+
+**Where:** the sweep covered `client/src/app/**` and
+`client/src/components/app-shell/hooks/*`; the bracket-path routes are
+`client/src/app/repos/[repoId]/pulls/[number]/` and
+`client/src/app/settings/[section]/`.
 
 ### 2026-08-02 — A second web instance can't verify a UI change against the running API
 
@@ -146,6 +242,11 @@ are `client/src/app/repos/[repoId]/pulls/[number]/page.tsx:170` (run) and
 `.../_components/ReviewRunAccordion/ReviewRunAccordion.tsx` (review); the
 fallback is `.../_components/RunHistory/RunHistory.tsx`.
 
+**Superseded by:** 2026-08-03 — the rule is unchanged, but the run-delete button
+moved out of the page: it is now the `onDelete` prop passed from
+`client/src/app/repos/[repoId]/pulls/[number]/_components/PrDetailView/PrDetailView.tsx`
+(the page itself is a thin wrapper). The review-delete button did not move.
+
 ### 2026-08-02 — A rule added to an agent prompt must state its own severity
 
 **Rule:** every behavioural rule appended to an agent's `system_prompt` has to
@@ -234,7 +335,28 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 
 ## Tool & Library Notes
 
-### 2026-08-02 — A committed symlink survives macOS/Linux clones and dies silently on Windows
+### 2026-08-02 — A vendored skill is upstream opinion, not house policy — two of its CRITICAL rules are retracted upstream
+
+**Quirk:** `.claude/skills/react-best-practices/SKILL.md` tags every rule with a
+severity, which reads like a house standard. Two of its CRITICAL ones are
+positions their own authors have since abandoned:
+
+| Line | Rule as written | Current primary source |
+|---|---|---|
+| `:24` | "Container components fetch data; presentational components receive props" | Dan Abramov retracted the split in 2019 ("I don't suggest splitting your components like this anymore"); patterns.dev: hooks "achieve the same result without" it |
+| `:26` | "Max 200 lines per component — split if larger" | Kent C. Dodds: "I don't mind if the JSX I return in my component function gets really long" — split on a named problem (re-renders, reuse, testing pain), "NOT BEFORE" |
+
+**Workaround:** treat a vendored skill as one opinion to check against
+primaries, never as the answer — and remember `skills-lock.json` means any
+correction you make in-place is overwritten on the next sync. To supersede one,
+write a separate unlocked skill that names the rule it replaces and why. The
+severity tag is the trap here: CRITICAL is the vendor's confidence, not
+evidence, and nothing in the file dates its claims.
+
+**Where:** `.claude/skills/react-best-practices/SKILL.md:24` and `:26`; the
+locked list is `skills-lock.json`. Sourcing and the full conflict set are in
+`.claude/skills/frontend-ui-architecture/RESEARCH.md` (§2); the superseding
+rules are `.claude/skills/frontend-ui-architecture/SKILL.md` §4.
 
 **Quirk:** git stores a symlink as mode `120000` with no `.gitattributes` and no
 config — a fresh checkout materializes a real link. But a Windows checkout
@@ -291,4 +413,25 @@ _Empty so far._
 
 ## Open Questions
 
-_Empty so far._
+### 2026-08-02 — The `pnpm arch` boundary gate is not wired into CI, so nothing enforces it on a PR
+
+**Question:** should the architecture gate run in `server-unit.yml`, and as what?
+`cd server && pnpm arch` (`dependency-cruiser`, 10 ring rules across `server/src`
+and `reviewer-core/src`) currently runs **only when someone runs it by hand**. A
+PR that puts Drizzle back into a new `routes.ts`, or `node:fs` into
+`reviewer-core`, is green in CI today. The skill it enforces reads as house law,
+which makes the gap worse than having no gate: the rules look enforced.
+
+**Blocked:** on a decision, not on work — deliberately left out of the change that
+introduced the gate. Two things to get right when it lands: the step must be an
+inlined `pnpm exec depcruise src ../reviewer-core/src --config .dependency-cruiser.cjs`
+rather than `pnpm arch`, because `server-unit.yml` already avoids depending on
+`package.json` scripts (its own comment explains why), and it needs
+`reviewer-core`'s deps installed first — the same `npm ci` step the typecheck job
+already runs, since unresolvable imports there would trip
+`core-resolves-everything`. Path filters already cover `server/**` and
+`reviewer-core/**`.
+
+**Where:** `.github/workflows/server-unit.yml` (typecheck job, after the
+"Install reviewer-core deps" step); gate at `server/.dependency-cruiser.cjs`;
+rules documented in `.claude/skills/backend-onion-architecture/SKILL.md` §10.

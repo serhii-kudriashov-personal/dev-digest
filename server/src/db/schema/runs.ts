@@ -1,3 +1,4 @@
+import { desc } from 'drizzle-orm';
 import {
   pgTable,
   uuid,
@@ -6,6 +7,7 @@ import {
   jsonb,
   timestamp,
   doublePrecision,
+  index,
 } from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { agents } from './agents';
@@ -13,7 +15,9 @@ import { pullRequests } from './pulls';
 
 // ============================================================ Observability
 
-export const agentRuns = pgTable('agent_runs', {
+export const agentRuns = pgTable(
+  'agent_runs',
+  {
   id: uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id')
     .notNull()
@@ -42,7 +46,18 @@ export const agentRuns = pgTable('agent_runs', {
   score: integer('score'),
   /** Findings that tripped the agent's gate (severity ≥ ciFailOn). */
   blockers: integer('blockers'),
-});
+  },
+  // `agent_runs` had NO indexes at all, while being read on every PR-detail load
+  // and by the PR list's cost rollup (which polls every 60s).
+  (t) => [
+    // `listRuns` — (workspace_id, pr_id) ordered by ran_at desc. The same index
+    // serves `activeRuns`, which adds `status` on the identical prefix.
+    index('agent_runs_ws_pr_ran_idx').on(t.workspaceId, t.prId, desc(t.ranAt)),
+    // PR-list cost rollup: `pr_id IN (…) AND cost_usd IS NOT NULL`, with no
+    // workspace predicate, so the composite index above cannot serve it.
+    index('agent_runs_pr_idx').on(t.prId),
+  ],
+);
 
 /** Whole trace of one run as a SINGLE jsonb document. */
 export const runTraces = pgTable('run_traces', {
