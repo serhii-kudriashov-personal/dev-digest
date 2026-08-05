@@ -262,7 +262,8 @@ export class ReviewRunExecutor {
           source: 'local',
         },
         stats: {
-          duration_ms: durationMs,
+          // Seconds, to match the run summary — see CHANGELOG 1.3.0.
+          duration_ms: Math.round(durationMs / 1000),
           tokens_in: tokensIn,
           tokens_out: tokensOut,
           findings: findingRows.length,
