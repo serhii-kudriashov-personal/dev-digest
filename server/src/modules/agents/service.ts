@@ -55,9 +55,15 @@ export class AgentsService {
     this.repo = new AgentsRepository(container.db);
   }
 
+  /**
+   * All agents in the workspace, each carrying its linked-skill count for the
+   * card chip. `skills_count` is LIST-only (see the contract) — the counts come
+   * from one grouped query rather than a per-agent lookup.
+   */
   async list(workspaceId: string): Promise<Agent[]> {
     const rows = await this.repo.list(workspaceId);
-    return rows.map(toAgentDto);
+    const counts = await this.repo.skillCountsByAgent(workspaceId);
+    return rows.map((row) => ({ ...toAgentDto(row), skills_count: counts.get(row.id) ?? 0 }));
   }
 
   async get(workspaceId: string, id: string): Promise<Agent | undefined> {

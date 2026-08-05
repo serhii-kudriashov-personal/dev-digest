@@ -184,6 +184,25 @@ export async function completeAgentRun(
     .where(eq(t.agentRuns.id, runId));
 }
 
+/**
+ * Record which skills this run injected, with the version and prompt order.
+ *
+ * The deterministic half of skill provenance — the executor knows exactly what it
+ * put in the prompt, so nothing here is inferred. Idempotent on (run_id, skill_id)
+ * so a retried write cannot duplicate a run's history.
+ */
+export async function saveRunSkills(
+  db: Db,
+  runId: string,
+  skills: { id: string; version: number; order: number }[],
+): Promise<void> {
+  if (skills.length === 0) return;
+  await db
+    .insert(t.runSkills)
+    .values(skills.map((s) => ({ runId, skillId: s.id, version: s.version, order: s.order })))
+    .onConflictDoNothing();
+}
+
 /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */
 export async function saveRunTrace(db: Db, runId: string, trace: RunTrace): Promise<void> {
   await db

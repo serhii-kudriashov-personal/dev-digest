@@ -28,6 +28,12 @@ export const skillVersions = pgTable(
       .references(() => skills.id, { onDelete: 'cascade' }),
     version: integer('version').notNull(),
     body: text('body').notNull(),
+    /**
+     * Why this version exists, in the author's words — shown on each row of the
+     * Versions tab. Nullable: versions written before the field existed, and any
+     * save the user did not annotate, legitimately have none.
+     */
+    message: text('message'),
     createdAt: now(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.skillId, t.version] }) }),

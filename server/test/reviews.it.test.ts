@@ -395,4 +395,238 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(body.runs.length).toBeGreaterThanOrEqual(2);
     await app.close();
   });
+
+  /**
+   * L02 — the wire that closes the gap root INSIGHTS.md recorded: `assemblePrompt`
+   * always built a `## Skills / rules` section, but the executor never passed
+   * `skills`, so the trace recorded `{skills: null}` as a literal.
+   *
+   * These three cases pin the whole contract: an ENABLED linked skill reaches the
+   * prompt in `agent_skills.order`, a DISABLED one does not, and an agent with no
+   * skills produces the pre-L02 prompt unchanged.
+   */
+  describe('linked skills reach the assembled prompt', () => {
+    async function runWithSkills(
+      app: Awaited<ReturnType<typeof buildApp>>,
+      skillIds: string[],
+    ): Promise<{
+      skills: string | null;
+      tokenCounts: Record<string, number> | undefined;
+      runId: string;
+    }> {
+      const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const agent = (
+        await app.inject({
+          method: 'POST',
+          url: '/agents',
+          payload: {
+            name: `Skilled ${Math.random().toString(36).slice(2, 8)}`,
+            provider: 'openai',
+            model: 'gpt-4.1',
+            system_prompt: 'base prompt',
+          },
+        })
+      ).json();
+
+      if (skillIds.length > 0) {
+        await app.inject({
+          method: 'POST',
+          url: `/agents/${agent.id}/skills`,
+          payload: { skill_ids: skillIds },
+        });
+      }
+
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: `/pulls/${pr.id}/review`,
+          payload: { agentId: agent.id },
+        })
+      ).json();
+      await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+
+      const trace = (
+        await app.inject({ method: 'GET', url: `/runs/${body.runs[0].run_id}/trace` })
+      ).json();
+      return {
+        skills: trace.prompt_assembly.skills ?? null,
+        tokenCounts: trace.prompt_assembly.token_counts,
+        runId: body.runs[0].run_id,
+      };
+    }
+
+    async function makeSkill(
+      app: Awaited<ReturnType<typeof buildApp>>,
+      name: string,
+      body: string,
+      enabled = true,
+    ): Promise<string> {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/skills',
+        payload: { name, body, enabled, type: 'custom' },
+      });
+      return res.json().id;
+    }
+
+    it('an agent with no linked skills assembles no skills block', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const { skills, tokenCounts } = await runWithSkills(app, []);
+      expect(skills).toBeNull();
+      // Omitted, not zero — a section that never existed has no cost to report.
+      expect(tokenCounts && 'skills' in tokenCounts).toBe(false);
+      await app.close();
+    });
+
+    it('enabled skills land in the block in agent_skills order, with a token count', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const first = await makeSkill(app, 'l02-first', '## FIRST\nReport a WARNING.');
+      const second = await makeSkill(app, 'l02-second', '## SECOND\nReport a WARNING.');
+
+      // Linked deliberately second-then-first: order is the ordering the user
+      // dragged, not the order the skills were created in.
+      const { skills, tokenCounts } = await runWithSkills(app, [second, first]);
+      expect(skills).toContain('## SECOND');
+      expect(skills).toContain('## FIRST');
+      expect(skills!.indexOf('## SECOND')).toBeLessThan(skills!.indexOf('## FIRST'));
+      expect(tokenCounts?.skills).toBeGreaterThan(0);
+      await app.close();
+    });
+
+    it('a DISABLED skill stays linked but contributes no prompt block', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const on = await makeSkill(app, 'l02-on', '## KEPT\nReport a WARNING.');
+      const off = await makeSkill(app, 'l02-off', '## DROPPED\nReport a WARNING.', false);
+
+      const { skills } = await runWithSkills(app, [on, off]);
+      expect(skills).toContain('## KEPT');
+      // `skills.enabled` is the gate the executor filters on.
+      expect(skills).not.toContain('## DROPPED');
+      await app.close();
+    });
+
+    it('records one run_skills row per ENABLED skill, with its version and order', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const a = await makeSkill(app, 'l02-rs-a', '## A');
+      const b = await makeSkill(app, 'l02-rs-b', '## B');
+      const off = await makeSkill(app, 'l02-rs-off', '## OFF', false);
+
+      const { runId } = await runWithSkills(app, [b, a, off]);
+
+      const rows = await pg.handle.db
+        .select()
+        .from(t.runSkills)
+        .where(eq(t.runSkills.runId, runId));
+      // The disabled skill stays LINKED but contributes nothing, so it is not
+      // part of what the run was given.
+      expect(rows).toHaveLength(2);
+      const byOrder = [...rows].sort((x, y) => x.order - y.order);
+      expect(byOrder.map((r) => r.skillId)).toEqual([b, a]);
+      // Version is recorded so a past run stays reproducible against the exact
+      // body it was scored with.
+      expect(byOrder.every((r) => r.version === 1)).toBe(true);
+      await app.close();
+    });
+
+    it('a run with no skills writes no run_skills rows', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const { runId } = await runWithSkills(app, []);
+      expect(
+        await pg.handle.db.select().from(t.runSkills).where(eq(t.runSkills.runId, runId)),
+      ).toHaveLength(0);
+      await app.close();
+    });
+
+    it('keeps an attribution naming a skill that WAS injected', async () => {
+      const skillName = 'l02-attributed';
+      const app = await appWith({
+        ...REVIEW_FIXTURE,
+        findings: [{ ...REVIEW_FIXTURE.findings[0], skill: skillName }],
+      });
+      const id = await makeSkill(app, skillName, '## Attributed');
+      const { runId } = await runWithSkills(app, [id]);
+
+      const rows = await pg.handle.db
+        .select({ skillId: t.findings.skillId })
+        .from(t.findings)
+        .innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId))
+        .where(eq(t.reviews.runId, runId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.skillId).toBe(id);
+      await app.close();
+    });
+
+    it('DISCARDS an attribution naming a skill that was NOT injected', async () => {
+      // The gate: a self-reported slug is checked against what the server put in
+      // the prompt. `findings.confidence` returning 1.0 for a hallucination (root
+      // INSIGHTS) is exactly why this cannot be trusted unvalidated.
+      const app = await appWith({
+        ...REVIEW_FIXTURE,
+        findings: [{ ...REVIEW_FIXTURE.findings[0], skill: 'never-injected-anywhere' }],
+      });
+      const id = await makeSkill(app, 'l02-present', '## Present');
+      const { runId } = await runWithSkills(app, [id]);
+
+      const rows = await pg.handle.db
+        .select({ skillId: t.findings.skillId })
+        .from(t.findings)
+        .innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId))
+        .where(eq(t.reviews.runId, runId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.skillId).toBeNull();
+      await app.close();
+    });
+
+    it('leaves a finding the model did not attribute unattributed', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const id = await makeSkill(app, 'l02-unattributed', '## Body');
+      const { runId } = await runWithSkills(app, [id]);
+      const rows = await pg.handle.db
+        .select({ skillId: t.findings.skillId })
+        .from(t.findings)
+        .innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId))
+        .where(eq(t.reviews.runId, runId));
+      expect(rows[0]!.skillId).toBeNull();
+      await app.close();
+    });
+
+    it('accept_rate stays NULL until a finding is judged, then reflects the judgement', async () => {
+      const skillName = 'l02-rate';
+      const app = await appWith({
+        ...REVIEW_FIXTURE,
+        findings: [{ ...REVIEW_FIXTURE.findings[0], skill: skillName }],
+      });
+      const id = await makeSkill(app, skillName, '## Rate');
+      const { runId } = await runWithSkills(app, [id]);
+
+      const before = (await app.inject({ method: 'GET', url: `/skills/${id}/stats` })).json();
+      // A skill nobody has judged is not a skill with 0% acceptance.
+      expect(before.accept_rate).toBeNull();
+      expect(before.runs_count).toBe(1);
+      expect(before.findings_last_30d).toBe(1);
+      expect(before.findings_by_category).toHaveProperty('security');
+
+      const [finding] = await pg.handle.db
+        .select({ id: t.findings.id })
+        .from(t.findings)
+        .innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId))
+        .where(eq(t.reviews.runId, runId));
+      await pg.handle.db
+        .update(t.findings)
+        .set({ acceptedAt: new Date() })
+        .where(eq(t.findings.id, finding!.id));
+
+      const after = (await app.inject({ method: 'GET', url: `/skills/${id}/stats` })).json();
+      expect(after.accept_rate).toBe(1);
+      await app.close();
+    });
+
+    it('every enabled skill disabled ⇒ no block at all, as if none were linked', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const off = await makeSkill(app, 'l02-all-off', '## NONE\nReport a WARNING.', false);
+      const { skills } = await runWithSkills(app, [off]);
+      expect(skills).toBeNull();
+      await app.close();
+    });
+  });
 });

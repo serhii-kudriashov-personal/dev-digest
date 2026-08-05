@@ -21,6 +21,16 @@
 # on every edit above a drifted line.
 set -euo pipefail
 
+# Pin collation. `sort` is locale-dependent, and the baseline is a SORTED file
+# compared byte-for-byte against a fresh run — so a shell with a different
+# LC_COLLATE reorders identical content and the gate fails with a diff whose `+`
+# and `-` lines are the same lines in a different order. Observed here: under
+# `C.UTF-8`, `}` (0x7D) sorts after `export …`; under `en_US.UTF-8` it sorts
+# before. Same 63 drifting lines either way, opposite verdicts. Pinning makes the
+# check deterministic on every machine and in CI, which is what the "stable"
+# claim above is worth.
+export LC_ALL=C
+
 cd "$(dirname "$0")/.."
 
 CANON="server/src/vendor/shared"

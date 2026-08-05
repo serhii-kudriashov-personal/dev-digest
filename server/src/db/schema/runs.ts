@@ -8,10 +8,12 @@ import {
   timestamp,
   doublePrecision,
   index,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { agents } from './agents';
 import { pullRequests } from './pulls';
+import { skills } from './skills';
 
 // ============================================================ Observability
 
@@ -56,6 +58,40 @@ export const agentRuns = pgTable(
     // PR-list cost rollup: `pr_id IN (…) AND cost_usd IS NOT NULL`, with no
     // workspace predicate, so the composite index above cannot serve it.
     index('agent_runs_pr_idx').on(t.prId),
+  ],
+);
+
+/**
+ * Which skills a run actually injected into its prompt, and in what order.
+ *
+ * The DETERMINISTIC half of skill provenance: the executor knows exactly what it
+ * put in the prompt, so unlike `findings.skill_id` (which the model reports and
+ * the server validates) nothing here is inferred. It is what makes "how often is
+ * this skill pulled" and "how many runs has it seen" answerable at all.
+ *
+ * `version` is recorded because a skill's body is mutable and versioned: without
+ * it a run tells you THAT a skill was used but not which wording it was scored
+ * against, which is precisely what the Versions tab promises to preserve.
+ */
+export const runSkills = pgTable(
+  'run_skills',
+  {
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    skillId: uuid('skill_id')
+      .notNull()
+      .references(() => skills.id, { onDelete: 'cascade' }),
+    /** `skills.version` at injection time. */
+    version: integer('version').notNull(),
+    /** Position within the `## Skills / rules` section. */
+    order: integer('order').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.runId, t.skillId] }),
+    // Per-skill reads (usage count, pull rate) filter on skill_id alone, which
+    // the (run_id, skill_id) primary key cannot serve.
+    index('run_skills_skill_idx').on(t.skillId),
   ],
 );
 

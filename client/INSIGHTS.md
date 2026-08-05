@@ -11,6 +11,47 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
+### 2026-08-05 — A drag-reorderable server list needs an OPTIMISTIC mutation, not local order state
+
+**Pattern:** for a list whose order lives on the server and is edited by dragging,
+put the new order into the React Query cache in `onMutate` and render straight from
+the query. Keep local state only for the drag gesture itself (which row is held,
+which row it is over) — never for the list.
+
+```ts
+onMutate: async ({ agentId, skillIds }) => {
+  const key = ["agent-skills", agentId];
+  await qc.cancelQueries({ queryKey: key });
+  const previous = qc.getQueryData<AgentSkillLink[]>(key);
+  qc.setQueryData(key, skillIds.map((skill_id, order) => ({ agent_id: agentId, skill_id, order })));
+  return { previous };                       // rollback in onError, or the UI
+},                                           // shows an order that never saved
+```
+
+**Why:** the obvious implementation is `useState(orderedIds)` seeded by
+`useEffect(..., [links])`, because dragging "needs" instant local feedback. That is
+exactly the CRITICAL "store derived state, then patch it" bug this package already
+paid for once in `ConfigTab` — see the 2026-08-03 entry below on `eslint-disable`
+directives, and the load-bearing comment in `AgentEditor.tsx` explaining why
+`ConfigTab` gets `key={agent.id}` instead of a sync Effect. The upstream lesson
+branch's version of this tab reintroduces it verbatim.
+
+An optimistic write gets the same instant feedback with no second source of truth,
+so the component needs no `key` either: switching agents cannot leave it stale
+because there is nothing to go stale. Two details that make it correct — return the
+previous value from `onMutate` and restore it in `onError`, and have the pure
+reorder helper return **the same array reference** when nothing moved, so a drag
+that ends where it started fires no write at all.
+
+Note this repo has **no** drag-and-drop library (no dnd-kit, no
+react-beautiful-dnd); native HTML5 `draggable` + `onDragStart`/`onDragEnter`/
+`onDragEnd` is the convention.
+
+**Where:** hook `client/src/lib/hooks/skills.ts` (`useSetAgentSkills`); consumer
+`client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.tsx`;
+the reference-equality rule is `.../SkillsTab/helpers.ts` (`reorder`), asserted in
+`helpers.test.ts` ("returns the SAME array reference when nothing moves").
+
 ### 2026-08-03 — A `'use client'` page becomes a server wrapper with NO Suspense, because every `useSearchParams` route here is dynamic
 
 **Pattern:** when you thin a page down to `return <TheView />` and move
@@ -42,7 +83,44 @@ column; the build is the only place the RSC boundary is actually decided.
 
 ## What Doesn't Work
 
-_Empty so far._
+### 2026-08-05 — Reaching a route-root `_components/` from a nested route with `../../../` — `typecheck` passes, only `lint` catches it
+
+**Tried:** importing a shared piece of a route from one of its nested routes the
+way the path actually runs — from
+`src/app/skills/[id]/_components/SkillEditorView/` up to the route root:
+
+```ts
+import { needsVetting, typeColor } from "../../../_components/SkillCard";
+import { SKILL_TYPE_VALUES } from "../../../constants";
+```
+
+**Failed:** `no-restricted-imports` rejects it — "Deep relative import — use the
+'@/' alias instead". The trap is the order the gates fail in: `pnpm typecheck` is
+**green** on both lines, so the error only appears when `pnpm lint` runs, which is
+easy to leave until last and easy to read as unrelated to the code you just wrote.
+Two levels (`../../constants` from a sibling `_components/X/`) is fine; three trips
+it, so the same logical import is legal from one depth and illegal from the next
+one down.
+
+**Instead:** address route-scoped modules through the alias, spelling out the route:
+
+```ts
+import { needsVetting, typeColor } from "@/app/skills/_components/SkillCard";
+import { SKILL_TYPE_VALUES } from "@/app/skills/constants";
+```
+
+Which also means: when a nested route needs something, that something belongs at
+the route root (`app/<route>/constants.ts`) rather than inside a sibling
+component's folder — consistent with the 2026-08-03 entry below on a View
+extraction not moving the route's shared `constants.ts` / `styles.ts` / `helpers.ts`.
+Related: root `INSIGHTS.md` (2026-08-03) records that `pnpm lint` UNDER-reports
+these because the rule is switched off in test files, so a green lint is not proof
+that a test file is clean.
+
+**Where:** rule at `client/eslint.config.mjs` (`no-restricted-imports`); the two
+lines were in
+`client/src/app/skills/[id]/_components/SkillEditorView/SkillEditorView.tsx`; the
+shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
 
@@ -204,6 +282,40 @@ the address moved: the page is now an 8-line wrapper and the selection owner is
 (`severities` / `onToggleSeverity`).
 
 ## Tool & Library Notes
+
+### 2026-08-05 — `@devdigest/ui`'s `Donut` is a MONEY chart, and a design mock inherited its `$`
+
+**Quirk:** `charts/Donut.tsx` cannot render counts. Two hardcoded assumptions:
+
+```tsx
+valuePrefix = "$",          // default, not opt-in
+{valuePrefix}{s.value.toFixed(2)}   // always two decimals
+```
+
+So a findings-by-category chart of 96 findings renders `$96.00`. Passing
+`valuePrefix=""` removes the currency and leaves `96.00`, which is still wrong for
+an integer — there is no prop for the decimals.
+
+Worth knowing because it leaked **upstream into a spec**: an approved design for
+the skill Stats tab showed a findings-by-category legend reading
+`security $52.00`, `bug $20.00`. Those are not requirements, they are this
+component's defaults showing through a mock that never overrode them. Check a
+chart mock against the component's own defaults before implementing the pixels.
+
+**Workaround:** do not "fix" the primitive — `src/vendor/**` is not ours to
+refactor (root `AGENTS.md`). A ring is ~20 lines of SVG `stroke-dasharray`, so
+draw it locally with the formatting the data actually needs. Bonus: hand-rolled
+SVG avoids the recharts `width(0) and height(0)` warnings that the jsdom smoke
+test already emits for every recharts mount.
+
+Reach for `Donut` when the values ARE currency (spend by provider, cost by agent)
+— that is what it is good at.
+
+**Where:** the primitive is `client/src/vendor/ui/charts/Donut.tsx:19` (prefix
+default) and `:52` (`toFixed(2)`); the local replacement is
+`client/src/app/skills/[id]/_components/StatsTab/CategoryDonut.tsx`, with its
+palette in that folder's `constants.ts` keyed by the `FindingCategory` enum. The
+mock artifact is recorded in `specs/l02-skills.md` §"Mock artifacts".
 
 ### 2026-08-03 — `pnpm lint` UNDER-reports deep relative imports: the rule is switched off in test files
 

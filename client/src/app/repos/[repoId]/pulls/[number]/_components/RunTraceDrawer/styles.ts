@@ -66,6 +66,9 @@ export const s = {
   promptDot: (color: string): CSSProperties => ({ width: 7, height: 7, borderRadius: 2, background: color }),
   promptLabel: { fontSize: 13, fontWeight: 600 } satisfies CSSProperties,
   promptToggle: { marginLeft: "auto", fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  // Per-section token cost, so "the skills block added N tokens" is readable off
+  // the trace instead of inferred by subtracting two runs' totals.
+  promptTokens: { fontSize: 11, color: "var(--text-muted)" } satisfies CSSProperties,
   promptPre: {
     margin: 0,
     padding: "12px 14px",

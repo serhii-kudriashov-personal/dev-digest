@@ -6,6 +6,7 @@ Reusable AI skills that provide specialized knowledge and workflows. Canonical l
 
 | Skill | Scope | Description |
 |-------|-------|-------------|
+| [pr-self-review](pr-self-review/SKILL.md) | Workflow | Reviews all open local changes against the skills the diff implicates, runs the repo gates, and blocks `gh pr create` / `gh pr merge` on a CRITICAL |
 | [backend-onion-architecture](backend-onion-architecture/SKILL.md) | Backend | Which ring code belongs to and what it may import — ports, composition root, repositories, the Fastify edge, the pure core, `pnpm arch` |
 | [fastify-best-practices](fastify-best-practices/SKILL.md) | Backend | Fastify routes, plugins, JSON-schema validation, error handling |
 | [drizzle-orm-patterns](drizzle-orm-patterns/SKILL.md) | Backend | Drizzle schema, queries, relations, transactions, migrations |

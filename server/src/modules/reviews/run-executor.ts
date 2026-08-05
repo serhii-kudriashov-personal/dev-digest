@@ -6,7 +6,13 @@ import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
 import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './repository.js';
 import { REVIEW_STRATEGY } from './constants.js';
-import { taskLine } from './helpers.js';
+import {
+  labelSkillBodies,
+  promptTokenCounts,
+  resolveSkillAttribution,
+  taskLine,
+  type InjectedSkill,
+} from './helpers.js';
 import { loadDiff } from './diff-loader.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
@@ -186,6 +192,35 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote;
 
+      // Skills linked to this agent, in `agent_skills.order` — that order is the
+      // order of the blocks in the prompt, which is why the editor lets the user
+      // drag it. `skills.enabled` is the gate: a disabled skill stays linked and
+      // keeps its position but contributes nothing to the prompt.
+      const linkedSkills = await this.container.agentsRepo.linkedSkills(agent.id);
+      const injectedSkills: InjectedSkill[] = linkedSkills
+        .filter((l) => l.skill.enabled)
+        .map((l) => ({
+          id: l.skill.id,
+          name: l.skill.name,
+          version: l.skill.version,
+          order: l.order,
+          body: l.skill.body,
+        }));
+      // Each body is labelled with its slug so the model has something to cite in
+      // `Finding.skill`; the slug is validated against THIS list after the run.
+      const skillBodies = labelSkillBodies(injectedSkills);
+      if (linkedSkills.length > 0) {
+        runLog.info(
+          `Skills: ${injectedSkills.length} of ${linkedSkills.length} linked skill(s) enabled`,
+        );
+      }
+      // Written before the LLM call so a run that fails mid-review still records
+      // what it was given — that is the input to the review, not its outcome.
+      await this.repo.saveRunSkills(
+        runId,
+        injectedSkills.map((s) => ({ id: s.id, version: s.version, order: s.order })),
+      );
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -206,6 +241,9 @@ export class ReviewRunExecutor {
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
+        // Same omit-when-empty contract as callers/repoMap above: with no
+        // enabled skills the assembled prompt is byte-identical to a pre-L02 run.
+        ...(skillBodies.length > 0 ? { skills: skillBodies } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
@@ -216,6 +254,26 @@ export class ReviewRunExecutor {
       const { tokensIn, tokensOut, costUsd, grounding } = outcome;
 
       const keptFindings = outcome.review.findings;
+
+      // Skill attribution: the model names a slug per finding, and only a slug
+      // naming a skill actually injected into THIS run survives. Same discipline
+      // as grounding's citation gate — a self-reported field is checked against
+      // something the server knows, or it is not stored.
+      const attribution = resolveSkillAttribution(keptFindings, injectedSkills);
+      if (attribution.rejected.length > 0) {
+        // Logged rather than swallowed: a model that mis-attributes systematically
+        // must not look like a model that simply never attributes.
+        runLog.info(
+          `Skills: discarded ${attribution.rejected.length} attribution(s) naming a ` +
+            `skill not in this run's prompt (${[...new Set(attribution.rejected)].join(', ')})`,
+        );
+      }
+      if (injectedSkills.length > 0) {
+        const attributed = attribution.byIndex.filter(Boolean).length;
+        runLog.info(
+          `Skills: ${attributed}/${keptFindings.length} finding(s) attributed to a skill`,
+        );
+      }
 
       // ---- Persist review + findings ----------------------------------------
       // One transaction: a review persisted without its findings reads as a
@@ -233,6 +291,7 @@ export class ReviewRunExecutor {
           model: agent.model,
         },
         keptFindings,
+        attribution.byIndex,
       );
       runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
 
@@ -277,7 +336,14 @@ export class ReviewRunExecutor {
           findings: findingRows.length,
           grounding,
         },
-        prompt_assembly: outcome.assembly,
+        // Per-section token attribution is added here rather than in the engine:
+        // `reviewer-core` is zero-I/O and must not depend on a tokenizer adapter.
+        prompt_assembly: {
+          ...outcome.assembly,
+          token_counts: promptTokenCounts(outcome.assembly, (text) =>
+            this.container.tokenizer.count(text),
+          ),
+        },
         tool_calls: outcome.chunks.map((c) => ({
           tool: 'review_file',
           args: c.label,

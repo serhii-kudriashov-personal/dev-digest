@@ -207,6 +207,70 @@ the editor field is
 
 ## Tool & Library Notes
 
+### 2026-08-05 — `pnpm test` is red here for an environmental reason: 8 `*.it.test.ts` files start 8 Postgres containers at once
+
+**Quirk:** on this machine the full `pnpm test` reports ~6 of 8 integration files
+failing with `Error: Hook timed out in 120000ms` inside `beforeAll` — i.e. in
+`startPg()`, before a single assertion runs. It is **not** a regression and not
+specific to any one file: each file passes on its own, and the same 6 fail with a
+newly added file *excluded*. Vitest runs test files in parallel, each
+`.it.test.ts` spins up its own pgvector container via testcontainers, and eight
+simultaneous container starts starve past the 120s `hookTimeout` in
+`vitest.config.ts`.
+
+The failure mode is the problem: a timeout in a `beforeAll` looks exactly like
+"the change under test broke the integration suite", so it invites a long hunt for
+a bug that is not there.
+
+**Workaround:** run the integration lane serially —
+
+```sh
+cd server && pnpm exec vitest run .it.test --no-file-parallelism   # 8 files, 51 tests, ~60s
+cd server && pnpm exec vitest run --exclude '**/*.it.test.ts'      # unit lane, ~6s
+```
+
+Serially all 8 files pass. Before blaming your change for an `.it.test.ts`
+timeout, re-run with `--no-file-parallelism`, and if you need to attribute a
+failure, re-run the single file. Note CI's `server-integration` job runs the
+parallel form (`pnpm exec vitest run .it.test`) on a dedicated runner, so a green
+CI does not mean the parallel form works locally.
+
+**Where:** timeouts at `server/vitest.config.ts` (`hookTimeout: 120_000`);
+container fixture `server/test/helpers/pg.ts` (`startPg`); the eight files are
+`server/test/*.it.test.ts`; lanes documented in `TESTING.md:67`.
+
+### 2026-08-05 — A base64 upload route needs its OWN `bodyLimit`, or the app-wide 1 MiB rejects it with an opaque 413
+
+**Quirk:** `buildApp` sets a global `bodyLimit: 1_048_576` (`app.ts:49`). A JSON
+route that carries a file as base64 gets ~33% inflation plus the envelope, so a
+**~750 KB** upload already exceeds 1 MiB. Fastify rejects it before the handler
+runs, so no service-level validation, log line, or error message of yours ever
+executes — the client sees a bare 413 that reads like an unrelated network fault
+rather than "your file is too big".
+
+**Workaround:** set `bodyLimit` per route, and keep the service's own size ceiling
+**below** it so the readable error always wins the race:
+
+```ts
+app.post('/skills/import',
+  { schema: { body: ImportBody }, bodyLimit: IMPORT_BODY_LIMIT_BYTES },  // 1.5 MB
+  async (req) => service.importPreview(req.body.filename, req.body.content_base64));
+```
+
+with `MAX_IMPORT_BYTES = 512 * 1024` checked on the *decoded* buffer. Two separate
+limits are needed, not one: a compressed archive also needs a cap on its
+**decompressed** total (`MAX_UNPACKED_BYTES`), because a small zip can expand
+without bound and the upload-size check cannot see that. The upstream lesson
+branch omits both the route limit and the unpacked cap while allowing a 5 MB
+import — i.e. every import over ~750 KB 413s there.
+
+**Where:** global limit `server/src/app.ts:49`; route override and the reasoning
+comment in `server/src/modules/skills/routes.ts`; the three constants and why they
+are ordered that way in `server/src/modules/skills/constants.ts`; zip-bomb guard
+in `server/src/modules/skills/helpers.ts` (`previewFromZip`), asserted by
+`server/test/skills-import.test.ts` ("rejects an archive that expands past the
+unpacked ceiling").
+
 ### 2026-08-03 — A Drizzle transaction handle is NOT a `Db`, so composing repo helpers needs `DbOrTx`
 
 **Quirk:** `db.transaction(async (tx) => …)` hands the callback a
@@ -351,4 +415,42 @@ _Empty so far._
 
 ## Open Questions
 
-_Empty so far._
+### 2026-08-05 — `pull_rate` counts pre-provenance runs as "not pulled", so it reads 0% right after the migration
+
+**Question:** should `pullRate`'s denominator exclude runs that predate
+`run_skills`?
+
+The metric is "of the last 30 days' runs by agents currently linking this skill,
+how many actually injected it" — a `LEFT JOIN` from `agent_runs` onto
+`run_skills`. Every run recorded **before** migration `0013` is in the denominator
+and can never match, because no row was ever written for it. Result: a skill that
+has been enabled the whole time shows `0%` rather than the truthful `100%`, and
+there is no way to tell that apart from a skill that genuinely was never pulled.
+
+It self-heals — after 30 days the window contains only post-migration runs — and
+`null` is already handled correctly for "no eligible runs at all". So this is
+wrong only in the transitional period, and only for workspaces with run history.
+Verified live on the dev DB: `lethal-trifecta` and friends show `0% pull` while
+`api-contract-gate` (whose agent has never run) correctly shows `—`.
+
+Three candidate fixes, none obviously right:
+
+- **Floor the window** at the earliest `run_skills` row for that agent. Correct,
+  but a skill attached to a brand-new agent then has no floor and reads `—` for a
+  while.
+- **Require the run to have at least one `run_skills` row** to be eligible. Cheap,
+  but it also excludes legitimate runs where every skill was disabled — which is
+  exactly a 0%-pull case worth counting.
+- **Leave it and document it.** What is shipped, on the grounds that the number is
+  uninformative rather than false, and that inventing a floor adds a rule readers
+  have to learn.
+
+**Blocked:** on a judgement about whether a transitional metric is worth extra
+machinery, not on work. If it is worth fixing, the floor variant is ~5 lines in
+`pullRate` plus a matching change in `listRollups`, and both need a test with a
+run inserted at an explicit `ranAt` before the migration.
+
+**Where:** `server/src/modules/skills/repository.ts` (`pullRate`, and the `pull`
+query inside `listRollups`); definition of record in `specs/l02-skills.md`
+§"Metric definitions"; migration that created the table is
+`server/src/db/migrations/0013_skinny_alice.sql`.

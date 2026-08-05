@@ -72,6 +72,28 @@ export const Finding = z.object({
   // Lethal-trifecta variant fields (present only when kind === 'lethal_trifecta')
   trifecta_components: z.array(TrifectaComponent).nullish(),
   evidence: z.array(TrifectaEvidence).nullish(),
+  /**
+   * Skill attribution. This schema IS the LLM's structured-output contract
+   * (`reviewer-core` passes `Review` straight to `completeStructured`), so the
+   * `.describe()` below is the instruction the model actually reads — which is
+   * why the attribution needs no change to `prompt.ts` or `INJECTION_GUARD`.
+   *
+   * NULLISH, not nullable: `Finding` is embedded in `eval_cases.expected_output`
+   * and `eval_runs.actual_output`, both jsonb, where a missing key must parse.
+   *
+   * The value is UNVERIFIED on arrival. The server keeps it only when the slug
+   * names a skill that was really injected into that run, and stores NULL
+   * otherwise — see `resolveSkillAttribution`.
+   */
+  skill: z
+    .string()
+    .nullish()
+    .describe(
+      'The exact slug of the skill from the "## Skills / rules" section whose rule ' +
+        'this finding applies, copied verbatim. Set null when the finding came from ' +
+        'your own analysis rather than one of those listed skills. Never guess and ' +
+        'never invent a slug — an unrecognised value is discarded.',
+    ),
 });
 export type Finding = z.infer<typeof Finding>;
 

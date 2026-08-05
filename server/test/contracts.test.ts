@@ -15,6 +15,8 @@ import {
   Settings,
   Repo,
   PrDetail,
+  SkillVersion,
+  SkillStats,
 } from '@devdigest/shared';
 
 /**
@@ -45,6 +47,57 @@ describe('AI contracts parse fixtures', () => {
     });
     expect(review.findings).toHaveLength(1);
     expect(review.score).toBe(61);
+    // The fixture carries no `skill` — the shape of every finding the model
+    // returned before L02's attribution field existed, and of every finding
+    // stored in an `eval_cases.expected_output` jsonb document. `Finding.skill`
+    // MUST stay nullish: `.nullable()` rejects a MISSING key.
+    expect(review.findings[0]!.skill).toBeUndefined();
+  });
+
+  it('Finding carries a skill attribution when the model supplied one', () => {
+    const f = Finding.parse({
+      id: 'f9',
+      severity: 'WARNING',
+      category: 'test',
+      title: 'Uncovered branch',
+      file: 'src/discount.ts',
+      start_line: 14,
+      end_line: 14,
+      rationale: 'The cap branch is never exercised.',
+      confidence: 0.6,
+      skill: 'test-coverage-nudge',
+    });
+    // Unvalidated at this layer by design — the server checks the slug against
+    // the skills actually injected into the run before storing a `skill_id`.
+    expect(f.skill).toBe('test-coverage-nudge');
+  });
+
+  it('SkillVersion parses without a message (versions predating the field)', () => {
+    const v = SkillVersion.parse({
+      skill_id: 's1',
+      version: 1,
+      body: '## Rule',
+      created_at: '2026-08-05T00:00:00.000Z',
+    });
+    expect(v.message).toBeUndefined();
+  });
+
+  it('SkillStats keeps unknown rates NULL rather than zero', () => {
+    const stats = SkillStats.parse({
+      used_by_count: 2,
+      agents: [{ id: 'a1', name: 'Test Quality Reviewer' }],
+      version_count: 1,
+      runs_count: 0,
+      pull_rate: null,
+      accept_rate: null,
+      findings_last_30d: 0,
+      findings_by_category: {},
+      unattributed_count: 0,
+    });
+    // A skill nobody has judged has no accept rate; 0 would claim every finding
+    // was dismissed. Same rule the cost badge follows for unknown vs free.
+    expect(stats.accept_rate).toBeNull();
+    expect(stats.pull_rate).toBeNull();
   });
 
   it('lethal-trifecta Finding variant', () => {
@@ -171,6 +224,36 @@ describe('AI contracts parse fixtures', () => {
     // nullish (not nullable): `.nullable()` rejects a MISSING key and would
     // make every historical run_traces document unparseable.
     expect(trace.stats.cost_usd).toBeUndefined();
+    // Same rule, same reason, for L02's per-section token attribution: the
+    // fixture has no `token_counts`, so PromptAssembly.token_counts MUST stay
+    // nullish or the whole run history stops parsing.
+    expect(trace.prompt_assembly.token_counts).toBeUndefined();
+  });
+
+  it('RunTrace carries per-section token_counts when the run recorded them', () => {
+    const trace = RunTrace.parse({
+      config: { agent: 'Test Quality Reviewer', model: 'gpt-4.1', source: 'local' },
+      stats: {
+        duration_ms: 4100,
+        tokens_in: 4949,
+        tokens_out: 810,
+        cost_usd: 0.002,
+        findings: 2,
+        grounding: '2/2 passed',
+      },
+      prompt_assembly: {
+        system: 's',
+        skills: '## rubric',
+        user: 'u',
+        token_counts: { system: 412, skills: 1240, user: 8707 },
+      },
+      tool_calls: [],
+      raw_output: '{}',
+      memory_pulled: [],
+      specs_read: [],
+      log: [],
+    });
+    expect(trace.prompt_assembly.token_counts?.skills).toBe(1240);
   });
 
   it('RunTrace carries cost_usd when the run recorded one', () => {

@@ -3,6 +3,7 @@ import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision, index 
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
+import { skills } from './skills';
 
 // ============================================================ Review & findings
 
@@ -58,6 +59,20 @@ export const findings = pgTable(
     confidence: doublePrecision('confidence').notNull(),
     kind: text('kind').notNull().default('finding'),
     trifectaComponents: jsonb('trifecta_components').$type<string[]>(),
+    /**
+     * The skill whose rule this finding applies, when one can be established.
+     *
+     * The model names a skill slug and the server keeps it ONLY if that skill was
+     * actually injected into the run that produced this finding (see
+     * `resolveSkillAttribution`). Anything unverifiable lands NULL and is counted
+     * as unattributed — a self-reported field is checked against something the
+     * server knows, or it is not stored.
+     *
+     * `set null`, deliberately unlike every other skill FK, which cascade: a
+     * finding is a historical fact about a review, so deleting a skill must not
+     * delete the findings raised while it existed.
+     */
+    skillId: uuid('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
   },
@@ -65,7 +80,13 @@ export const findings = pgTable(
   // unique constraints only. Every read of findings joins or filters on
   // review_id (reviewsForPull, and the PR list's severity rollup), so without
   // this the table is scanned in full each time.
-  (t) => [index('findings_review_id_idx').on(t.reviewId)],
+  // A foreign key is NOT an index (see above). Every per-skill stat read filters
+  // on skill_id — accept rate, findings-by-category, the 30-day count — so this
+  // one earns its keep for the same reason review_id does.
+  (t) => [
+    index('findings_review_id_idx').on(t.reviewId),
+    index('findings_skill_id_idx').on(t.skillId),
+  ],
 );
 
 export const prIntent = pgTable('pr_intent', {

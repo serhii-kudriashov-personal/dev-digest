@@ -94,6 +94,7 @@ Vitest 2 · testcontainers · agent-browser
 | `ONBOARDING.md` | asking "how does it all fit together", or new to the repo |
 | `TESTING.md` | writing or fixing a test or a CI workflow |
 | `docs/agent-prompts/` | editing a review agent's `system_prompt` |
+| `docs/l02-experiment.md` | measuring whether a skill (or any prompt change) actually helps |
 | `docs/` | asking "why was it decided this way" |
 | `specs/` | implementing a new feature — read its spec first |
 | `INSIGHTS.md` | at the start of every session, and before any non-trivial change: the traps are written down |

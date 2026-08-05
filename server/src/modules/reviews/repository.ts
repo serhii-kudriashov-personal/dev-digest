@@ -69,8 +69,10 @@ export class ReviewRepository {
   insertReviewWithFindings(
     values: Parameters<typeof reviewRepo.insertReviewWithFindings>[1],
     findings: Finding[],
+    /** Resolved skill attribution, parallel to `findings` by index. */
+    skillIds?: (string | null)[],
   ): ReturnType<typeof reviewRepo.insertReviewWithFindings> {
-    return reviewRepo.insertReviewWithFindings(this.db, values, findings);
+    return reviewRepo.insertReviewWithFindings(this.db, values, findings, skillIds);
   }
 
   /** Reviews for a PR (newest first), each with its findings. */
@@ -187,6 +189,14 @@ export class ReviewRepository {
   /** Record the head SHA a review ran against (PR-list freshness derivation). */
   markReviewed(prId: string, sha: string): Promise<void> {
     return pullRepo.markReviewed(this.db, prId, sha);
+  }
+
+  /** Record which skills a run injected (version + prompt order). */
+  saveRunSkills(
+    runId: string,
+    skills: { id: string; version: number; order: number }[],
+  ): Promise<void> {
+    return runRepo.saveRunSkills(this.db, runId, skills);
   }
 
   /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */

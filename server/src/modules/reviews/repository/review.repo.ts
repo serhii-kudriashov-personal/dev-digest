@@ -26,16 +26,24 @@ export async function insertReview(
   return row!;
 }
 
+/**
+ * @param skillIds resolved skill attribution, parallel to `findings` by index.
+ *   Supplied by `resolveSkillAttribution`, which has already discarded any slug
+ *   the model named that was not injected into the run. Omit it (or pass a null
+ *   entry) and the finding is stored unattributed — NEVER guess here: this layer
+ *   has no way to validate a slug, which is the whole reason the caller does.
+ */
 export async function insertFindings(
   db: DbOrTx,
   reviewId: string,
   findings: Finding[],
+  skillIds?: (string | null)[],
 ): Promise<FindingRow[]> {
   if (findings.length === 0) return [];
   const rows = await db
     .insert(t.findings)
     .values(
-      findings.map((f) => ({
+      findings.map((f, i) => ({
         reviewId,
         file: f.file,
         startLine: f.start_line,
@@ -48,6 +56,7 @@ export async function insertFindings(
         confidence: f.confidence,
         kind: f.kind ?? 'finding',
         trifectaComponents: f.trifecta_components ?? null,
+        skillId: skillIds?.[i] ?? null,
       })),
     )
     .returning();
@@ -69,10 +78,11 @@ export async function insertReviewWithFindings(
   db: Db,
   values: Parameters<typeof insertReview>[1],
   findings: Finding[],
+  skillIds?: (string | null)[],
 ): Promise<{ review: ReviewRow; findingRows: FindingRow[] }> {
   return db.transaction(async (tx) => {
     const review = await insertReview(tx, values);
-    const findingRows = await insertFindings(tx, review.id, findings);
+    const findingRows = await insertFindings(tx, review.id, findings, skillIds);
     return { review, findingRows };
   });
 }

@@ -10,10 +10,10 @@ adapters.ts: <   path: string;
 adapters.ts: <   readonly id: 'openai' | 'anthropic' | 'openrouter';
 adapters.ts: <   sessionId?: string;
 adapters.ts: <   sync(repo: RepoRef, branch: string): Promise<{ head: string }>;
-adapters.ts: < }
-adapters.ts: < }
 adapters.ts: < export interface CommitFile {
 adapters.ts: < export interface CommitFilesPayload {
+adapters.ts: < }
+adapters.ts: < }
 adapters.ts: >   readonly id: 'openai' | 'anthropic';
 contracts/eval-ci.ts: <     .array(z.string())
 contracts/eval-ci.ts: <     .nullish()
@@ -26,11 +26,11 @@ contracts/eval-ci.ts: <   provider: z.enum(['openai', 'anthropic', 'openrouter']
 contracts/eval-ci.ts: <   skills: z
 contracts/eval-ci.ts: <   strategy: z.enum(['auto', 'single-pass', 'map-reduce']).default('auto'),
 contracts/eval-ci.ts: <   system_prompt: z.string(),
-contracts/eval-ci.ts: < });
 contracts/eval-ci.ts: < export const AgentManifest = z.object({
 contracts/eval-ci.ts: < export type AgentManifest = z.infer<typeof AgentManifest>;
 contracts/eval-ci.ts: < export type AgentManifestInput = z.input<typeof AgentManifest>;
 contracts/eval-ci.ts: < import { EvalRun, EvalOwnerKind, Conformance, Provider, CiFailOn } from './knowledge.js';
+contracts/eval-ci.ts: < });
 contracts/eval-ci.ts: >   provider: z.enum(['openai', 'anthropic']).nullish(),
 contracts/eval-ci.ts: > import { EvalRun, EvalOwnerKind, Conformance } from './knowledge.js';
 contracts/knowledge.ts: <   agent_id: z.string(),
@@ -49,15 +49,15 @@ contracts/knowledge.ts: <   strategy: ReviewStrategy,
 contracts/knowledge.ts: <   strategy: ReviewStrategy.nullish(),
 contracts/knowledge.ts: <   system_prompt: z.string(),
 contracts/knowledge.ts: <   version: z.number().int(),
-contracts/knowledge.ts: < });
-contracts/knowledge.ts: < });
-contracts/knowledge.ts: < });
 contracts/knowledge.ts: < export const AgentVersion = z.object({
 contracts/knowledge.ts: < export const AgentVersionConfig = z.object({
 contracts/knowledge.ts: < export const StoredAgentVersionConfig = AgentVersionConfig.extend({
 contracts/knowledge.ts: < export type AgentVersion = z.infer<typeof AgentVersion>;
 contracts/knowledge.ts: < export type AgentVersionConfig = z.infer<typeof AgentVersionConfig>;
 contracts/knowledge.ts: < export type StoredAgentVersionConfig = z.infer<typeof StoredAgentVersionConfig>;
+contracts/knowledge.ts: < });
+contracts/knowledge.ts: < });
+contracts/knowledge.ts: < });
 contracts/productionize.ts: <   provider: z.enum(['openai', 'anthropic', 'openrouter']),
 contracts/productionize.ts: >   provider: z.enum(['openai', 'anthropic']),
 contracts/trace.ts: <       attribution in the run trace. */
