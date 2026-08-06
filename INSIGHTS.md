@@ -11,9 +11,298 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
-_Empty so far._
+### 2026-08-05 — To make the model report a new field, `.describe()` the shared contract — then validate the answer server-side
+
+**Pattern:** two halves, and both are needed.
+
+1. **Ask through the schema, not the prompt.** `reviewer-core` hands the shared
+   `Review` contract straight to `completeStructured` (`schema: ReviewSchema`), so
+   a `.describe()` on any field of `Finding` / `Review` **is** an instruction the
+   model reads. Add the field `.nullish()`, put the instruction in `.describe()`,
+   and you have changed what the model returns with **zero** edits to
+   `prompt.ts`, `INJECTION_GUARD`, or any agent's `system_prompt`.
+2. **Never store the answer unchecked.** Validate it against something the server
+   knows for itself, and record what you rejected.
+
+L02's skill attribution is the worked example. `Finding.skill` asks for a slug
+from the `## Skills / rules` section; the server keeps it only when that slug
+names a skill actually injected into *that* run, stores `NULL` otherwise, and
+logs the discarded claims. The gate is deliberately the same shape as
+`grounding.ts`, which refuses a finding citing a line absent from the diff.
+
+**Why:** the prompt route is the expensive one and the measured-worse one. Root
+`INSIGHTS.md` (2026-08-02) recorded a `system_prompt` block *crowding out*
+findings a previous run had caught (3 → 2, one hallucinated, score 41 → 30), and
+`prompt.ts`'s guard is on the do-not-touch list. A schema field description costs
+no prompt real estate and cannot descope the review.
+
+The validation half is not optional paranoia — the same file records
+`findings.confidence` returning `1.0` for a hallucination, so anything the model
+says about its own output is a claim, not data. Two consequences worth stating:
+log the rejects (a model that mis-attributes systematically must not look like one
+that never attributes), and be precise about what the gate proves — that the skill
+was *present and could have* produced the finding, never that it did.
+
+Three plumbing facts that make this cheap, all verified: `reduceReviews` merges
+with `partials.flatMap(p => p.findings)` and grounding does `kept.push(finding)`,
+so an unknown field survives both untouched; and the labelling that gives the
+model something to cite (`### <slug>` before each body) is a server-side string
+built before `reviewPullRequest`, so `PromptParts.skills?: string[]` is unchanged
+and `reviewer-core` needs no edit at all.
+
+**Where:** field + instruction at
+`server/src/vendor/shared/contracts/findings.ts` (`Finding.skill`, ported to the
+client copy); schema handed to the model at
+`reviewer-core/src/review/run.ts:174`; the gate is
+`resolveSkillAttribution` in `server/src/modules/reviews/helpers.ts` (pure, unit
+tested in `server/test/reviews-helpers.test.ts`); the deterministic side it
+validates against is `run_skills` (`server/src/db/schema/runs.ts`); end-to-end
+proof in `server/test/reviews.it.test.ts` ("DISCARDS an attribution naming a skill
+that was NOT injected"). Field-survival points: `reviewer-core/src/review/reduce.ts:43`
+and `reviewer-core/src/grounding.ts:68`.
+
+### 2026-08-05 — A lesson feature is mostly already scaffolded: inventory Part 0 before writing a line
+
+**Pattern:** before implementing a course lesson, grep for the feature's nouns
+across schema, contracts, routes, UI primitives and `messages/` — and check
+`git diff --stat main...upstream/lesson-N-lab/<name>` for the file list upstream
+touched. The starter ships the *shape* of every later lesson with the middle
+removed, so the real task is usually one wire, not a subsystem.
+
+**Why:** L02 "Skills" looked like a full-stack feature. Almost all of it existed:
+
+| Already there | Where |
+|---|---|
+| `skills`, `skill_versions`, `agent_skills` tables | `server/src/db/schema/skills.ts`, `.../agents.ts:52` |
+| `Skill`, `SkillType`, `SkillSource`, `AgentSkillLink` | `server/src/vendor/shared/contracts/knowledge.ts:114-199` |
+| `GET/POST /agents/:id/skills` + `setSkills`/`linkSkill`/`linkedSkills` | `server/src/modules/agents/{routes,service,repository}.ts` |
+| `ReviewInput.skills?: string[]` → `## Skills / rules` | `reviewer-core/src/review/run.ts:55`, `prompt.ts:88,109` |
+| the trace **already renders** the skills block, colour reserved | `.../RunTraceDrawer/_components/TraceBody/TraceBody.tsx:76`, `constants.ts:16` |
+| `AgentCard` accepts + renders `skillCount`, with a passing test | `client/src/components/agent-card/AgentCard.tsx:20,70` |
+| the whole page's copy, incl. import + vetting strings | `client/messages/en/skills.json` |
+| `AgentEditor` `?tab=` state + a `TABS` extension point | `.../AgentEditor/{AgentEditor,constants}.tsx` |
+
+So the feature needed **no migration at all** and the behavioural change was six
+lines in the run executor. Two concrete traps this avoids: `agent_skills` has only
+`(agent_id, skill_id, order)` and *no* `enabled` column, which decides the whole
+enablement model (attachment = row existence, `skills.enabled` = the single gate) —
+guess wrong and you write a migration you did not need; and `skills.type` is
+already a fixed enum (`rubric|convention|security|custom`) matching the design
+mockup's badges, so inventing a free-text `type` would have broken the mock.
+
+Read the upstream lesson branch for the intended *contract*, not as code to copy —
+its `SkillsTab` reintroduces the Effect-copies-server-state bug this repo already
+fixed, hardcodes inline styles, uses deep relative imports the linter rejects, and
+ignores the i18n file it also ships.
+
+**Where:** inventory table above; the upstream branch is
+`upstream/lesson-2-lab/skills`; the spec that records what was in and out is
+`specs/l02-skills.md`.
+
+### 2026-08-03 — To blame a refactor for a test failure, rebuild the state just BEFORE it — `HEAD` is the wrong baseline here
+
+**Pattern:** this repo's working tree carries several uncommitted phases at once
+(Phase 0 guardrails + Phase 1 fixes + Phase 2a refactor). When a test fails and
+you need to know whether *your* phase caused it, do **not** `git show HEAD:<file>`
+to get a baseline. Reconstruct the state as of the phase immediately before yours:
+keep every earlier phase's changes, and undo only your own.
+
+**Why:** restoring `HEAD`'s `pulls/[number]/page.tsx` to test a Phase-2a
+extraction produced a file that could not compile against the tree — Phase 1 had
+changed `FindingsTab`'s props from `cancelMutation` to `onCancelRuns`/`cancelling`,
+so the 203-line `HEAD` page passed a prop that no longer exists. A baseline that
+does not build tells you nothing, and the failure it produces looks like evidence.
+The working baseline was instead built from the extracted view itself — inline its
+body back into `page.tsx`, restore `'use client'`, repoint `../X` to
+`./_components/X` — which holds Phases 0 and 1 constant and varies only the one
+thing under suspicion. `pnpm typecheck` on the baseline is the gate that proves it
+is a fair comparison.
+
+That comparison is what settled the question: on the same harness the refactor
+scored `6/8` and `7/8` while the baseline scored `4/8`, and the flow that failed
+on both (`08`) was thereby cleared. Note the second half of that — a single run
+of a flaky suite attributes nothing; flow `05` failed once and passed on the next
+run with no code change.
+
+**Where:** the phases are described in
+`~/.claude/plans/parallel-hugging-giraffe.md`; the prop change that broke the
+`HEAD` baseline is
+`client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsTab/FindingsTab.tsx`
+(Phase 1, item 1.9); the flakiness is catalogued in `e2e/INSIGHTS.md`
+(2026-08-03).
+
+### 2026-08-03 — Introducing a linter: grep its own disable directives FIRST
+
+**Pattern:** before adding a linter to a package that never had one, run
+`grep -rn "eslint-disable" src/` (or the equivalent for the tool). Every hit is a
+suppression written against a linter that never ran, so none of them were ever
+validated — and each one is a claim that a rule was considered and waived.
+
+**Why:** adding ESLint to `client/` surfaced exactly two, and they were not
+equivalent. `ConfigTab.tsx` carried
+`// eslint-disable-line react-hooks/exhaustive-deps` on the Effect that copied
+nine props into state — the CRITICAL anti-pattern of the whole audit. The comment
+made it read as deliberate and reviewed, which is why it survived; a reader sees a
+suppression and assumes someone already weighed it. The second, in
+`ReviewRunAccordion.tsx`, was simply unused — the rule reports nothing there —
+and was only detectable *because* the linter now runs and flags unused
+directives.
+
+So the order matters: audit the suppressions, then turn the rules on. Doing it the
+other way round means the pre-existing suppressions silently become part of the
+baseline you declare green.
+
+**Where:** config at `client/eslint.config.mjs`; the two directives were at
+`client/src/app/agents/[id]/_components/AgentEditor/_components/ConfigTab/ConfigTab.tsx`
+and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65`
+(both removed).
 
 ## What Doesn't Work
+
+### 2026-08-06 — `pr-self-review` cannot gate a PR built in a secondary git worktree — the script `cd`s to the primary root
+
+**Tried:** building a deliberately-broken demo PR in a detached worktree
+(`git worktree add --detach … origin/main`, branch `demo/api-contract-break`) so
+the primary tree's uncommitted work stayed untouched, then committing, pushing,
+and running `gh pr create` for that branch.
+
+**Failed:** the hook denied with
+`the verdict is for commit ae5a53f4, HEAD is now 2c1fd2ea`. Both SHAs describe the
+PRIMARY tree (`lab/lab02`, carrying unrelated uncommitted work) — not the branch
+the PR is for, whose six files the gate never looked at. The denial reads like a
+stale review of your PR; it is actually a fresh review of a different tree.
+
+The cause is structural, not a cwd accident. `scripts/pr-self-review.sh:24` runs
+`cd "$(dirname "$0")/.."` before anything else, and the hook invokes it as
+`"${CLAUDE_PROJECT_DIR:-.}/scripts/pr-self-review.sh" gate`. So `head_sha` and
+`tree_hash` always describe the primary repo root. Issuing `gh pr create` from
+inside the worktree does not help, and no flag repoints it.
+
+**Instead:** three in-policy exits; which one is right depends on why the worktree
+exists.
+
+- Build the branch in the primary tree after all, when the PR is real work that
+  the gate *should* read.
+- Open it through the GitHub web UI. `SKILL.md` §"What this skill cannot do"
+  already states the web path is uncovered, so this is a documented limitation
+  rather than an evasion — say so out loud when you use it.
+- Review the primary tree and land a fresh verdict — honest only when those open
+  changes are genuinely part of this PR.
+
+**Not** an exit: deleting the verdict or editing `head_sha` / `tree_hash`.
+`SKILL.md` §"Blocking, and the way out" calls that forging the gate, and
+`overridden_by_user` requires the user to have seen real findings first — and
+there are none, because the gate never read the diff it blocked.
+
+Worth writing down because this repo teaches the opposite reflex elsewhere:
+`server/INSIGHTS.md` (2026-08-05, `reviews.it.test.ts` / `prompt_assembly`)
+recommends a detached worktree for clean-tree reproduction. That advice is right
+for tests and collides with this gate the moment the worktree's branch is meant
+to become a pull request.
+
+**Where:** unconditional chdir at `scripts/pr-self-review.sh:24`; verdict written
+at `:72-78`, re-checked by the hook at `:334-344`; `tree_hash()` at `:57`; hook
+wiring in `.claude/settings.json` (`PreToolUse` → `Bash`); the documented web-UI
+gap at `.claude/skills/pr-self-review/SKILL.md` §"What this skill cannot do"; the
+colliding worktree advice in `server/INSIGHTS.md` (2026-08-05).
+
+### 2026-08-04 — A freshness gate cannot hash a tree that contains its own verdict file
+
+**Tried:** making `pr-self-review`'s verdict unforgeable by recording a
+`tree_hash` of every open change — `git status --porcelain`, `git diff HEAD`, and
+a `git hash-object` per untracked file — so the `PreToolUse` hook could recompute
+it and reject a `pass` written before the last three edits.
+
+**Failed:** every `pass` read as stale the instant it was written. The verdict
+lands at `.devdigest/pr-self-review.json`, which is *inside* the tree being
+hashed, so writing it changed the hash it had just recorded. The symptom is
+maximally confusing: the hook denies with "the working tree changed since the
+review" when nothing changed but the review itself. Adding the path to
+`.gitignore` is necessary but not sufficient on its own — the gate must not
+depend on a file anyone can edit for its correctness.
+
+**Instead:** exclude the directory by **pathspec** in every git command the hash
+reads, `':(exclude).devdigest'`, and keep the `.gitignore` entry as well. The rule
+generalizes: any check that hashes the working tree to prove its own freshness has
+to exclude its own output, and belt-and-braces is right here because a `.gitignore`
+edit would otherwise silently break the gate rather than trip it.
+
+Worth knowing for the same reason: `git status --porcelain` reports untracked
+files by **name only**, so untracked content must be hashed per file or editing a
+brand-new file after a passing review does not invalidate it.
+
+**Where:** `scripts/pr-self-review.sh:29` (`EXCL`) and `:57` (`tree_hash`);
+`.gitignore` (`.devdigest/pr-self-review.json`).
+
+### 2026-08-04 — A command gate that matches substrings denies `echo "gh pr create"` — and denied its own tests
+
+**Tried:** enforcing `pr-self-review` with a `PreToolUse` hook on `Bash` that
+decided from the command string, first pass
+`grep -Eq '\bgh\b.*\bpr\b[[:space:]]+(create|merge)\b'`.
+
+**Failed:** it fires on any command that *mentions* the phrase. The failure
+arrived from an unexpected direction — the hook went live the moment
+`.claude/settings.json` was written, and then blocked the very Bash calls testing
+it, because those calls carried `gh pr create` inside an `echo`. The tool result
+came back as a bare denial reason with none of the expected output, which reads
+like the script crashed rather than like the gate working correctly.
+
+**Instead:** split the command on `&&`, `||`, `|`, `;` and require a part to
+*start* with `gh`; a mention inside an argument belongs to some other program.
+`gh pr list` and `gh pr view` stay ungated. Two practical consequences:
+
+- Test a live command-matching hook from a script **outside** the repo, passing
+  payloads through a file, so the strings under test never appear in a command
+  the hook itself inspects. `.claude/skills/*/SKILL.md` and settings are picked up
+  without a restart, so "not wired up yet" is not a safe assumption.
+- Fail **closed** on internal error but **silent** on non-match: the gate emits
+  nothing and exits 0 for the 99% of Bash calls it does not care about, after a
+  single cheap `grep` pre-filter on the raw payload (~12ms; ~95ms when it does
+  evaluate).
+
+**Where:** `scripts/pr-self-review.sh:260` (`pr_verb`), hook wiring in
+`.claude/settings.json`; 13 behaviour cases in
+`.claude/skills/pr-self-review/SKILL.md` §"Blocking, and the way out".
+
+### 2026-08-03 — A `grep -l | perl -pi` sweep fails silently here: `grep` is ugrep, and route paths contain `[brackets]`
+
+**Tried:** rewriting deep relative imports to `@/` across ~16 files with the
+usual one-liner, twice.
+
+1. `FILES=$(grep -rlE ... src) && perl -pi -e 's{...}{...}g' $FILES`
+2. `grep -rlZ ... | while IFS= read -r -d '' f; do perl -pi ... "$f"; done`
+
+**Failed:** both, for two unrelated reasons, and **neither reported failure in a
+way you would notice**.
+
+1. The unquoted `$FILES` expansion collapsed into one argument, and perl died
+   with `File name too long` — *after* printing a plausible-looking list of
+   filenames, so the output reads like partial success. Nothing was modified.
+   Every path in `src/app/repos/[repoId]/pulls/[number]/…` also carries glob
+   metacharacters, which is what makes quoting non-optional here in the first
+   place.
+2. `grep` on this machine is **ugrep**, where `-Z` means *fuzzy matching*, not
+   `--null`. So the pipeline produced no NUL-separated records, the `while` loop
+   body never ran, and the command exited **0 with no output** — indistinguishable
+   from "there was nothing to change".
+
+**Instead:** write the list to a file and loop over lines, quoting the variable:
+
+```sh
+grep -rlE 'PATTERN' src --include='*.ts' --include='*.tsx' > /tmp/f.txt
+while IFS= read -r f; do perl -pi -e 's{...}{...}g' "$f" && echo "ok $f"; done < /tmp/f.txt
+```
+
+The `echo "ok $f"` is the point: a per-file receipt is the only cheap way to tell
+"nothing matched" from "the pipeline broke". Then re-run the original `grep` to
+confirm zero hits — do not trust the sweep's own exit code. (Filenames in this
+repo contain no newlines, so line-based reading is safe; `ugrep` also accepts
+`--null` spelled out if you want NUL separation.)
+
+**Where:** the sweep covered `client/src/app/**` and
+`client/src/components/app-shell/hooks/*`; the bracket-path routes are
+`client/src/app/repos/[repoId]/pulls/[number]/` and
+`client/src/app/settings/[section]/`.
 
 ### 2026-08-02 — A second web instance can't verify a UI change against the running API
 
@@ -99,6 +388,98 @@ historical drift is its own task.
 
 ## Codebase Patterns
 
+### 2026-08-05 — "Created disabled until vetted" is about WHO wrote the body, not about `source !== 'manual'`
+
+**Rule:** a skill built from this repo's own extracted conventions is created
+`enabled: true`, even though its `source` is `'extracted'` and the vetting badge
+formula is `needsVetting(skill) = source !== "manual" && !enabled`. Do not "fix" it
+to `enabled: false` for consistency with the import flow.
+
+**Why:** the disabled-on-import default exists because importing grants a *stranger*
+write access to your agent's prompt (entry below, 2026-08-05). The control it buys is
+a human reading the body before it takes effect. The conventions extractor already
+spent that control, and more of it: the user saw each rule next to the verbatim
+snippet that proves it, accepted or rejected it one at a time, could edit the wording,
+and then reviewed the merged body in an editable modal before saving. Creating the
+result disabled would demand a *second* vetting of text the user just wrote the
+verdicts for — and the failure is invisible: the skill sits in `/skills` looking
+created while contributing nothing to any review.
+
+The distinction to carry forward: the gate is provenance-of-authorship, not the
+`source` enum. `'extracted'` from your own clone is self-authored; the same enum value
+for a convention mined out of someone else's repository would not be, and this feature
+deliberately does not offer that.
+
+Two consequences worth knowing. `needsVetting` will therefore never fire for these
+skills, which is correct rather than a hole. And the residual risk moves to the
+evidence snippet: it is model-selected text from repo files that lands **unwrapped**
+in every later prompt, so the controls are procedural — proven verbatim against a
+file actually read, fenced as a code block, and only the accepted subset promoted. The
+data→instruction transition happens exactly at the accept click, which is where a
+human is.
+
+**Where:** default set in `server/src/modules/conventions/helpers.ts`
+(`buildSkillDraft`, with the reasoning as a comment); asserted by
+`server/test/conventions-helpers.test.ts` ("is enabled: the accept/reject loop the
+user just completed IS the vetting") and
+`server/test/conventions.it.test.ts`; `needsVetting` lives at
+`client/src/app/skills/_components/SkillCard/helpers.ts`; reasoning recorded in
+`specs/l02-conventions-extractor.md` §Screens and §Trust.
+
+### 2026-08-05 — A skill body must NOT be `wrapUntrusted`-wrapped, however much the UI copy wants it to be
+
+**Rule:** linked skill bodies go into the prompt as plain `## Skills / rules`.
+Do not "harden" them by passing them through `wrapUntrusted`, and do not write UI
+copy claiming they are delimiter-wrapped. The control on an imported skill is
+procedural — preview, explicit confirm, created `enabled: false`, badged until
+vetted — never a delimiter.
+
+**Why:** `INJECTION_GUARD` instructs the model that everything inside
+`<untrusted>…</untrusted>` is data and that any instruction in it must be ignored.
+A skill *is* an instruction. Wrapping one therefore tells the model to ignore the
+rule the user just imported and switched on — the feature silently does nothing,
+and it fails in the least visible way possible: the block is right there in the
+trace, with a token cost, having no effect. `prompt.ts:42` already says as much
+("trusted-ish; community skills should be sanitized upstream").
+
+This is worth writing down because the pull toward wrapping is strong and comes
+from the product itself: `client/messages/en/skills.json` shipped (before any
+skills feature existed) with `file.bodyHint` = "Pasted content is wrapped as
+untrusted data — never executed as instructions" and `url.hint` = "stored as
+untrusted". Both were false, and both read as a requirement rather than as a
+mistake. They are now corrected to state what is true — the body becomes
+instructions, which is why import leaves it disabled.
+
+The honest framing for the same reason: importing a skill grants a stranger write
+access to your agent's prompt. That is the feature, not a bug to be delimiter-ed
+away.
+
+**Where:** guard at `reviewer-core/src/prompt.ts:16` (do not touch — repo rule);
+skills rendered unwrapped at `prompt.ts:109`; the disabled-on-import default is
+`client/src/app/skills/_components/ImportDrawer/ImportDrawer.tsx` (`enabled: false`);
+corrected strings in `client/messages/en/skills.json`; reasoning recorded in
+`specs/l02-skills.md` §Trust.
+
+### 2026-08-02 — `CLAUDE.md` is a symlink; the real instruction file is `AGENTS.md`
+
+**Rule:** edit `AGENTS.md`. Each of the five `CLAUDE.md` (root, `server/`,
+`client/`, `reviewer-core/`, `e2e/`) is a symlink to the `AGENTS.md` beside it,
+and it has to stay one. Never `Write` a fresh `CLAUDE.md` over a link, and never
+"resolve the duplication" by deleting one of the two names.
+
+**Why:** Claude Code loads only `CLAUDE.md` — `AGENTS.md` is not read natively,
+by design or by setting. So the link is load-bearing, not cosmetic: turn it into
+a real file and you get two instruction files that drift silently, with Claude
+reading the stale one. Both names must exist, and exactly one of them can hold
+content.
+
+**Where:** links at `CLAUDE.md`, `server/CLAUDE.md`, `client/CLAUDE.md`,
+`reviewer-core/CLAUDE.md`, `e2e/CLAUDE.md`; rule stated in `AGENTS.md:40`
+(Repo rules). Renaming across the repo: a blanket
+`sed -i 's/CLAUDE.md/AGENTS.md/g'` must exclude `.claude/skills/zod/` (that
+vendored skill ships its own unrelated `AGENTS.md`) and `server/clones/` (a
+gitignored stale clone of this repo).
+
 ### 2026-08-02 — An `agent_runs` row and its `reviews` row can each outlive the other
 
 **Rule:** when rendering runs and reviews together — they are both on the PR
@@ -125,6 +506,11 @@ instead of rendering an empty severity breakdown.
 are `client/src/app/repos/[repoId]/pulls/[number]/page.tsx:170` (run) and
 `.../_components/ReviewRunAccordion/ReviewRunAccordion.tsx` (review); the
 fallback is `.../_components/RunHistory/RunHistory.tsx`.
+
+**Superseded by:** 2026-08-03 — the rule is unchanged, but the run-delete button
+moved out of the page: it is now the `onDelete` prop passed from
+`client/src/app/repos/[repoId]/pulls/[number]/_components/PrDetailView/PrDetailView.tsx`
+(the page itself is a thin wrapper). The review-delete button did not move.
 
 ### 2026-08-02 — A rule added to an agent prompt must state its own severity
 
@@ -214,6 +600,93 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 
 ## Tool & Library Notes
 
+### 2026-08-04 — Two shell traps on this machine that both exit 0 with no output
+
+**Quirk:** a string-splitting helper matched nothing, and neither trap announced
+itself. Both are macOS defaults, and both were in the same six lines.
+
+1. **BSD `sed` writes a literal `n` for `\n` in a replacement.**
+   `sed -E 's/(\&\&|\|\||;|\|)/\n/g'` does not split into lines here — it
+   substitutes the character `n`. GNU sed does what you meant, which is why the
+   idiom looks correct in every snippet you will find.
+2. **`while IFS= read -r x; do … done` never runs the body for a final line with
+   no trailing newline.** `printf '%s' "$s"` produces exactly that, so a
+   single-part input — the common case — is read into the variable and then
+   discarded when `read` returns 1.
+
+Together they produced one unsplit line that was then dropped: the function
+returned "no match" for every input, with exit 0 and no diagnostic anywhere.
+
+**Workaround:** split with bash parameter expansion instead of `sed`
+(`s="${s//&&/$nl}"`, `||` **before** `|`), feed the loop with `<<< "$s"`, and
+write the loop as `while IFS= read -r part || [ -n "$part" ]`. Add this to the
+ugrep entry below as the same class of bug: on this machine the standard text
+tools are not the GNU ones, and the failure mode is silence rather than an error.
+
+**Where:** `scripts/pr-self-review.sh:260-275` (`pr_verb`).
+
+### 2026-08-04 — `skills-lock.json` covers only 8 of the 13 skills — four vendored-looking ones are ours to edit
+
+**Quirk:** `.claude/skills/` holds 13 skills and the lock holds 8:
+`architecture-patterns`, `drizzle-orm-patterns`, `fastify-best-practices`,
+`github-workflow-automation`, `next-best-practices`, `postgresql-table-design`,
+`typescript-expert`, `zod`. So `react-best-practices`, `react-testing-library`,
+`security` and `mermaid-diagram` are **not** locked, despite reading exactly like
+vendored upstream files — and two of them (`architecture-patterns`,
+`github-workflow-automation`) are locked but not present on disk at all.
+
+**Workaround:** `jq -r '.skills | keys[]' skills-lock.json` is the only reliable
+answer to "will my edit be overwritten on sync"; do not infer it from a skill's
+tone or from the presence of a `references/` directory. Note this does not soften
+the 2026-08-02 entry below — `react-best-practices` is still upstream opinion whose
+CRITICAL tags are the vendor's confidence, and editing it in place is still the
+wrong fix. It means an edit there would *survive*, not that it is a good idea.
+
+**Where:** `skills-lock.json`; the classifier that acts on it is
+`scripts/pr-self-review.sh` (`locked_skills`, `classify` → `skip:vendored-skill`).
+
+### 2026-08-02 — A vendored skill is upstream opinion, not house policy — two of its CRITICAL rules are retracted upstream
+
+**Quirk:** `.claude/skills/react-best-practices/SKILL.md` tags every rule with a
+severity, which reads like a house standard. Two of its CRITICAL ones are
+positions their own authors have since abandoned:
+
+| Line | Rule as written | Current primary source |
+|---|---|---|
+| `:24` | "Container components fetch data; presentational components receive props" | Dan Abramov retracted the split in 2019 ("I don't suggest splitting your components like this anymore"); patterns.dev: hooks "achieve the same result without" it |
+| `:26` | "Max 200 lines per component — split if larger" | Kent C. Dodds: "I don't mind if the JSX I return in my component function gets really long" — split on a named problem (re-renders, reuse, testing pain), "NOT BEFORE" |
+
+**Workaround:** treat a vendored skill as one opinion to check against
+primaries, never as the answer — and remember `skills-lock.json` means any
+correction you make in-place is overwritten on the next sync. To supersede one,
+write a separate unlocked skill that names the rule it replaces and why. The
+severity tag is the trap here: CRITICAL is the vendor's confidence, not
+evidence, and nothing in the file dates its claims.
+
+**Where:** `.claude/skills/react-best-practices/SKILL.md:24` and `:26`; the
+locked list is `skills-lock.json`. Sourcing and the full conflict set are in
+`.claude/skills/frontend-ui-architecture/RESEARCH.md` (§2); the superseding
+rules are `.claude/skills/frontend-ui-architecture/SKILL.md` §4.
+
+**Quirk:** git stores a symlink as mode `120000` with no `.gitattributes` and no
+config — a fresh checkout materializes a real link. But a Windows checkout
+WITHOUT `core.symlinks=true` (or Developer Mode) writes a regular file whose
+entire content is the target path. For `CLAUDE.md` that means Claude Code loads a
+one-line memory file reading `AGENTS.md` — no error, no warning, the project
+instructions are simply gone and the session looks like the repo has no
+conventions.
+
+**Workaround:** on Windows clone with `git clone -c core.symlinks=true`. To
+verify a checkout anywhere: `git ls-files -s '*CLAUDE.md'` must print `120000`
+on every row (`100644` means the link was flattened or a tool dereferenced it),
+and `/context` must show a non-trivial token count for the memory file — ~1.8k
+for root, not ~10. To test the staged links before committing, use
+`git checkout-index -a -f --prefix=/tmp/check/`; a plain `git clone .` only
+reflects HEAD and will show the pre-rename layout.
+
+**Where:** `CLAUDE.md` and `<pkg>/CLAUDE.md`; no `.gitattributes` exists in this
+repo and none is needed.
+
 ### 2026-08-02 — `findings.confidence` is not calibrated — never gate on it
 
 **Quirk:** the model emits `confidence: 1.0` for a hallucination as readily as
@@ -250,4 +723,25 @@ _Empty so far._
 
 ## Open Questions
 
-_Empty so far._
+### 2026-08-02 — The `pnpm arch` boundary gate is not wired into CI, so nothing enforces it on a PR
+
+**Question:** should the architecture gate run in `server-unit.yml`, and as what?
+`cd server && pnpm arch` (`dependency-cruiser`, 10 ring rules across `server/src`
+and `reviewer-core/src`) currently runs **only when someone runs it by hand**. A
+PR that puts Drizzle back into a new `routes.ts`, or `node:fs` into
+`reviewer-core`, is green in CI today. The skill it enforces reads as house law,
+which makes the gap worse than having no gate: the rules look enforced.
+
+**Blocked:** on a decision, not on work — deliberately left out of the change that
+introduced the gate. Two things to get right when it lands: the step must be an
+inlined `pnpm exec depcruise src ../reviewer-core/src --config .dependency-cruiser.cjs`
+rather than `pnpm arch`, because `server-unit.yml` already avoids depending on
+`package.json` scripts (its own comment explains why), and it needs
+`reviewer-core`'s deps installed first — the same `npm ci` step the typecheck job
+already runs, since unresolvable imports there would trip
+`core-resolves-everything`. Path filters already cover `server/**` and
+`reviewer-core/**`.
+
+**Where:** `.github/workflows/server-unit.yml` (typecheck job, after the
+"Install reviewer-core deps" step); gate at `server/.dependency-cruiser.cjs`;
+rules documented in `.claude/skills/backend-onion-architecture/SKILL.md` §10.

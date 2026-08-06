@@ -1,4 +1,4 @@
-# Server integration suite — the 12 DB-backed test files (`*.it.test.ts`).
+# Server integration suite — the DB-backed test files (`*.it.test.ts`).
 #
 # Each spins up a real Postgres (pgvector) via testcontainers, builds the
 # Fastify app, migrates + seeds, and exercises the routes end-to-end against
@@ -15,10 +15,18 @@ on:
     branches: [main]
     paths:
       - 'server/**'
+      # The DB-backed tests execute reviewer-core at runtime (run-executor calls
+      # reviewPullRequest), so a change confined to reviewer-core/ must re-run
+      # this suite. server-unit.yml already filters on it for the same reason.
+      - 'reviewer-core/**'
       - '.github/workflows/server-integration.yml'
   pull_request:
     paths:
       - 'server/**'
+      # The DB-backed tests execute reviewer-core at runtime (run-executor calls
+      # reviewPullRequest), so a change confined to reviewer-core/ must re-run
+      # this suite. server-unit.yml already filters on it for the same reason.
+      - 'reviewer-core/**'
       - '.github/workflows/server-integration.yml'
 
 permissions:

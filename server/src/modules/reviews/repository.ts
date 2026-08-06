@@ -59,6 +59,22 @@ export class ReviewRepository {
     return reviewRepo.insertFindings(this.db, reviewId, findings);
   }
 
+  /**
+   * Review + findings in ONE transaction — use this on the review-persistence
+   * path instead of `insertReview` then `insertFindings` (see the underlying
+   * helper for why). Param type is DERIVED, not restated: re-declaring it here
+   * is the mistake this facade already makes for `completeAgentRun`, and it
+   * makes adding a field fail at the call sites instead of at the type.
+   */
+  insertReviewWithFindings(
+    values: Parameters<typeof reviewRepo.insertReviewWithFindings>[1],
+    findings: Finding[],
+    /** Resolved skill attribution, parallel to `findings` by index. */
+    skillIds?: (string | null)[],
+  ): ReturnType<typeof reviewRepo.insertReviewWithFindings> {
+    return reviewRepo.insertReviewWithFindings(this.db, values, findings, skillIds);
+  }
+
   /** Reviews for a PR (newest first), each with its findings. */
   reviewsForPull(prId: string): Promise<{ review: ReviewRow; findings: FindingRow[] }[]> {
     return reviewRepo.reviewsForPull(this.db, prId);
@@ -173,6 +189,14 @@ export class ReviewRepository {
   /** Record the head SHA a review ran against (PR-list freshness derivation). */
   markReviewed(prId: string, sha: string): Promise<void> {
     return pullRepo.markReviewed(this.db, prId, sha);
+  }
+
+  /** Record which skills a run injected (version + prompt order). */
+  saveRunSkills(
+    runId: string,
+    skills: { id: string; version: number; order: number }[],
+  ): Promise<void> {
+    return runRepo.saveRunSkills(this.db, runId, skills);
   }
 
   /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */

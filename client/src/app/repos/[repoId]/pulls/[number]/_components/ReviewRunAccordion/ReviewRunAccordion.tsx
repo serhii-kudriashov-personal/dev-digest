@@ -13,7 +13,7 @@ import { FindingsPanel } from "../FindingsPanel";
 import { countBySeverity } from "../FindingsPanel/helpers";
 import { VerdictBanner } from "../VerdictBanner";
 import { FindingsHoverCard, SeverityBadges } from "@/components/findings-hover-card";
-import { useDeleteReview } from "../../../../../../../lib/hooks/reviews";
+import { useDeleteReview } from "@/lib/hooks/reviews";
 import { formatCost } from "@/lib/format";
 
 const VERDICT_COLOR: Record<string, string> = {
@@ -62,7 +62,6 @@ export function ReviewRunAccordion({
       setOpen(true);
       rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetRunId, targetNonce, review.run_id]);
   const t = useTranslations("prReview");
   const del = useDeleteReview(prId);

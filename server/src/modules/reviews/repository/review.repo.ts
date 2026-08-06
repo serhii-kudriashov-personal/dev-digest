@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import type { Db } from '../../../db/client.js';
+import type { Db, DbOrTx } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { Finding } from '@devdigest/shared';
 import type { FindingRow, PullRow } from '../../../db/rows.js';
@@ -9,7 +9,7 @@ export type ReviewRow = typeof t.reviews.$inferSelect;
 // ---- reviews + findings ---------------------------------------------------
 
 export async function insertReview(
-  db: Db,
+  db: DbOrTx,
   values: {
     workspaceId: string;
     prId: string;
@@ -26,16 +26,24 @@ export async function insertReview(
   return row!;
 }
 
+/**
+ * @param skillIds resolved skill attribution, parallel to `findings` by index.
+ *   Supplied by `resolveSkillAttribution`, which has already discarded any slug
+ *   the model named that was not injected into the run. Omit it (or pass a null
+ *   entry) and the finding is stored unattributed — NEVER guess here: this layer
+ *   has no way to validate a slug, which is the whole reason the caller does.
+ */
 export async function insertFindings(
-  db: Db,
+  db: DbOrTx,
   reviewId: string,
   findings: Finding[],
+  skillIds?: (string | null)[],
 ): Promise<FindingRow[]> {
   if (findings.length === 0) return [];
   const rows = await db
     .insert(t.findings)
     .values(
-      findings.map((f) => ({
+      findings.map((f, i) => ({
         reviewId,
         file: f.file,
         startLine: f.start_line,
@@ -48,10 +56,35 @@ export async function insertFindings(
         confidence: f.confidence,
         kind: f.kind ?? 'finding',
         trifectaComponents: f.trifecta_components ?? null,
+        skillId: skillIds?.[i] ?? null,
       })),
     )
     .returning();
   return rows;
+}
+
+/**
+ * Insert a review AND its findings as ONE unit.
+ *
+ * Prefer this over calling `insertReview` + `insertFindings` in sequence: a
+ * failure between the two commits a review carrying a verdict and a score with
+ * zero findings, which is indistinguishable from a genuinely clean review — the
+ * UI renders both as "no findings", so the corruption is invisible.
+ *
+ * The transaction stays here rather than in the caller: `Db` belongs to this
+ * ring, and a transaction handle must never cross the repository boundary.
+ */
+export async function insertReviewWithFindings(
+  db: Db,
+  values: Parameters<typeof insertReview>[1],
+  findings: Finding[],
+  skillIds?: (string | null)[],
+): Promise<{ review: ReviewRow; findingRows: FindingRow[] }> {
+  return db.transaction(async (tx) => {
+    const review = await insertReview(tx, values);
+    const findingRows = await insertFindings(tx, review.id, findings, skillIds);
+    return { review, findingRows };
+  });
 }
 
 /** Reviews for a PR (newest first), each with its findings. */

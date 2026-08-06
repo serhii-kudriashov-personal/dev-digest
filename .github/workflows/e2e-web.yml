@@ -113,11 +113,19 @@ jobs:
           npm i -g agent-browser
           agent-browser install --with-deps
 
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm ci
+
+      # e2e/ ships a typecheck script that nothing ever invoked, so a spec could
+      # break its own types and only fail at runtime, mid-flow.
+      - name: Typecheck e2e specs
+        working-directory: e2e
+        run: npm run typecheck
+
       - name: Run e2e flows
         working-directory: e2e
-        run: |
-          npm ci
-          npm test
+        run: npm test
 
       - name: Upload failure artifacts
         if: failure()

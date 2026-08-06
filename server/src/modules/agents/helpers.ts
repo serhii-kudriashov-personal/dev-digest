@@ -1,5 +1,5 @@
 import type { Agent, AgentVersion, CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
-import { AgentVersionConfig } from '@devdigest/shared';
+import { StoredAgentVersionConfig } from '@devdigest/shared';
 import type { AgentRow, AgentVersionRow } from './repository.js';
 
 /**
@@ -27,18 +27,48 @@ export function toAgentDto(row: AgentRow): Agent {
 }
 
 /**
- * Map a persisted `agent_versions` row to the public `AgentVersion` DTO. The
- * stored `config_json` is untyped jsonb (a snapshot from an older config shape
- * could drift), so it is parsed through `AgentVersionConfig` — a malformed
- * snapshot throws here rather than leaking an unvalidated blob to the client.
+ * Map a persisted `agent_versions` row to the public `AgentVersion` DTO.
+ *
+ * `config_json` is untyped jsonb, so it is still validated rather than passed
+ * through — but with the LENIENT `StoredAgentVersionConfig`, because snapshots
+ * written before migrations 0002/0003/0007 are missing `strategy`, `ci_fail_on`
+ * and `repo_intel` entirely. Parsing those with the strict schema threw, and
+ * because the caller maps over a list, one old snapshot took the whole version
+ * history down with it.
+ *
+ * The gaps are filled with the columns' OWN defaults, so a replayed old version
+ * behaves the way that agent actually behaved at the time.
  */
 export function toAgentVersionDto(row: AgentVersionRow): AgentVersion {
+  const stored = StoredAgentVersionConfig.parse(row.configJson);
   return {
     agent_id: row.agentId,
     version: row.version,
-    config: AgentVersionConfig.parse(row.configJson),
+    config: {
+      ...stored,
+      strategy: stored.strategy ?? 'single-pass',
+      ci_fail_on: stored.ci_fail_on ?? 'critical',
+      repo_intel: stored.repo_intel ?? true,
+      skills: stored.skills ?? [],
+    },
     created_at: row.createdAt.toISOString(),
   };
+}
+
+/**
+ * `toAgentVersionDto`, but `null` instead of a throw on an unparseable snapshot.
+ *
+ * For a LIST of versions, one corrupt row should cost that row, not the whole
+ * history — a 500 on `GET /agents/:id/versions` hides every good snapshot behind
+ * one bad one. Single-version reads keep using the throwing form: there is no
+ * partial answer to give, so failing loudly is correct there.
+ */
+export function toAgentVersionDtoSafe(row: AgentVersionRow): AgentVersion | null {
+  try {
+    return toAgentVersionDto(row);
+  } catch {
+    return null;
+  }
 }
 
 /** Fields whose change bumps the agent's config version (anything but `enabled`). */

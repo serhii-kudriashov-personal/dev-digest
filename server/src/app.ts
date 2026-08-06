@@ -158,9 +158,19 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     }
     app.log.error(err);
     const e = err as { statusCode?: number; message?: string };
-    reply.status(e.statusCode ?? 500).send({
-      error: { code: 'internal_error', message: e.message ?? 'Internal error' },
-    });
+    const status = e.statusCode ?? 500;
+    // A 4xx from here is Fastify describing the REQUEST (unparseable JSON, body
+    // too large) — that message is safe and genuinely useful to the caller. A
+    // 5xx message comes from INSIDE: a driver error carrying a connection
+    // string, a filesystem path, a failed query. Those are for the log only.
+    // Kept verbose outside production so local debugging is unaffected.
+    const message =
+      status < 500
+        ? (e.message ?? 'Request failed')
+        : config.nodeEnv === 'production'
+          ? 'Internal error'
+          : (e.message ?? 'Internal error');
+    reply.status(status).send({ error: { code: 'internal_error', message } });
   });
 
   // Register feature modules from the static registry (src/modules/index.ts).

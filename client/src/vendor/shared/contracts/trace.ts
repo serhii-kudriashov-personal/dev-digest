@@ -48,6 +48,18 @@ export const PromptAssembly = z.object({
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
   user: z.string(),
+  /**
+   * Per-section token attribution, keyed by the section names above (plus
+   * `user`) — what each slot actually cost, so "the skills block added N
+   * tokens" is a number rather than a guess.
+   *
+   * NULLISH, not nullable: RunTrace is persisted as a SINGLE jsonb document,
+   * and every trace written before L02 has no `token_counts` key at all.
+   * `.nullable()` accepts an explicit null but REJECTS a missing key, which
+   * would make the entire run history unparseable — the same trap
+   * `RunStats.cost_usd` documents below.
+   */
+  token_counts: z.record(z.string(), z.number().int()).nullish(),
 });
 export type PromptAssembly = z.infer<typeof PromptAssembly>;
 

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}/scripts/pr-self-review.sh\" gate",
+            "timeout": 30,
+            "statusMessage": "pr-self-review gate"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/pr-self-review.sh state)",
+      "Bash(./scripts/pr-self-review.sh files)",
+      "Bash(./scripts/pr-self-review.sh gates)"
+    ]
+  }
+}

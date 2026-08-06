@@ -6,7 +6,7 @@
 #    macOS is covered by daily local dev, Windows is not a ship target, and
 #    `@ast-grep/napi` is exact-pinned so its native binary only changes on a
 #    deliberate version bump.
-#  - unit: the ~19 DB-free test files (everything that is NOT `*.it.test.ts`).
+#  - unit: the DB-free test files (everything that is NOT `*.it.test.ts`).
 #    LLM/git/embeddings are mocked via src/adapters/mocks.ts — no Docker.
 #
 # DB-backed tests run in server-integration.yml. reviewer-core/** is in the
@@ -64,6 +64,11 @@ jobs:
         run: npm ci
 
       - run: pnpm typecheck
+
+      # Onion-architecture gate — ring boundaries across server/src and
+      # reviewer-core/src (see .claude/skills/backend-onion-architecture/SKILL.md).
+      # Runs here rather than in the `unit` job because it needs no Docker.
+      - run: pnpm arch
 
   unit:
     name: tests

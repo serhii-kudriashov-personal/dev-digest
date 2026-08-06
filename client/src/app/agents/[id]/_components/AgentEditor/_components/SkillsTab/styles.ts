@@ -1,0 +1,63 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for SkillsTab. */
+export const s = {
+  wrap: { maxWidth: 720, display: "flex", flexDirection: "column", gap: 10 } satisfies CSSProperties,
+  header: { display: "flex", alignItems: "center", gap: 12 } satisfies CSSProperties,
+  h2: { fontSize: 15, fontWeight: 650 } satisfies CSSProperties,
+  search: {
+    marginLeft: "auto",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "6px 10px",
+    borderRadius: 7,
+    border: "1px solid var(--border)",
+    background: "var(--bg-surface)",
+    width: 180,
+  } satisfies CSSProperties,
+  searchInput: {
+    flex: 1,
+    fontSize: 12,
+    background: "transparent",
+    border: "none",
+    outline: "none",
+    color: "var(--text-primary)",
+  } satisfies CSSProperties,
+  hint: { fontSize: 12, color: "var(--text-muted)", marginBottom: 4 } satisfies CSSProperties,
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "var(--text-muted)",
+    marginTop: 8,
+  } satisfies CSSProperties,
+  row: (opts: { attached: boolean; dragging: boolean; dimmed: boolean }): CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "8px 10px",
+    borderRadius: 7,
+    marginBottom: 4,
+    border: `1px solid ${opts.dragging ? "var(--accent)" : "var(--border)"}`,
+    background: opts.attached ? "var(--bg-surface)" : "transparent",
+    opacity: opts.dimmed ? 0.55 : 1,
+    cursor: opts.attached ? "grab" : "default",
+  }),
+  handle: {
+    color: "var(--text-muted)",
+    display: "inline-flex",
+    flexShrink: 0,
+    cursor: "grab",
+  } satisfies CSSProperties,
+  handleSpacer: { width: 14, flexShrink: 0 } satisfies CSSProperties,
+  name: { flex: 1, fontSize: 13, fontWeight: 500 } satisfies CSSProperties,
+  order: {
+    fontSize: 11,
+    color: "var(--text-muted)",
+    minWidth: 18,
+    textAlign: "right",
+    flexShrink: 0,
+  } satisfies CSSProperties,
+} as const;

@@ -46,9 +46,10 @@ export interface MockLLMOptions {
   /** Fixture returned by completeStructured (validated against the schema). */
   structured?: unknown;
   /**
-   * Per-schemaName fixtures for multi-call flows (e.g. the conventions 2-step
-   * dialogue: 'ConventionFileSelection' then 'ConventionExtraction'). Looked up
-   * by req.schemaName; falls back to `structured` when no entry matches.
+   * Per-schemaName fixtures, looked up by `req.schemaName`; falls back to
+   * `structured` when no entry matches. Useful for keying a fixture to one call in
+   * a flow that makes several, and for naming the schema under test explicitly —
+   * e.g. 'ConventionExtraction' in the conventions tests.
    */
   structuredBySchema?: Record<string, unknown>;
   completionText?: string;

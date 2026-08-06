@@ -8,6 +8,7 @@ import { useTranslations } from "next-intl";
 import { Tabs } from "@devdigest/ui";
 import type { Agent } from "@devdigest/shared";
 import { ConfigTab } from "./_components/ConfigTab";
+import { SkillsTab } from "./_components/SkillsTab";
 import { TABS } from "./constants";
 import { s } from "./styles";
 
@@ -20,7 +21,17 @@ export function AgentEditor({ agent, tab, onTab }: { agent: Agent; tab: string; 
         <Tabs tabs={tabs} value={tab} onChange={onTab} pad="0 24px" />
       </div>
       <div style={s.body}>
-        <ConfigTab agent={agent} />
+        {/* `key` is load-bearing: ConfigTab is an uncontrolled form seeded from
+            `agent`, so switching agents must give it a FRESH instance rather
+            than leave it re-syncing nine fields in an Effect. */}
+        {tab === "skills" ? (
+          // SkillsTab needs no `key`: it holds no copy of server state, rendering
+          // straight from the query cache (its mutation updates that cache
+          // optimistically), so switching agents cannot leave it stale.
+          <SkillsTab agentId={agent.id} />
+        ) : (
+          <ConfigTab key={agent.id} agent={agent} />
+        )}
       </div>
     </div>
   );

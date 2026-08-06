@@ -7,7 +7,6 @@ import { RunHistory } from "../RunHistory/RunHistory";
 import { ReviewRunAccordion } from "../ReviewRunAccordion";
 import { s } from "./styles";
 import type { FindingRecord, ReviewRecord, RunSummary, PrCommit, Severity } from "@devdigest/shared";
-import type { UseMutationResult } from "@tanstack/react-query";
 
 interface FindingsTabProps {
   prId: string | null;
@@ -17,7 +16,13 @@ interface FindingsTabProps {
   runs: ReviewRecord[];
   prRuns: RunSummary[] | undefined;
   prCommits: PrCommit[];
-  cancelMutation: UseMutationResult<any, any, string, any>;
+  /**
+   * Cancelling is the caller's business — this tab only needs to ask for it and
+   * to know whether a request is in flight. Taking the whole `UseMutationResult`
+   * would tie the component to TanStack Query for two members it actually uses.
+   */
+  onCancelRuns: (runIds: string[]) => void;
+  cancelling: boolean;
   /** owner/repo + head sha — used to deep-link a finding's file:line to GitHub. */
   repoFullName?: string | null;
   headSha?: string | null;
@@ -37,7 +42,8 @@ export function FindingsTab({
   runs,
   prRuns,
   prCommits,
-  cancelMutation,
+  onCancelRuns,
+  cancelling,
   repoFullName,
   headSha,
   severities,
@@ -47,8 +53,8 @@ export function FindingsTab({
   onRunDone,
 }: FindingsTabProps) {
   const handleCancelAll = useCallback(() => {
-    liveRunIds.forEach((id) => cancelMutation.mutate(id));
-  }, [liveRunIds, cancelMutation]);
+    onCancelRuns(liveRunIds);
+  }, [liveRunIds, onCancelRuns]);
 
   const handleOpenFirstTrace = useCallback(() => {
     if (liveRunIds[0]) onOpenTrace(liveRunIds[0]);
@@ -107,7 +113,7 @@ export function FindingsTab({
                   kind="danger"
                   size="sm"
                   icon="X"
-                  loading={cancelMutation.isPending}
+                  loading={cancelling}
                   onClick={handleCancelAll}
                 >
                   Cancel

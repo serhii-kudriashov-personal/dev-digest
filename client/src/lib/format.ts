@@ -25,3 +25,16 @@ export function formatTokenCount(tokens: number | null | undefined): string | nu
   if (tokens == null || tokens <= 0) return null;
   return `${tokens.toLocaleString("en-US")} tok`;
 }
+
+/**
+ * A 0..1 rate as a whole percentage, or an em dash when there is nothing to
+ * measure yet.
+ *
+ * `null` and `0` are different facts and must render differently: a skill nobody
+ * has judged has NO accept rate, while a skill whose findings were all dismissed
+ * genuinely has 0%. Same rule the cost badge follows for unknown vs free.
+ */
+export function formatRate(rate: number | null | undefined): string {
+  if (rate == null) return "—";
+  return `${Math.round(rate * 100)}%`;
+}

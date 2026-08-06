@@ -9,7 +9,7 @@ import type {
   ReviewStrategy,
 } from '@devdigest/shared';
 import { AgentsRepository } from './repository.js';
-import { toAgentDto, toAgentVersionDto } from './helpers.js';
+import { toAgentDto, toAgentVersionDto, toAgentVersionDtoSafe } from './helpers.js';
 
 /**
  * A2 — agents service. Business logic for the Agents tab + Agent Editor.
@@ -55,9 +55,15 @@ export class AgentsService {
     this.repo = new AgentsRepository(container.db);
   }
 
+  /**
+   * All agents in the workspace, each carrying its linked-skill count for the
+   * card chip. `skills_count` is LIST-only (see the contract) — the counts come
+   * from one grouped query rather than a per-agent lookup.
+   */
   async list(workspaceId: string): Promise<Agent[]> {
     const rows = await this.repo.list(workspaceId);
-    return rows.map(toAgentDto);
+    const counts = await this.repo.skillCountsByAgent(workspaceId);
+    return rows.map((row) => ({ ...toAgentDto(row), skills_count: counts.get(row.id) ?? 0 }));
   }
 
   async get(workspaceId: string, id: string): Promise<Agent | undefined> {
@@ -117,7 +123,8 @@ export class AgentsService {
     const agent = await this.repo.getById(workspaceId, agentId);
     if (!agent) return undefined;
     const rows = await this.repo.listVersions(agentId);
-    return rows.map(toAgentVersionDto);
+    // Skip rather than throw: see `toAgentVersionDtoSafe`.
+    return rows.map(toAgentVersionDtoSafe).filter((v): v is AgentVersion => v !== null);
   }
 
   /**

@@ -1,12 +1,16 @@
 /* AgentCard — model chip, skills count, enabled toggle. Stats are an A5 mount;
-   we render the provider/model + skill count here. */
+   we render the provider/model + skill count here.
+
+   Shared, not route-local: rendered by /agents (the grid) and by /agents/:id
+   (the editor's left rail), so it lives here rather than under one of their
+   _components/ trees. */
 "use client";
 
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Icon, Badge, Toggle } from "@devdigest/ui";
 import type { Agent } from "@devdigest/shared";
-import { useDeleteAgent } from "../../../../lib/hooks/agents";
+import { useDeleteAgent } from "@/lib/hooks/agents";
 import { modelColor } from "./helpers";
 import { s } from "./styles";
 
