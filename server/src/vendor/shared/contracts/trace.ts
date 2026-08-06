@@ -59,6 +59,7 @@ export const MemoryPulled = z.object({
 export type MemoryPulled = z.infer<typeof MemoryPulled>;
 
 export const RunStats = z.object({
+  // Whole seconds — see @devdigest/api CHANGELOG 1.3.0.
   duration_ms: z.number().int(),
   tokens_in: z.number().int(),
   tokens_out: z.number().int(),
@@ -99,11 +100,12 @@ export const RunSummary = z.object({
   model: z.string().nullable(),
   status: z.string().nullable(), // running | done | failed | cancelled
   error: z.string().nullable(),
+  // Whole seconds now — the timeline never rendered sub-second precision, and
+  // millisecond integers made the JSON needlessly large on long histories.
   duration_ms: z.number().int().nullable(),
   tokens_in: z.number().int().nullable(),
   tokens_out: z.number().int().nullable(),
-  findings_count: z.number().int().nullable(),
-  grounding: z.string().nullable(),
+  findings: z.number().int().nullable(),
   ran_at: z.string().nullable(),
   // Review outcome, denormalized onto the run row at completion (the timeline
   // has no FK to the review). score = the review's 0-100 score; blockers =

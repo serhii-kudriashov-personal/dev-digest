@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { z } from 'zod';
 import { RunRequest } from '@devdigest/shared';
 import type { RunEvent } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
@@ -16,6 +17,12 @@ import { ReviewService } from './service.js';
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
 const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
+
+/** Which slice of a PR's run history `GET /pulls/:id/runs` should return. */
+const RunsQuery = z.object({
+  status: z.enum(['all', 'running', 'done', 'failed', 'cancelled']),
+});
+
 export default async function reviewsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const { container } = app;
@@ -98,10 +105,19 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
   });
 
   // ---- All runs for a PR (any status; the run history, incl. failures) -----
-  app.get('/pulls/:id/runs', { schema: { params: IdParams } }, async (req) => {
-    const { workspaceId } = await getContext(container, req);
-    return service.listRuns(workspaceId, req.params.id);
-  });
+  // `status` is now explicit so the caller states which slice of the history it
+  // wants instead of filtering client-side.
+  app.get(
+    '/pulls/:id/runs',
+    { schema: { params: IdParams, querystring: RunsQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      const runs = await service.listRuns(workspaceId, req.params.id);
+      return req.query.status === 'all'
+        ? runs
+        : runs.filter((r) => r.status === req.query.status);
+    },
+  );
 
   // ---- Delete one run from the history (+ its trace) ----------------------
   app.delete('/runs/:id', { schema: { params: IdParams } }, async (req) => {
