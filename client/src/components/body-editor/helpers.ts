@@ -1,4 +1,4 @@
-import { CHARS_PER_TOKEN } from "@/app/skills/constants";
+import { CHARS_PER_TOKEN } from "./constants";
 
 /**
  * Approximate token count for the editor's header.

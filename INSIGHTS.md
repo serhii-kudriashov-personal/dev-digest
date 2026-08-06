@@ -159,6 +159,53 @@ and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65
 
 ## What Doesn't Work
 
+### 2026-08-06 — `pr-self-review` cannot gate a PR built in a secondary git worktree — the script `cd`s to the primary root
+
+**Tried:** building a deliberately-broken demo PR in a detached worktree
+(`git worktree add --detach … origin/main`, branch `demo/api-contract-break`) so
+the primary tree's uncommitted work stayed untouched, then committing, pushing,
+and running `gh pr create` for that branch.
+
+**Failed:** the hook denied with
+`the verdict is for commit ae5a53f4, HEAD is now 2c1fd2ea`. Both SHAs describe the
+PRIMARY tree (`lab/lab02`, carrying unrelated uncommitted work) — not the branch
+the PR is for, whose six files the gate never looked at. The denial reads like a
+stale review of your PR; it is actually a fresh review of a different tree.
+
+The cause is structural, not a cwd accident. `scripts/pr-self-review.sh:24` runs
+`cd "$(dirname "$0")/.."` before anything else, and the hook invokes it as
+`"${CLAUDE_PROJECT_DIR:-.}/scripts/pr-self-review.sh" gate`. So `head_sha` and
+`tree_hash` always describe the primary repo root. Issuing `gh pr create` from
+inside the worktree does not help, and no flag repoints it.
+
+**Instead:** three in-policy exits; which one is right depends on why the worktree
+exists.
+
+- Build the branch in the primary tree after all, when the PR is real work that
+  the gate *should* read.
+- Open it through the GitHub web UI. `SKILL.md` §"What this skill cannot do"
+  already states the web path is uncovered, so this is a documented limitation
+  rather than an evasion — say so out loud when you use it.
+- Review the primary tree and land a fresh verdict — honest only when those open
+  changes are genuinely part of this PR.
+
+**Not** an exit: deleting the verdict or editing `head_sha` / `tree_hash`.
+`SKILL.md` §"Blocking, and the way out" calls that forging the gate, and
+`overridden_by_user` requires the user to have seen real findings first — and
+there are none, because the gate never read the diff it blocked.
+
+Worth writing down because this repo teaches the opposite reflex elsewhere:
+`server/INSIGHTS.md` (2026-08-05, `reviews.it.test.ts` / `prompt_assembly`)
+recommends a detached worktree for clean-tree reproduction. That advice is right
+for tests and collides with this gate the moment the worktree's branch is meant
+to become a pull request.
+
+**Where:** unconditional chdir at `scripts/pr-self-review.sh:24`; verdict written
+at `:72-78`, re-checked by the hook at `:334-344`; `tree_hash()` at `:57`; hook
+wiring in `.claude/settings.json` (`PreToolUse` → `Bash`); the documented web-UI
+gap at `.claude/skills/pr-self-review/SKILL.md` §"What this skill cannot do"; the
+colliding worktree advice in `server/INSIGHTS.md` (2026-08-05).
+
 ### 2026-08-04 — A freshness gate cannot hash a tree that contains its own verdict file
 
 **Tried:** making `pr-self-review`'s verdict unforgeable by recording a
@@ -340,6 +387,44 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-05 — "Created disabled until vetted" is about WHO wrote the body, not about `source !== 'manual'`
+
+**Rule:** a skill built from this repo's own extracted conventions is created
+`enabled: true`, even though its `source` is `'extracted'` and the vetting badge
+formula is `needsVetting(skill) = source !== "manual" && !enabled`. Do not "fix" it
+to `enabled: false` for consistency with the import flow.
+
+**Why:** the disabled-on-import default exists because importing grants a *stranger*
+write access to your agent's prompt (entry below, 2026-08-05). The control it buys is
+a human reading the body before it takes effect. The conventions extractor already
+spent that control, and more of it: the user saw each rule next to the verbatim
+snippet that proves it, accepted or rejected it one at a time, could edit the wording,
+and then reviewed the merged body in an editable modal before saving. Creating the
+result disabled would demand a *second* vetting of text the user just wrote the
+verdicts for — and the failure is invisible: the skill sits in `/skills` looking
+created while contributing nothing to any review.
+
+The distinction to carry forward: the gate is provenance-of-authorship, not the
+`source` enum. `'extracted'` from your own clone is self-authored; the same enum value
+for a convention mined out of someone else's repository would not be, and this feature
+deliberately does not offer that.
+
+Two consequences worth knowing. `needsVetting` will therefore never fire for these
+skills, which is correct rather than a hole. And the residual risk moves to the
+evidence snippet: it is model-selected text from repo files that lands **unwrapped**
+in every later prompt, so the controls are procedural — proven verbatim against a
+file actually read, fenced as a code block, and only the accepted subset promoted. The
+data→instruction transition happens exactly at the accept click, which is where a
+human is.
+
+**Where:** default set in `server/src/modules/conventions/helpers.ts`
+(`buildSkillDraft`, with the reasoning as a comment); asserted by
+`server/test/conventions-helpers.test.ts` ("is enabled: the accept/reject loop the
+user just completed IS the vetting") and
+`server/test/conventions.it.test.ts`; `needsVetting` lives at
+`client/src/app/skills/_components/SkillCard/helpers.ts`; reasoning recorded in
+`specs/l02-conventions-extractor.md` §Screens and §Trust.
 
 ### 2026-08-05 — A skill body must NOT be `wrapUntrusted`-wrapped, however much the UI copy wants it to be
 

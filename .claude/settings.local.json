@@ -33,7 +33,9 @@
       "Bash(agent-browser find *)",
       "Bash(agent-browser eval *)",
       "Bash(curl -sf http://localhost:3110/)",
-      "Bash(curl -sf http://localhost:3111/health)"
+      "Bash(curl -sf http://localhost:3111/health)",
+      "Bash(docker exec devdigest-postgres *)",
+      "Bash(git ls-remote *)"
     ],
     "deny": [],
     "ask": []

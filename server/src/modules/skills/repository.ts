@@ -22,6 +22,12 @@ export interface InsertSkill {
   source?: SkillSource;
   body: string;
   enabled?: boolean;
+  /**
+   * Repo-relative paths this skill was extracted from. Only an `extracted` skill
+   * has any — a hand-written one legitimately has none, which is why this is
+   * absent rather than an empty array.
+   */
+  evidenceFiles?: string[] | null;
 }
 
 export interface UpdateSkill {
@@ -84,6 +90,7 @@ export class SkillsRepository {
         body: values.body,
         enabled: values.enabled ?? true,
         version: INITIAL_SKILL_VERSION,
+        evidenceFiles: values.evidenceFiles ?? null,
       })
       .returning();
     await this.snapshotVersion(row!, INITIAL_SKILL_VERSION);

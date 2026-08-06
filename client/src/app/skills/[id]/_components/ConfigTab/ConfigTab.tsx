@@ -15,7 +15,7 @@ import type { Skill, SkillType } from "@devdigest/shared";
 import { useDeleteSkill, useUpdateSkill } from "@/lib/hooks/skills";
 import { useToast } from "@/lib/toast";
 import { SKILL_TYPE_VALUES } from "@/app/skills/constants";
-import { BodyEditor } from "../BodyEditor";
+import { BodyEditor } from "@/components/body-editor";
 import { s } from "./styles";
 
 export function ConfigTab({ skill }: { skill: Skill }) {

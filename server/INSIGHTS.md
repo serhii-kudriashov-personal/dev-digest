@@ -56,6 +56,47 @@ to probe.
 
 ## What Doesn't Work
 
+### 2026-08-05 — Porting `upstream/reference/full-build`'s conventions module fails three of this repo's own gates
+
+**Tried:** implementing the L02 conventions extractor by taking the complete module
+that already exists on `upstream/reference/full-build`
+(`server/src/modules/conventions/{constants,helpers,repository,routes,service,extract-pipeline}.ts`
+plus its `.it.test.ts`) and adapting it.
+
+**Failed:** three separate gates, none of which the reference branch runs.
+
+1. **`pnpm arch` — `no-cross-slice-import`.** Its `service.ts` does
+   `import { SkillsService } from '../skills/service.js'` so that accepting a
+   candidate can create a skill. `SLICE_PRIVATE`
+   (`.dependency-cruiser.cjs:65`) forbids reaching another slice's `service`.
+2. **`InsertSkill` has no `evidenceFiles`.** The reference `accept` passes
+   `evidenceFiles: [row.evidencePath]`, and the `skills.evidence_files` column
+   exists (`src/db/schema/skills.ts:19`) — but this branch's
+   `modules/skills/repository.ts:17` had dropped the field, so it typechecks
+   nowhere and the provenance link is silently lost.
+3. **Route validation style.** It uses `app.get<{Params:{id:string}}>` with no
+   `schema:` and calls `ExtractBody.parse(req.body ?? {})` inside the handler,
+   which `server/AGENTS.md:33` forbids outright.
+
+**Instead:** the interaction design solved (1) for free. Because the user's flow
+puts an editable modal between *accept* and *save*, the module never creates a
+skill at all — it returns a draft (`POST /repos/:id/conventions/skill-draft`,
+persists nothing) and the client saves it through the existing `POST /skills`. No
+cross-slice import exists to forbid. (2) was a three-line restoration
+(`InsertSkill.evidenceFiles`, `insert()`, `CreateSkillBody.evidence_files`) with no
+migration. (3) is mechanical: `withTypeProvider<ZodTypeProvider>()` plus
+`{ schema: { params: IdParams, body: … } }`.
+
+Two softer notes for anyone reading that branch: its `loadRepo` runs Drizzle from
+`extract-pipeline.ts`, which is ring 2 and escapes `no-sql-in-service` only because
+the rule matches by filename — the honest home is `conventions/repository.ts`; and
+its `provider` enum predates OpenRouter.
+
+**Where:** the landed module is `src/modules/conventions/` (compare against
+`git show upstream/reference/full-build:server/src/modules/conventions/service.ts`);
+the arch rules are `server/.dependency-cruiser.cjs:65,128`; the restored field is
+`src/modules/skills/repository.ts:17` and `src/modules/skills/routes.ts:33`.
+
 ### 2026-08-03 — The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker
 
 **Tried:** verifying Phase-1 server changes with one batch run,
@@ -142,6 +183,32 @@ testcontainers.
 
 ## Codebase Patterns
 
+### 2026-08-05 — A non-review caller of `assemblePrompt` must use the `diff` slot, and will be mislabelled
+
+**Rule:** when you call `assemblePrompt` for something that is not a diff review —
+the conventions extractor sends a *sample of repository files* — put the payload in
+`parts.diff` anyway, and accept the `## Diff to review` heading. Do not route it
+through `repoMap` to get a nicer label.
+
+**Why:** `reviewer-core/AGENTS.md` says every prompt slot is optional and an empty
+one is omitted, which is true of all of them **except** `diff`:
+`userSections.push(\`## Diff to review\n${wrapUntrusted('diff', parts.diff)}\`)` is
+unconditional (`reviewer-core/src/prompt.ts:120`). So using `repoMap` for the bodies
+does not remove the Diff section — it emits an *empty* one alongside, which misleads
+the model more than a wrong heading does.
+
+What actually matters is the property, not the name: `diff` is `wrapUntrusted`-wrapped,
+so repository content arrives as data the model is told to ignore instructions from.
+Prefix each body `FILE: <path>` and the content is unambiguous despite the heading.
+`prompt.ts` is on the do-not-touch list, so adding a "files" slot is not a drive-by
+fix — if a future lesson needs one, it is a deliberate change to the shared engine.
+
+**Where:** `src/modules/conventions/extract-pipeline.ts` (the `assemblePrompt` call
+carries this reasoning as a comment); the unconditional push is
+`reviewer-core/src/prompt.ts:120`; asserted end to end by
+`server/test/conventions.it.test.ts` ("sends repo content as UNTRUSTED data, never as
+instructions").
+
 ### 2026-08-02 — A PR-list rollup may already exist in `modules/pulls/status.ts` — and its docblock may lie
 
 **Rule:** before writing a new per-PR aggregate for `GET /repos/:id/pulls`, grep
@@ -206,6 +273,36 @@ the editor field is
 `client/src/app/agents/[id]/_components/AgentEditor/_components/ConfigTab/ConfigTab.tsx:130`.
 
 ## Tool & Library Notes
+
+### 2026-08-05 — `pnpm db:generate` goes INTERACTIVE when one migration both drops and adds a column
+
+**Quirk:** a schema edit that removes `accepted` and adds `status` makes
+`drizzle-kit generate` stop and ask
+`Is category column in conventions table created or renamed from another column?`
+with a cursor-key menu. It needs a real TTY, so from a script it just hangs and then
+dies with `ELIFECYCLE Command failed` — having written **no** migration, while its
+log still shows the full table inventory as if it had worked.
+
+Piping does not help and makes it worse: `yes '' | pnpm db:generate` floods the
+prompt and the run fails the same way, again leaving nothing behind. Only the
+combination of a drop *and* an add triggers it — either alone is unambiguous.
+
+**Workaround:** split it into two generates, so neither is ambiguous.
+
+1. Keep the old column in the schema, add the new ones, run `pnpm db:generate` →
+   a purely additive migration (nothing dropped ⇒ nothing to disambiguate).
+2. Remove the old column, run it again → a pure `DROP COLUMN`.
+
+That is why the conventions change ships as `0014_amusing_forge.sql` (additive plus
+`convention_scans` plus both indexes) and `0015_messy_hellfire_club.sql`
+(`ALTER TABLE conventions DROP COLUMN accepted`) rather than one file. `expect(1)` is
+the other route if you truly need a single migration — `/usr/bin/expect` is present
+and a bare `\r` selects the already-highlighted "create column" — but two migrations
+are cheaper and read more honestly in the log.
+
+**Where:** `src/db/migrations/0014_amusing_forge.sql` and `0015_messy_hellfire_club.sql`;
+schema at `src/db/schema/knowledge.ts:31`; reasoning recorded in
+`specs/l02-conventions-extractor.md` §Migrations.
 
 ### 2026-08-05 — `pnpm test` is red here for an environmental reason: 8 `*.it.test.ts` files start 8 Postgres containers at once
 
@@ -347,6 +444,42 @@ than relying on config auto-discovery. Same trap applies to any future
 (`"arch"`); `"type": "module"` at `server/package.json:4`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-05 — `reviews.it.test.ts` fails on `prompt_assembly` for reasons that have nothing to do with your change
+
+**Symptom:** `TypeError: Cannot read properties of undefined (reading 'skills')` at
+`test/reviews.it.test.ts:452` (`trace.prompt_assembly.skills`), in the
+"linked skills reach the assembled prompt" block. **Which** test fails moves between
+runs — 2 failures alone, a different single failure inside the full lane — so it
+reads exactly like a regression from whatever you just touched.
+
+**Cause:** a race in the test's own helper, not in the product.
+`waitForPrRuns(db, prId, { expected: 1 })` (`test/helpers/runs.ts:26-29`) counts
+**every** terminal `agent_runs` row for that `pr_id`, cumulatively across the whole
+file. Earlier tests in the file already left terminal runs against the same seeded
+PR, so `terminal.length >= 1` is true the instant it is called; `runWithSkills`
+proceeds to `GET /runs/:id/trace` before the run it just started has written one,
+and the trace comes back without `prompt_assembly`.
+
+**Takeaway:** before blaming your diff, reproduce on a clean tree — and note that
+`git stash` is not the way here, because a partial tree may not build. Use a
+detached worktree at `HEAD` with `node_modules` symlinked in:
+
+```sh
+git worktree add --detach /tmp/clean HEAD
+ln -s "$PWD/server/node_modules" /tmp/clean/server/node_modules
+ln -s "$PWD/reviewer-core/node_modules" /tmp/clean/reviewer-core/node_modules
+pnpm --dir /tmp/clean/server exec vitest run reviews.it --no-file-parallelism
+git worktree remove --force /tmp/clean     # rm the symlinks first
+```
+
+The same two failures reproduce there, which settles it in about three minutes. The
+real fix, when someone takes it, is for `waitForPrRuns` to count runs created *after*
+a baseline (or to filter by the `run_id` the caller already holds) rather than
+counting every row for the PR.
+
+**Where:** helper at `server/test/helpers/runs.ts:14-34`; call sites
+`server/test/reviews.it.test.ts:446` and `:452`.
 
 ### 2026-08-03 — The jsonb `.nullish()` trap, second instance — and the fix is NOT to loosen the DTO
 

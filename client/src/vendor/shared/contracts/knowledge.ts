@@ -218,15 +218,95 @@ export const SkillImportPreview = z.object({
 export type SkillImportPreview = z.infer<typeof SkillImportPreview>;
 
 // ---- Conventions ----
+
+/**
+ * Tri-state, not a boolean. A re-scan clears only `pending` rows, so an accepted
+ * rule is never re-proposed as a duplicate and a rejected one never comes back.
+ */
+export const ConventionStatus = z.enum(['pending', 'accepted', 'rejected']);
+export type ConventionStatus = z.infer<typeof ConventionStatus>;
+
+export const ConventionCategory = z.enum([
+  'naming',
+  'error-handling',
+  'structure',
+  'testing',
+  'api-shape',
+  'tooling',
+  'other',
+]);
+export type ConventionCategory = z.infer<typeof ConventionCategory>;
+
+/**
+ * One extracted house-rule candidate.
+ *
+ * Every field except `rule` and `status` is provenance and is NOT editable: the
+ * evidence was proven against a file the scan actually read, and the line range
+ * was computed from where the snippet was found — never reported by the model.
+ * Letting the snippet be rewritten would leave a confidence figure and a line
+ * range describing nothing.
+ *
+ * `confidence` is rendered and NOTHING else — it is not calibrated (the model
+ * emits 1.0 for hallucinations just as readily), so it is never sorted, filtered,
+ * thresholded or auto-acted on.
+ */
 export const ConventionCandidate = z.object({
   id: z.string(),
   rule: z.string(),
+  category: ConventionCategory,
   evidence_path: z.string(),
   evidence_snippet: z.string(),
+  /** 1-based, inclusive. Server-computed. */
+  evidence_line_start: z.number().int(),
+  evidence_line_end: z.number().int(),
   confidence: z.number().min(0).max(1),
-  accepted: z.boolean(),
+  status: ConventionStatus,
+  created_at: z.string(),
 });
 export type ConventionCandidate = z.infer<typeof ConventionCandidate>;
+
+/**
+ * One extraction run. `dropped` is how many candidates the model claimed that the
+ * evidence gate could not prove — published so a model that systematically
+ * invents evidence does not look like one that never does.
+ */
+export const ConventionScan = z.object({
+  id: z.string(),
+  files_sampled: z.number().int(),
+  candidates: z.number().int(),
+  dropped: z.number().int(),
+  provider: z.string(),
+  model: z.string(),
+  created_at: z.string(),
+});
+export type ConventionScan = z.infer<typeof ConventionScan>;
+
+/**
+ * `last_scan` is `.nullable()` rather than `.nullish()` because it is rebuilt
+ * from columns on every read, so the key is always present. `null` means "never
+ * scanned" and the UI omits the subtitle — it must never read as "0 files".
+ */
+export const ConventionsPayload = z.object({
+  candidates: z.array(ConventionCandidate),
+  last_scan: ConventionScan.nullable(),
+});
+export type ConventionsPayload = z.infer<typeof ConventionsPayload>;
+
+/**
+ * What the accepted conventions WOULD become, returned by
+ * `POST /repos/:id/conventions/skill-draft` without persisting anything — the
+ * same contract as `SkillImportPreview`. Everything is editable in the modal
+ * before `POST /skills` saves it.
+ */
+export const ConventionSkillDraft = z.object({
+  name: z.string(),
+  description: z.string(),
+  type: SkillType,
+  body: z.string(),
+  enabled: z.boolean(),
+  evidence_files: z.array(z.string()),
+});
+export type ConventionSkillDraft = z.infer<typeof ConventionSkillDraft>;
 
 // ---- Agents ----
 export const Provider = z.enum(['openai', 'anthropic', 'openrouter']);

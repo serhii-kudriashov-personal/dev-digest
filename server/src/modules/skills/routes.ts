@@ -29,6 +29,8 @@ const CreateSkillBody = z.object({
   source: SkillSource.optional(),
   body: z.string().min(1),
   enabled: z.boolean().optional(),
+  /** Paths this skill was extracted from — set by the conventions extractor. */
+  evidence_files: z.array(z.string()).optional(),
 });
 
 const UpdateSkillBody = z.object({
@@ -95,6 +97,7 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
       ...(body.type !== undefined ? { type: body.type } : {}),
       ...(body.source !== undefined ? { source: body.source } : {}),
       ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+      ...(body.evidence_files !== undefined ? { evidenceFiles: body.evidence_files } : {}),
     });
     reply.status(201);
     return skill;

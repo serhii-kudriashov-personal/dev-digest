@@ -317,8 +317,65 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     if (values.length > 0) await db.insert(t.agentSkills).values(values);
   }
 
+  // ---- extracted convention candidates (L02) ----
+  // Seeded so the Conventions screen and its e2e flow have something to judge
+  // WITHOUT firing a model call. The evidence line ranges are the ones the gate
+  // would have computed; nothing here is a model claim.
+  const existingConventions = await db
+    .select({ id: t.conventions.id })
+    .from(t.conventions)
+    .where(and(eq(t.conventions.workspaceId, workspaceId), eq(t.conventions.repoId, repoId)));
+  if (existingConventions.length === 0) {
+    await db.insert(t.conventionScans).values({
+      workspaceId,
+      repoId,
+      filesSampled: 14,
+      candidates: SEED_CONVENTIONS.length,
+      dropped: 2,
+      provider: 'openai',
+      model: 'gpt-5.4',
+    });
+    await db
+      .insert(t.conventions)
+      .values(SEED_CONVENTIONS.map((c) => ({ workspaceId, repoId, ...c })));
+  }
+
   return { workspaceId, userId };
 }
+
+/**
+ * Demo candidates for `acme/payments-api`. All `pending` on purpose — the screen's
+ * whole point is the accept/reject decision, so seeding them judged would hide it.
+ */
+const SEED_CONVENTIONS = [
+  {
+    rule: 'Always use async/await instead of .then() chains.',
+    category: 'structure' as const,
+    evidencePath: 'src/api/users.ts',
+    evidenceSnippet: 'const user = await db.users.find(id);\nconst posts = await db.posts.findMany({ userId });',
+    evidenceLineStart: 23,
+    evidenceLineEnd: 31,
+    confidence: 0.91,
+  },
+  {
+    rule: 'All public route handlers return a typed Result<T, ApiError>.',
+    category: 'api-shape' as const,
+    evidencePath: 'src/api/public/index.ts',
+    evidenceSnippet: 'function handler(): Result<Item[], ApiError> {\n  return ok(items);\n}',
+    evidenceLineStart: 14,
+    evidenceLineEnd: 20,
+    confidence: 0.78,
+  },
+  {
+    rule: 'Redis access goes through the src/lib/redis.ts singleton.',
+    category: 'structure' as const,
+    evidencePath: 'src/lib/redis.ts',
+    evidenceSnippet: 'export const redis = new Redis(config.redisUrl);',
+    evidenceLineStart: 1,
+    evidenceLineEnd: 9,
+    confidence: 0.85,
+  },
+];
 
 // CLI entrypoint
 if (import.meta.url === `file://${process.argv[1]}`) {

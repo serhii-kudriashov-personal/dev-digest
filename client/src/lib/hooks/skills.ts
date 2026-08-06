@@ -44,6 +44,8 @@ export interface CreateSkillInput {
   source?: SkillSource;
   body: string;
   enabled?: boolean;
+  /** Paths the skill was extracted from — set by the conventions extractor. */
+  evidence_files?: string[];
 }
 
 export function useCreateSkill() {
@@ -153,6 +155,30 @@ export function useAgentSkillLinks(agentId: string | null | undefined) {
  * state, then patch it" bug is the CRITICAL one client/INSIGHTS.md records for
  * ConfigTab; `AgentEditor` still carries the comment explaining the fix.)
  */
+/**
+ * Attach ONE skill to an agent, appended at the end of its prompt order.
+ *
+ * The same endpoint as `useSetAgentSkills`, taking the `{ skill_id }` branch — a
+ * caller that has just created a skill knows nothing about the agent's existing
+ * order and must not have to fetch it first only to send it back.
+ *
+ * Not optimistic: the skill did not exist a moment ago, so there is no stale
+ * ordering on screen to keep smooth, and a silent failure here would leave the
+ * user believing the skill is live when it reaches no review.
+ */
+export function useLinkAgentSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, skillId }: { agentId: string; skillId: string }) =>
+      api.post<AgentSkillLink[]>(`/agents/${agentId}/skills`, { skill_id: skillId }),
+    onSuccess: (data, { agentId }) => {
+      qc.setQueryData(["agent-skills", agentId], data);
+      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: ["skills"] });
+    },
+  });
+}
+
 export function useSetAgentSkills() {
   const qc = useQueryClient();
   return useMutation({

@@ -11,7 +11,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Icon } from "@devdigest/ui";
-import { TOKEN_ESTIMATE_DEBOUNCE_MS } from "@/app/skills/constants";
+import { TOKEN_ESTIMATE_DEBOUNCE_MS } from "./constants";
 import { bodyFilename, estimateTokens, lineCount } from "./helpers";
 import { s } from "./styles";
 

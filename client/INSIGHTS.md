@@ -124,6 +124,42 @@ shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
 
+### 2026-08-05 — Promoting a component to `src/components/` must move its CONSTANTS too, and the linter will not tell you
+
+**Rule:** when a route-local component becomes shared, the literals it reads move
+with it. `BodyEditor` went from
+`src/app/skills/[id]/_components/BodyEditor/` to `src/components/body-editor/` so the
+conventions extractor's create-skill modal could reuse it — and its
+`CHARS_PER_TOKEN` / `TOKEN_ESTIMATE_DEBOUNCE_MS` had to move from
+`src/app/skills/constants.ts` into `src/components/body-editor/constants.ts` in the
+same step. A shared component that imports `@/app/<route>/constants` has the
+dependency arrow backwards: the route now depends on the component AND the component
+on the route.
+
+**Why:** nothing catches this. `pnpm typecheck` is happy — `@/app/skills/constants`
+resolves fine from anywhere. And `import/no-restricted-paths`
+(`eslint.config.mjs:42-79`) only names `agents`, `repos`, `settings` and
+`onboarding` as zones; **`skills` is not in the list**, so ESLint would not have
+flagged `src/app/repos/**` importing `src/app/skills/**` either. Both gates pass on
+the wrong layout, which is exactly why the rule has to be remembered rather than
+enforced.
+
+Leave a pointer where the constants used to be rather than deleting the lines
+silently — the next reader of `app/skills/constants.ts` is looking for
+`CHARS_PER_TOKEN` and needs to know it moved, not that it vanished.
+
+Note the i18n namespace does NOT have to move: `BodyEditor` still calls
+`useTranslations("skills")` for `editor.unsaved` / `editor.tokenEstimate`, and that
+is correct — next-intl merges every namespace globally, and the strings genuinely
+describe a *skill body*, whichever route is editing one.
+
+**Where:** `src/components/body-editor/{BodyEditor.tsx,constants.ts,helpers.ts}`; the
+pointer comment is at `src/app/skills/constants.ts`; the consumers are
+`src/app/skills/[id]/_components/ConfigTab/ConfigTab.tsx:18` and
+`src/app/repos/[repoId]/conventions/_components/CreateSkillFromConventionsModal/`.
+Reinforces the 2026-08-02 entry below (cross-route components live in
+`src/components/`).
+
 ### 2026-08-03 — Extracting a page into a View does NOT move the route's shared `constants.ts` / `styles.ts` / `helpers.ts`
 
 **Rule:** when you thin `<route>/page.tsx` into
@@ -282,6 +318,34 @@ the address moved: the page is now an 8-line wrapper and the selection owner is
 (`severities` / `onToggleSeverity`).
 
 ## Tool & Library Notes
+
+### 2026-08-05 — `IconName` is the vendored REGISTRY's key set, not lucide's export list — and one key is aliased
+
+**Quirk:** `icon="Pencil"` fails typecheck with a 64-name union in the error, even
+though lucide exports `Pencil` and the string appears in `icons.tsx`. The registry
+deliberately renames it: `Edit: Pencil` (`src/vendor/ui/icons.tsx:147`, comment
+"prototype used 'Edit'; lucide exports Pencil/Edit — alias to keep API"). So the
+usable name is `"Edit"`, and grepping the file for `Pencil` finds only the *import*.
+Separately, plenty of plausible lucide icons are simply absent — `Wand2` is not
+registered, so the "merged from conventions" banner uses `Sparkles`.
+
+**Workaround:** read the keys of the `Icon` object, not the import list and not
+lucide's docs:
+
+```sh
+node -e "import('./src/vendor/ui/icons.tsx')" # no — it's TSX; grep the object instead
+sed -n '/satisfies Record<string, LucideIcon>/q;/^} satisfies/q' src/vendor/ui/icons.tsx
+```
+
+In practice: find the object literal and read the keys after it, watching for `X:`
+aliases. Adding a missing icon means editing `src/vendor/ui/**`, which the root
+`AGENTS.md` marks do-not-refactor — picking a registered icon is the cheap move, and
+`pnpm typecheck` is the only thing that catches a wrong name (there is no runtime
+error; `Icon[name]` would just be `undefined`).
+
+**Where:** registry at `src/vendor/ui/icons.tsx` (alias at `:147`); `IconName` is
+`keyof typeof Icon`; consumers `src/app/repos/[repoId]/conventions/_components/ConventionCard/ConventionCard.tsx`
+and `.../CreateSkillFromConventionsModal/CreateSkillFromConventionsModal.tsx`.
 
 ### 2026-08-05 — `@devdigest/ui`'s `Donut` is a MONEY chart, and a design mock inherited its `$`
 
