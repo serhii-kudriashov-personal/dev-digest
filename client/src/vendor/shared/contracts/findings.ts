@@ -94,6 +94,30 @@ export const Finding = z.object({
         'your own analysis rather than one of those listed skills. Never guess and ' +
         'never invent a slug — an unrecognised value is discarded.',
     ),
+  /**
+   * Scope label, relative to the derived PR intent (L03). Asked for through the
+   * schema for the same reason as `skill` above: this object IS the model's
+   * structured-output contract, so the `.describe()` is the instruction, and no
+   * edit to `prompt.ts` or `INJECTION_GUARD` is needed.
+   *
+   * NULLISH, not nullable — same jsonb reason as `skill`.
+   *
+   * A nullish ENUM is safe here: `kind` (`FindingKind.nullish()`, above) is
+   * already one and already ships inside the schema handed to
+   * `completeStructured`. It converts to `anyOf: [{enum}, {type: 'null'}]`.
+   *
+   * The label is METADATA. The suppression decision is made server-side by the
+   * deterministic `applyScopeGate`, never by the model withholding a finding.
+   */
+  scope: z
+    .enum(['in_scope', 'out_of_scope'])
+    .nullish()
+    .describe(
+      'Whether this finding falls inside the PR intent stated in the "## PR intent (derived)" ' +
+        'section. Set "out_of_scope" ONLY when the issue is unrelated to that stated scope. ' +
+        'Label honestly and NEVER omit or downgrade a finding because it is out of scope — ' +
+        'the label is metadata, not permission to withhold. Set null when no intent was given.',
+    ),
 });
 export type Finding = z.infer<typeof Finding>;
 

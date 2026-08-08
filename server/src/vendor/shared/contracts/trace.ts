@@ -48,6 +48,8 @@ export const PromptAssembly = z.object({
   repo_map: z.string().nullish(),
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
+  /** Derived PR intent block (L03); null when no intent was available. */
+  intent: z.string().nullish(),
   user: z.string(),
   /**
    * Per-section token attribution, keyed by the section names above (plus

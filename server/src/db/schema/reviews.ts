@@ -89,6 +89,12 @@ export const findings = pgTable(
   ],
 );
 
+// Derivation metadata (L03) is all NULLABLE and purely additive: rows written
+// before L03 have no value for any of it, and a nullable column with no
+// volatile default does not rewrite the table.
+//
+// NO INDEX, deliberately: `pr_id` is the primary key and every read here is
+// `WHERE pr_id = $1`.
 export const prIntent = pgTable('pr_intent', {
   prId: uuid('pr_id')
     .primaryKey()
@@ -96,6 +102,21 @@ export const prIntent = pgTable('pr_intent', {
   intent: text('intent').notNull(),
   inScope: jsonb('in_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   outOfScope: jsonb('out_of_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  // The commit the intent was derived from. This is what makes "the PR moved,
+  // re-derive" a decidable question rather than a guess — compare it against
+  // `pull_requests.head_sha`.
+  headSha: text('head_sha'),
+  // DETERMINISTIC tier ('high' | 'medium' | 'low'), computed server-side from
+  // which sources were actually present. Text, not an enum type: the tiers are
+  // owned by the contract, and a pg enum would need a migration to extend.
+  confidence: text('confidence'),
+  // The model's own self-rated confidence — stored, never trusted, never shown.
+  modelConfidence: doublePrecision('model_confidence'),
+  // Source LABELS only, never the content that was sent.
+  sources: jsonb('sources').$type<string[]>(),
+  provider: text('provider'),
+  model: text('model'),
+  generatedAt: timestamp('generated_at', { withTimezone: true }),
 });
 
 export const prBrief = pgTable('pr_brief', {

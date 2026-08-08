@@ -10,6 +10,27 @@
   "overlap": "{count} overlap",
   "unavailable": "Brief not available yet.",
   "unavailableHint": "Run a review or open the PR to compute it.",
+  "inScope": "In scope",
+  "outOfScope": "Out of scope",
+  "stale": "Stale",
+  "staleHint": "The PR has changed since this was derived.",
+  "rederive": "Re-derive",
+  "derive": "Derive intent",
+  "deriving": "Deriving…",
+  "confidenceLabel": "Confidence",
+  "confidence": {
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low"
+  },
+  "sourcesLabel": "Derived from",
+  "sources": {
+    "pr_title_body": "PR title and description",
+    "linked_issue": "Linked issue",
+    "linked_spec": "Linked plan or spec",
+    "hunk_headers": "Changed line ranges",
+    "commit_messages": "Commit messages"
+  },
   "why": {
     "title": "git-why",
     "blame": "blame",

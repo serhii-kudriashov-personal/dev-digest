@@ -9,6 +9,7 @@ import type {
 import { Review as ReviewSchema } from '@devdigest/shared';
 import { assemblePrompt } from '../prompt.js';
 import { groundFindings, groundingSummary } from '../grounding.js';
+import { applyScopeGate, scopeSummary } from '../scope.js';
 import { reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
 
 /**
@@ -18,9 +19,11 @@ import { reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
  *
  * This is the pure core lifted out of the server's `ReviewService.runOneAgent`:
  * assemble prompt → single-pass OR map-reduce per file → reduce → SHARED
- * citation-grounding gate. It performs NO I/O beyond the injected LLM provider
- * (no DB, GitHub, fs, memory retrieval, intent, or persistence) — those stay in
- * the caller (server persists + streams SSE; runner posts + writes an artifact).
+ * citation-grounding gate → SHARED scope gate. It performs NO I/O beyond the
+ * injected LLM provider (no DB, GitHub, fs, memory retrieval, intent
+ * DERIVATION, or persistence) — those stay in the caller (server persists +
+ * streams SSE; runner posts + writes an artifact). The derived intent arrives
+ * as a plain string parameter, like every other resolved input.
  *
  * Skill bodies / memory / specs are RESOLVED strings here: the caller turns
  * AgentManifest skill slugs into bodies (DB in the studio, fs in the runner).
@@ -71,6 +74,12 @@ export interface ReviewInput {
   /** PR author's description/body (untrusted; truncated + delimiter-wrapped in
       the prompt). Empty/undefined → section omitted. */
   prDescription?: string;
+  /**
+   * Derived PR intent block (L03). Untrusted; delimiter-wrapped in the prompt.
+   * Empty/undefined → section omitted AND the scope gate below is a no-op, so a
+   * PR with no intent behaves exactly as it did before L03.
+   */
+  intent?: string;
   /** Task framing line, e.g. "Review PR #482 …". */
   task?: string;
   /** Override the structured-output retry budget. */
@@ -99,6 +108,12 @@ export interface ReviewOutcome {
   grounding: string;
   /** Findings dropped by grounding, with reasons (for logs / "never go silent"). */
   dropped: { finding: Finding; reason: string }[];
+  /**
+   * Findings dropped by the SCOPE gate, with reasons. Always empty when no
+   * `intent` was supplied. Reported so a suppression is never silent — the
+   * caller logs these; nothing is hidden without a record.
+   */
+  scopeDropped: { finding: Finding; reason: string }[];
   /** Which path ran. */
   mode: ReviewMode;
   /** Prompt assembly (for the run trace). Single-pass: the one call; map-reduce: the whole-diff assembly. */
@@ -135,6 +150,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     callers: input.callers,
     repoMap: input.repoMap,
     prDescription: input.prDescription,
+    intent: input.intent,
     task: input.task,
   };
 
@@ -201,13 +217,26 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
   }
   emit('result', `Citation grounding: ${grounding}`);
 
-  // Score is derived from the findings that SURVIVED grounding (not the model's
-  // self-reported number, and not the pre-grounding set) so the score, the
-  // findings list, and the deterministic event always agree.
+  // SCOPE gate (L03) — runs after grounding, on the findings that survived it.
+  // A no-op unless an intent block was actually supplied, and every CRITICAL
+  // survives it regardless of scope.
+  const scoped = applyScopeGate(ground.kept, Boolean(input.intent?.trim()));
+  for (const d of scoped.dropped) {
+    emit('info', `scope dropped "${d.finding.title}": ${d.reason}`);
+  }
+  if (scoped.dropped.length > 0) emit('result', `Scope gate: ${scopeSummary(scoped)}`);
+
+  // Score is derived from the findings that SURVIVED grounding AND the scope
+  // gate (not the model's self-reported number, and not the pre-gate set) so
+  // the score, the findings list, and the deterministic event always agree.
+  // Consequence, accepted deliberately: a dropped out-of-scope WARNING no
+  // longer depresses the score and no longer blocks a `ci_fail_on: 'warning'`
+  // agent. CRITICALs always survive, so `ci_fail_on: 'critical'` is unaffected.
   return {
-    review: { ...merged, findings: ground.kept, score: scoreFromFindings(ground.kept) },
+    review: { ...merged, findings: scoped.kept, score: scoreFromFindings(scoped.kept) },
     grounding,
     dropped: ground.dropped,
+    scopeDropped: scoped.dropped,
     mode,
     assembly,
     chunks: chunks.map((c) => ({ label: c.label })),

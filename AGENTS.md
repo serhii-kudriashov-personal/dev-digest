@@ -95,6 +95,7 @@ Vitest 2 · testcontainers · agent-browser
 | `TESTING.md` | writing or fixing a test or a CI workflow |
 | `docs/agent-prompts/` | editing a review agent's `system_prompt` |
 | `docs/l02-experiment.md` | measuring whether a skill (or any prompt change) actually helps |
+| `docs/intent-layer.md` | working on derived PR intent (L03) — sources and their exclusions, the deterministic scope gate, the two confidence numbers, or what the run log does and does not record |
 | `docs/` | asking "why was it decided this way" |
 | `specs/` | implementing a new feature — read its spec first |
 | `INSIGHTS.md` | at the start of every session, and before any non-trivial change: the traps are written down |

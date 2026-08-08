@@ -210,6 +210,54 @@ and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65
 
 ## What Doesn't Work
 
+### 2026-08-08 — Racing `researcher` against `planner` and patching the plan by `SendMessage` mid-flight: the message lands too late, or never
+
+**Tried:** two ways of getting external research into a `planner` run without
+paying for the round trip twice.
+
+1. Launching `researcher` (repo inventory) and `researcher` (external practices)
+   in parallel, then `planner` after them.
+2. After the first attempt died, launching `researcher` (external) and `planner`
+   **concurrently**, then `SendMessage`-ing the research findings to the running
+   `planner` as soon as they arrived.
+
+**Failed:** both, differently.
+
+1. Both `researcher` runs terminated with
+   `Agent terminated early due to an API error: You've hit your session limit`.
+   Neither returned partial output — a subagent that dies this way returns
+   **nothing**, not a truncated report, so the whole run is lost rather than
+   degraded. The main session kept working normally, which makes the limit look
+   like an agent-specific fault rather than an account-wide one.
+2. `SendMessage` is queued "for delivery at its next tool round". A `planner`
+   that is already composing its final message has no next tool round, so the
+   message was never read: the returned plan still carried "the slug is
+   unverified — **needs `researcher`**" as an open question, for a fact that had
+   been verified minutes earlier. The plan is not wrong, it is just stale, and
+   nothing in it says so.
+
+**Instead:** sequence research → plan, and treat the research report as an
+*input* you paste into the planner prompt, not as an update you send later. A
+subagent's prompt is the only channel guaranteed to be read. If you must run them
+concurrently, plan to reconcile the two outputs **yourself** afterwards and
+budget for it — folding four verified findings into a finished plan by hand cost
+more than serializing would have.
+
+Two smaller consequences worth carrying:
+
+- Give the planner the inventory you already have (`path:line`) and ask it to
+  *verify and correct* rather than rediscover. That worked well here — it
+  returned six corrections to line numbers and claims, including five stale
+  docblocks where the brief said two.
+- When a subagent dies on an account limit, its work is gone; there is no resume
+  that recovers a partial report. Doing the inventory inline in the main session
+  is the cheaper fallback, not a re-launch.
+
+**Where:** the plan produced this way is `specs/l03-intent-layer.md`; the
+findings that had to be folded in by hand are its §"External findings of record".
+Agent definitions are `.claude/agents/{researcher,planner}.md`; the set and its
+registration surfaces are `.claude/agents/README.md`.
+
 ### 2026-08-06 — `pr-self-review` cannot gate a PR built in a secondary git worktree — the script `cd`s to the primary root
 
 **Tried:** building a deliberately-broken demo PR in a detached worktree
@@ -438,6 +486,43 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-08 — Adding a prompt slot to `reviewer-core` is TWO edits: `promptTokenCounts` is a hand-written list, not a loop
+
+**Rule:** when you add an optional section to `assemblePrompt` — the `intent`
+slot, or whatever comes after it — add a matching row to the `sections` array in
+the server's `promptTokenCounts` **in the same change**. Adding only the slot
+compiles, passes every test, renders correctly in the trace drawer, and silently
+omits that section from `prompt_assembly.token_counts`.
+
+**Why:** the function looks like it derives its keys from the assembly, and the
+`PromptAssembly` contract it consumes is a Zod object it could iterate. It does
+not — it is an explicit eight-pair literal (`system`, `skills`, `memory`,
+`specs`, `callers`, `repo_map`, `pr_description`, `user`), and its loop skips
+`null` entries. A ninth key on the assembly is simply never asked about.
+
+The failure is invisible in the direction you would check. `token_counts` is
+`.nullish()` and per-key optional by design, precisely so traces written before
+L02 stay parseable — so "my section has no token count" is indistinguishable
+from "this trace predates the feature". Nothing types it, nothing tests it, and
+the trace still renders.
+
+That matters because per-section attribution is the whole point of the field:
+its own contract comment says it exists so that "the skills block added N tokens"
+is a number rather than a guess. A new slot with no row is a slot whose cost you
+cannot argue about — which is exactly when you need the number, since root
+`INSIGHTS.md` (2026-08-02) records a prompt addition making a review measurably
+*worse*.
+
+Note the two files are in different packages, so neither package's typecheck can
+see the coupling.
+
+**Where:** the list is `server/src/modules/reviews/helpers.ts:107-116`
+(`promptTokenCounts`), called at `server/src/modules/reviews/run-executor.ts:343`;
+the slots it must track are `reviewer-core/src/prompt.ts:104-121` and the
+`assembly` object at `:129-138`; the contract is
+`server/src/vendor/shared/contracts/trace.ts:39-64` (`token_counts` at `:64`,
+nullish for the jsonb reason). Planned use in `specs/l03-intent-layer.md` Step 6.
 
 ### 2026-08-08 — Check a body constraint's stated REASON against the frontmatter, not just its conclusion — a right rule with a wrong reason invites you to delete it
 
@@ -822,6 +907,96 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 
 ## Tool & Library Notes
 
+### 2026-08-08 — A `.nullish()` z.enum DOES survive `toJsonSchema` — and `Finding.kind` had already proved it in production
+
+**Quirk:** adding an optional enum to the structured-output contract looks risky,
+because the only documented precedent (`Finding.skill`) is a nullish **string**,
+and the two convert to different JSON Schema shapes:
+
+| Zod | `zodResponseFormat` output |
+|---|---|
+| `z.string().nullish()` | `{ "type": "string", "nullable": true }` |
+| `z.enum([...]).nullish()` | `{ "anyOf": [{ "type": "string", "enum": [...] }, { "type": "null" }] }` |
+
+Both land in `required` — OpenAI's converter puts **every** property there and
+expresses optionality through nullability instead, which is why a missing key
+still parses on the Zod side while the schema says the field is required.
+
+The part worth knowing before you go looking: **the repo already ships a nullish
+enum in that exact schema.** `Finding.kind` is `FindingKind.nullish()`, and
+`Finding` is handed straight to `completeStructured` as part of `Review`. So the
+`anyOf` shape has been going to real providers since before L03, and
+"unverified" was a question that the existing contract had already answered.
+
+**Workaround:** none needed — use `z.enum([...]).nullish()` directly. Verify a
+new one the cheap way rather than reasoning about it: `toJsonSchema(Review,
+'Review')` and read `properties.findings.items.properties.<field>`. The fallback
+that was planned for this (`z.string().nullish()` with the values named in
+`.describe()` and normalised server-side) is **not** required and would have cost
+a hand-rolled normaliser plus the loss of Zod-side rejection of a bogus value.
+
+Note the general lesson, since the same trap is set for the next optional field:
+check whether a sibling field in the same object already has the shape you are
+unsure about, before treating the question as open. Also note `nullable: true` is
+an OpenAPI-ism rather than standard JSON Schema draft-07 — it is what the bundled
+converter emits for a nullish string, and it is not the shape an enum gets.
+
+**Where:** converter at `reviewer-core/src/llm/structured.ts:19`
+(`toJsonSchema` → `zodResponseFormat`); the pre-existing nullish enum is
+`server/src/vendor/shared/contracts/findings.ts:71` (`kind`), the new one is
+`:112` (`scope`); the schema reaches the model at
+`reviewer-core/src/review/run.ts:176`. Guard test:
+`server/test/prompt-structured.test.ts` ("a NULLISH ENUM survives toJsonSchema").
+This **corrects** `specs/l03-intent-layer.md` §Risks 10, which recorded it as
+unproven.
+
+### 2026-08-08 — OpenRouter structured-output support is per-ENDPOINT, not per-model — and our request carries no guard, so the symptom is a retry loop, not a routing error
+
+**Quirk:** `response_format: { type: 'json_schema', …, strict: true }` is not a
+property of a model on OpenRouter. Its own guide: "Support is determined per
+endpoint, not just per model: the same model may be served by multiple providers,
+and only some of those providers may support structured outputs." And on strict
+mode: "Enforcement varies by provider: some guarantee schema-conforming output,
+while others translate your schema into their own structured-output format or
+treat it as a strong hint."
+
+Measured on `deepseek/deepseek-v4-flash-0731` via
+`/api/v1/models/<slug>/endpoints`: DeepInfra and DigitalOcean advertise
+`structured_outputs`; StreamLake, BaseTen, CoreWeave and GMICloud advertise only
+`response_format`. So the *same* model id can be served by an endpoint that
+honours the schema and by one that treats it as advice, and which you get is a
+routing decision you are not making.
+
+What makes it expensive is the failure mode. `OpenRouterProvider.completeStructured`
+reprompts on a parse failure up to `maxRetries + 1` times and then throws
+`… failed schema validation for <SchemaName>`. That reads as "this model is too
+weak for structured output" — so the natural response is to switch to a bigger,
+pricier model, which may well work purely because it routed elsewhere. Nothing in
+the error mentions the provider.
+
+**Workaround:** send OpenRouter's provider-routing flag —
+`provider: { require_parameters: true }`, documented as "the request won't even
+be routed to that provider" when it does not support every parameter sent. Today
+the request at `openrouter.ts:69-84` has **no** `provider` key at all, and
+`StructuredRequest` has no field to carry one, so this needs a field on the
+shared contract (both copies) threaded through with the same conditional-spread
+shape the file already uses for `session_id` and `usage`.
+
+Make it **opt-in**, not default-on: switching it on globally changes which
+providers serve every existing review run, invisibly and possibly at a different
+price. A new caller can ask for it; changing the fleet is its own decision.
+
+**Where:** the request is `reviewer-core/src/llm/openrouter.ts:69-84` (the
+`response_format` block at `:74-77`, the conditional spreads at `:80` and `:83`);
+the contract with no room for it is `server/src/vendor/shared/adapters.ts:55-70`
+(`StructuredRequest`), copied at `client/src/vendor/shared/adapters.ts`; the
+retry loop that hides the cause is `openrouter.ts:68-115`
+(`parseWithRepair` + the final throw). Upstream:
+`https://openrouter.ai/docs/guides/features/structured-outputs` and
+`https://openrouter.ai/docs/guides/routing/provider-selection`. Verified
+2026-08-08; design decision recorded in `specs/l03-intent-layer.md`
+§"External findings of record" 2.
+
 ### 2026-08-08 — `skills:` and `permissionMode:` exist in subagent frontmatter — and `permissionMode: plan` needs a body rule, because `ExitPlanMode` is stripped
 
 **Quirk:** the entry below lists the frontmatter fields the repo's first subagent
@@ -1030,6 +1205,27 @@ catch the divergence because each package typechecks in isolation and both pass.
 **Takeaway:** always edit the canon and port the change in the same commit.
 Before touching contracts, check: `diff -r server/src/vendor/shared
 client/src/vendor/shared`.
+
+**Superseded by:** 2026-08-08 — the recurring error is real and the takeaway
+stands, but two of its specifics are now false, and both mislead in the
+expensive direction (they make you plan work that is already done).
+
+1. **`openrouter` is NOT missing from the client's `Provider` union.**
+   `client/src/vendor/shared/contracts/knowledge.ts:312` reads
+   `z.enum(['openai', 'anthropic', 'openrouter'])`. So setting a client-side
+   default to the `openrouter` provider typechecks today, and no porting step is
+   needed for it. Re-verified 2026-08-08 while planning L03, which had budgeted
+   for exactly that port.
+2. **There IS sync tooling now.** `scripts/check-shared-sync.sh` freezes today's
+   drift as `scripts/shared-sync.baseline` and fails only on **new** drift, with
+   comments and blank lines ignored. It is the check to run, not `diff -r` — the
+   2026-08-02 "What Doesn't Work" entry explains why a blanket `diff -r` can
+   never be empty here. Use `--update` to re-record the baseline deliberately.
+
+The other four names in the symptom above are unchanged and still absent from the
+client copy: `AgentManifest`, `AgentVersionConfig`, `CommitFilesPayload` and
+`sessionId` each appear in `server/src/vendor/shared` and in **no** file under
+`client/src/vendor/shared`. Closing that gap is still its own task.
 
 ## Session Notes
 

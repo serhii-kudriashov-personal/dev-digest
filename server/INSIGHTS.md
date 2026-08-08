@@ -11,6 +11,55 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
+### 2026-08-08 — A never-throw facade is untestable through its production caller the moment that caller has its own containment `.catch` — test the guarantee at the service
+
+**Pattern:** when a port documents "this never throws" (`RepoIntel`, now
+`IntentFacade`), write the proof against the **service**, driving each failure in
+through `ContainerOverrides`, and assert two things per case: that the call
+returned `null`, and a **distinguishing string** from the layer that was supposed
+to fail — the provider's `503`, the schema name, the missing key's name. Without
+the second assertion the test only proves that `null` came back from somewhere,
+which is also what a stub returning `null` at step 1 proves.
+
+Assert as well that **nothing was persisted**. A half-written row is worse than a
+clean failure: on the next call it reads as a valid cache and silently suppresses
+the retry, so the degraded path succeeds once and then stops running at all.
+
+**Why:** the obvious place to test it is the caller, and that test is a trap. The
+L03 pre-work step is `container.intent.ensure(...).catch(() => null)` in
+`run-executor.ts`, and the integration case "a throwing `ensure` still lets the
+review run to completion" passes **because of the `.catch`** — it proves the
+caller's resilience, a different property. If `ensure` regressed to throwing,
+nothing would go red.
+
+The reflex fix — delete the `.catch` so the contract becomes load-bearing — is
+wrong here, and the reason generalises. That step sits **outside** the try/catch
+that calls `failAll`, and `executeRuns` runs in the background un-awaited by the
+route, so an escaping throw is an unhandled rejection that leaves every queued
+run with no status and no trace. The `.catch` is a containment boundary, not a
+duplicate guarantee. Keep it, and move the proof to where the guarantee lives.
+
+Two placement notes that cost time. These tests have to be `*.it.test.ts`: the
+service constructs its repository from `container.db` and `ensure` reads the pull
+**before** any failure path is reachable, so a hermetic fake `db` makes every
+case return `null` at step 1 — green for the wrong reason. And append them to the
+existing `.it.test.ts` file for that slice rather than starting a new one, so the
+Postgres container starts once.
+
+One limb stays untested and that is the honest outcome: "a DB hiccup returns
+`null`" cannot be forced without either corrupting the shared fixture for every
+other case in the file, or stubbing `container.db` — which short-circuits the
+test. It rests on the same single `try/catch` the other four limbs exercise.
+
+**Where:** the contract is `src/modules/intent/types.ts` (`IntentFacade`
+docblock); the implementation's single `try/catch` is `src/modules/intent/service.ts`
+(`ensure`); the containment boundary and the reason it stays are commented at
+`src/modules/reviews/run-executor.ts` (the `Deriving PR intent` step); the proof
+is `test/intent.it.test.ts` (`describe('the degraded contract — ensure NEVER
+throws')`, five cases incl. "nothing persisted on failure"); the caller-side test
+that does NOT prove it is `test/reviews.it.test.ts`. Precedent for the port shape
+is `RepoIntel` (`src/modules/repo-intel/types.ts`).
+
 ### 2026-08-03 — `--no-file-parallelism` makes the integration suite deterministic AND faster; re-running is the wrong fix
 
 **Pattern:** run the DB-backed suite serialized, always:
@@ -55,6 +104,57 @@ to probe.
 ("Commands") without the flag — add it there if you touch that table.
 
 ## What Doesn't Work
+
+### 2026-08-08 — Adding a pre-work step to the review executor made `reviews.it.test.ts` spend REAL money, because `.env` holds live keys and that file mocks only ONE provider
+
+**Tried:** wiring L03's intent derivation into `ReviewRunExecutor.executeRuns` as
+shared pre-work (one `container.intent.ensure` per queued batch, exactly like the
+callers digest), then running the existing integration suite unchanged.
+
+**Failed:** `reviews.it.test.ts` went from ~25s to **562s** with cascading
+timeouts, and it was making real, billable calls the whole time. Two live
+credentials, both from `server/.env`, which the test config loads:
+
+1. **OpenRouter.** `appWith` overrides `llm: { [provider]: … }` — one key, either
+   `openai` or `anthropic`. The `review_intent` feature default is now
+   `openrouter`, so `container.llm('openrouter')` fell through to the real
+   `OpenRouterProvider` built from `OPENROUTER_API_KEY` and classified intent
+   against the live API, once per review run.
+2. **GitHub.** The seeded PR body reads "Add rate limiting. Closes #471", so the
+   intent pipeline resolved a linked issue and called `api.github.com` for issue
+   #471 on a repo that does not exist, through the real Octokit client built from
+   `GITHUB_TOKEN`.
+
+Neither announces itself. There is no "you are online" warning; the only symptom
+is a slow suite and `trace.prompt_assembly` coming back undefined as unrelated
+assertions time out — which reads exactly like the flake documented below.
+
+**Instead:** when a shared pre-work step is added to the executor, every
+integration test that triggers a review has to mock the ports that step newly
+reaches. Here the honest fix is to stub the facade itself, so the pre-work does
+no I/O at all and those tests keep testing what they are about:
+
+```ts
+const nullIntent = () => ({ async get() { return null; }, async ensure() { return null; } });
+// …overrides: { …, intent: nullIntent() }
+```
+
+The generalisable rule: **`ContainerOverrides` is only a seam for the ports a
+test knows to override.** A new `container.<port>` consumer in a shared code path
+silently un-mocks every existing test that did not name it, and a partial
+override map (`llm` keyed by ONE provider id) is the most dangerous shape,
+because it looks complete. Before adding a container call to `run-executor.ts`,
+grep the integration tests for `overrides:` and check each one covers the new
+edge. Note the two keys are in `server/.env` rather than
+`~/.devdigest/secrets.json`, so "no secrets file" is not evidence of a hermetic
+environment.
+
+**Where:** the pre-work step is `src/modules/reviews/run-executor.ts` (the
+`Deriving PR intent` `runLog.step`); the stub and the reasoning comment are in
+`test/reviews.it.test.ts` (`nullIntent`, used by `appWith`); the feature default
+that routes to OpenRouter is
+`src/vendor/shared/contracts/platform.ts:53-61`; the issue lookup is
+`src/modules/intent/pipeline.ts` (`collectSources`, the `linked_issue` block).
 
 ### 2026-08-05 — Porting `upstream/reference/full-build`'s conventions module fails three of this repo's own gates
 
@@ -183,6 +283,50 @@ testcontainers.
 
 ## Codebase Patterns
 
+### 2026-08-08 — `no-cross-slice-import` scopes its `from` to `^src/modules/` — which is WHY the container may import a slice's service and a sibling slice may not
+
+**Rule:** when slice A needs something slice B owns, put a facade port in
+`modules/B/types.ts`, construct B's service in `platform/container.ts`, and let A
+reach it as `container.<b>`. Do not import `modules/B/service.js` from anywhere
+under `src/modules/`. This is not a style preference — it is the only shape the
+gate permits, and the reason is in the rule's *selector*, not in its target.
+
+**Why:** `no-cross-slice-import` is
+`from: { path: '^src/modules/([^/]+)/' }` → `to: { path: SLICE_PRIVATE, pathNot: '^src/modules/$1/' }`,
+with `SLICE_PRIVATE` = `^src/modules/[^/]+/(service|repository|routes|helpers|run-executor)`.
+Both halves matter and only one of them is ever quoted:
+
+- `modules/reviews/run-executor.ts` → `modules/intent/service.ts` **fires** — the
+  importer is under `^src/modules/`, the target is `SLICE_PRIVATE`. This is the
+  failure the 2026-08-05 conventions entry records.
+- `platform/container.ts` → `modules/intent/service.ts` **does not fire** —
+  `container.ts` is not under `^src/modules/`, so the `from` selector never
+  matches it at all. The container is exempt by construction, not by an allowlist
+  anyone maintains.
+- `run-executor.ts` → `import type { IntentFacade } from '../intent/types.js'` is
+  legal twice over: `types.ts` is not in `SLICE_PRIVATE`, **and**
+  `tsPreCompilationDeps: false` means a type-only import produces no graph edge.
+
+`backend-onion-architecture` §4 states the container-facade rule in prose, which
+reads as convention. The mechanism that makes it enforceable is visible only in
+the config, and knowing it changes what you do when the gate fires: the fix is to
+move the edge to the container, never to widen `SLICE_PRIVATE`. `container.repoIntel`
+is the worked example and exists in exactly this shape for exactly this reason.
+
+Two traps the same selectors create, neither caught by anything:
+
+- `SLICE_PRIVATE` does not list `pipeline.ts` or `constants.ts`, so another slice
+  can import them and the gate stays green. Treat everything in a slice except
+  `types.ts` as private by contract.
+- `no-sql-in-service` matches only `(service|helpers).ts`, so a file named
+  `pipeline.ts` may hold Drizzle with no complaint — the honesty problem the
+  2026-08-05 entry already names about `conventions/extract-pipeline.ts`.
+
+**Where:** rule at `server/.dependency-cruiser.cjs:128-139`, `SLICE_PRIVATE` at
+`:65`, `no-sql-in-service` at `:88-101`, `tsPreCompilationDeps` in `options`
+(`:216`); the exempt importer is `src/platform/container.ts:25-29` (four module
+internals already imported) and the facade precedent is `:120` (`get repoIntel()`).
+
 ### 2026-08-05 — A non-review caller of `assemblePrompt` must use the `diff` slot, and will be mislabelled
 
 **Rule:** when you call `assemblePrompt` for something that is not a diff review —
@@ -273,6 +417,49 @@ the editor field is
 `client/src/app/agents/[id]/_components/AgentEditor/_components/ConfigTab/ConfigTab.tsx:130`.
 
 ## Tool & Library Notes
+
+### 2026-08-08 — `deepseek/deepseek-v4-flash` and `…-flash-latest` are DIFFERENT models at different prices, and the pricier one is the one already hardcoded here
+
+**Quirk:** the two slugs look like the same model with an optional freshness
+suffix. They are not. Verified against OpenRouter's live `/api/v1/models`:
+
+| Slug | Resolves to | Price / 1M |
+|---|---|---|
+| `~deepseek/deepseek-v4-flash-latest` | `deepseek/deepseek-v4-flash-0731` (moving alias) | $0.09 / $0.18 |
+| `deepseek/deepseek-v4-flash` | `deepseek/deepseek-v4-flash-20260423` | **$0.14 / $0.28** |
+
+Both numbers are real — this is two dated snapshots, not a stale price book. The
+alias carries `alias_target: deepseek/deepseek-v4-flash-0731` and is described as
+"always redirects to the latest model in the DeepSeek V4 Flash family", so its
+target moves whenever DeepSeek ships a new V4 Flash.
+
+The bare, pricier slug is the one this repo already commits to in two places:
+the cost table, and the OpenRouter default every conventions extraction uses when
+the workspace has picked nothing. So "switch to the cheap DeepSeek flash model"
+is not a no-op — done by editing a feature default it produces a run whose cost
+is attributed from the *other* snapshot's prices, silently and with no error.
+
+**Workaround:** pin the **dated** slug (`deepseek/deepseek-v4-flash-0731`) rather
+than the alias whenever the model backs something that will be measured, and add
+its own row to `pricing.ts` instead of assuming the existing `deepseek/…-flash`
+row covers it. The reason to avoid the alias is not cost — it is that
+`eval_cases` / `eval_runs` compare runs across time, and a slug that silently
+changes model makes a quality or cost regression unattributable. `pricing.ts`
+already asks for this in its own comment ("Slugs + prices are APPROXIMATE and
+must be confirmed against openrouter.ai/models before relying on cost"); the
+comment is easy to read as boilerplate rather than as an instruction.
+
+Unknown slugs fall through to `null` cost, which is safe and explicitly flagged —
+so a *wrong* slug is loud, but a *different-but-known* slug is silent. That
+asymmetry is the whole trap.
+
+**Where:** the price table is `src/adapters/llm/pricing.ts:31`, with the
+confirm-before-relying comment at `:27-29`; the OpenRouter default that uses the
+bare slug is `src/modules/conventions/constants.ts:121` (`DEFAULT_MODEL`); the
+feature-model registry that will point at the pinned slug is
+`src/vendor/shared/contracts/platform.ts:53-58` (mirrored in
+`client/src/vendor/shared` and again in `client/src/lib/feature-models.ts`).
+Decision recorded in `specs/l03-intent-layer.md` §"External findings of record".
 
 ### 2026-08-05 — `pnpm db:generate` goes INTERACTIVE when one migration both drops and adds a column
 
@@ -445,6 +632,59 @@ than relying on config auto-discovery. Same trap applies to any future
 
 ## Recurring Errors & Fixes
 
+### 2026-08-08 — The `prompt_assembly` flake is a run-vs-trace ordering race: the run is marked DONE before the trace is written
+
+**Symptom:** `TypeError: Cannot read properties of undefined (reading 'skills')`
+/ `(reading 'intent')` — `trace.prompt_assembly` is undefined after the test has
+already waited for the run to finish. Intermittent, and **which** test fails
+moves between runs.
+
+**Cause:** the entry below attributes this to `waitForPrRuns` counting every
+terminal `agent_runs` row for the PR cumulatively. That is real, but it cannot be
+the whole story: `runWithSkills` calls `setupRepoAndPr` and therefore gets a
+**fresh PR with zero prior runs** on every invocation, so there is nothing
+cumulative to over-count — and it still fails.
+
+The mechanism underneath is an ordering one in the executor itself.
+`completeAgentRun(runId, { status: 'done', … })` runs **before** the trace
+document is built and `saveRunTrace(runId, trace)` persists it. So there is a
+real window in which the run is terminal and `run_traces` has no row, and *any*
+waiter keyed on run STATUS — `waitForPrRuns`, or a per-`runId` status poll —
+returns inside it. `GET /runs/:id/trace` then answers without `prompt_assembly`.
+
+**Takeaway:** wait on the row you are about to assert on, not on a proxy for it.
+
+```ts
+async function waitForTrace(runId: string, timeoutMs = 10_000) {
+  const start = Date.now();
+  for (;;) {
+    const [row] = await pg.handle.db
+      .select().from(t.runTraces).where(eq(t.runTraces.runId, runId));
+    if (row) return row;
+    if (Date.now() - start > timeoutMs) return row;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+```
+
+Three L03 tests using this passed 3/3 consecutive runs while the neighbouring
+skills tests, still on `waitForPrRuns`, failed on one of them. Note the run is
+genuinely `done` at that point — this is not a product bug and the trace does
+arrive; it is only a test that asked the wrong question. Converting the remaining
+`waitForPrRuns` call sites is its own task.
+
+Before blaming your diff for any of this, get a baseline: the **unmodified**
+`HEAD` in a detached worktree flakes the same way (measured 2026-08-08: one run
+`2 failed | 17 passed`, the next `19 passed`, same code, same daemon), using the
+worktree recipe in the entry below.
+
+**Where:** the ordering is `src/modules/reviews/run-executor.ts` —
+`this.repo.completeAgentRun(runId, { status: 'done', … })` followed later by
+`this.repo.saveRunTrace(runId, trace)`; the racy shared helper is
+`test/helpers/runs.ts:14-34`; the trace-keyed waiter is `waitForTrace` in
+`test/reviews.it.test.ts` (the `L03 — the derived intent reaches the prompt`
+block); the table it polls is `src/db/schema/runs.ts:99` (`run_traces`).
+
 ### 2026-08-05 — `reviews.it.test.ts` fails on `prompt_assembly` for reasons that have nothing to do with your change
 
 **Symptom:** `TypeError: Cannot read properties of undefined (reading 'skills')` at
@@ -480,6 +720,13 @@ counting every row for the PR.
 
 **Where:** helper at `server/test/helpers/runs.ts:14-34`; call sites
 `server/test/reviews.it.test.ts:446` and `:452`.
+
+**Superseded by:** 2026-08-08 (the entry above) — the worktree-baseline advice
+stands and the cumulative count is real, but the diagnosis is incomplete, and the
+proposed fix would **not** have worked. `runWithSkills` creates a fresh PR per
+call, so filtering by `run_id` still returns inside the window: the executor
+marks the run `done` before `saveRunTrace` writes the trace. Wait on the
+`run_traces` row instead.
 
 ### 2026-08-03 — The jsonb `.nullish()` trap, second instance — and the fix is NOT to loosen the DTO
 
@@ -547,6 +794,44 @@ other delegated methods there.
 _Empty so far._
 
 ## Open Questions
+
+### 2026-08-08 — Two slices now import `settings/feature-models.ts`, and the §12 fix for it would break both
+
+**Question:** should per-feature model resolution move behind the container, the
+way `container.intent` and `container.repoIntel` already do?
+
+`modules/intent/service.ts` imports `resolveFeatureModel` from
+`../settings/feature-models.js`, and `modules/conventions/extract-pipeline.ts`
+imports `getFeatureModelOverride` from the same file. Both are cross-slice
+imports into another slice's private logic, and that file does its own reads
+(`await container.db`), so each importer transitively runs a `settings` SELECT
+outside its own repository.
+
+`pnpm arch` is green on both, and that is the uncomfortable part rather than a
+reprieve: `SLICE_PRIVATE` is a **filename allowlist**
+(`service|repository|routes|helpers|run-executor`), and `feature-models` is none
+of those. The `backend-onion-architecture` §12 fix shape for that file is "rename
+to `service.ts`" — the day anyone does, both imports start failing the gate at
+once, in two features neither of which owns the file.
+
+Accepted as debt for L03 deliberately, not overlooked: `specs/l03-intent-layer.md`
+prescribed `resolveFeatureModel`, the conventions precedent was already shipping,
+and a real fix touches two slices this plan had no mandate over and would need its
+own review. Recorded because the alternative is that the second instance looks
+like the first one's endorsement.
+
+**Blocked:** on a decision about scope, not on work. The container route is the
+one this repo already sanctions for exactly this shape, and it would let §12's
+rename happen without collateral. Whoever takes it fixes `conventions/` in the
+same change, or the rename stays blocked either way.
+
+**Where:** the two importers are `src/modules/intent/service.ts` and
+`src/modules/conventions/extract-pipeline.ts:5`; the file itself is
+`src/modules/settings/feature-models.ts` (its own read at `:41`); the rule that
+does not fire is `no-cross-slice-import` (`server/.dependency-cruiser.cjs:128-139`,
+`SLICE_PRIVATE` at `:65`) — see the Codebase Patterns entry above for why the
+container is exempt. The §12 row is in
+`.claude/skills/backend-onion-architecture/SKILL.md`.
 
 ### 2026-08-05 — `pull_rate` counts pre-provenance runs as "not pulled", so it reads 0% right after the migration
 
