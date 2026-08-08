@@ -11,6 +11,57 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
+### 2026-08-08 — A spec-conformance checker must extract the obligations FIRST — and must never be asked to "explain the problem and suggest a fix"
+
+**Pattern:** when writing any agent or prompt that checks code against a written
+spec, plan or acceptance list, fix this order and enforce it structurally:
+
+1. extract every obligation into a numbered list, quoting the source verbatim,
+   **before opening a single source file**, and end the list with a count;
+2. per item, state what it *requires*, then what the code *does*, then compare;
+3. emit exactly one row per item, one verdict from a **closed** enum, and an
+   evidence cell that is a `path:line` actually read or verbatim command output
+   — prose in that cell is itself a defect;
+4. make the row count the receipt: `N` items in, `N` rows out, counts summing
+   to `N`.
+
+And explicitly **forbid** the familiar framing "find the problems and propose
+fixes".
+
+**Why:** that framing is not neutral — it measurably makes the checker worse.
+[arXiv:2508.12358](https://arxiv.org/html/2508.12358v1) reports GPT-4o's
+rate of correctly recognising *correct* code collapsing from 52.4% to 11.0% on
+HumanEval when the prompt asked it to explain problems and propose fixes,
+recovering to 72.0% with a two-phase reflective prompt and 85.4% with a
+behavioural-comparison prompt (summarize spec behaviour and actual behaviour
+independently, then compare). The mechanism is intuitive once seen: the model
+starts hunting for defects before it has committed to a verdict, and it finds
+them whether or not they exist. Anthropic's own
+[best-practices](https://code.claude.com/docs/en/best-practices) says the same
+thing from the other side — "a reviewer prompted to find gaps will usually
+report some, even when the work is sound".
+
+Two supporting results worth carrying: checklist decomposition beats one
+holistic verdict on agreement and variance (CheckEval,
+[arXiv:2403.18771](https://arxiv.org/abs/2403.18771)), and LLM judges are
+self-inconsistent across identical repeated runs — Krippendorff's α 0.265–0.563
+— with few-shot and CoT making no difference
+([arXiv:2510.27106](https://arxiv.org/html/2510.27106v1)). So if a verdict ever
+gates something here, run it twice and escalate disagreement rather than
+trusting one pass.
+
+This generalises past the one agent: it is the same shape as
+`reviewer-core/src/grounding.ts`, which keeps a finding only when its cited
+lines exist in the diff. The non-LLM half of the check is the half that cannot
+be talked out of its answer.
+
+**Where:** the rules are `.claude/agents/plan-verifier.md` §Method (steps 1–6)
+and its `## Conformance` / `## Counts` template; the ban on advice is its
+§"Hard constraints" (`Banned output`) and the two-case admissibility test under
+`## Findings outside the plan`. Sources catalogued in
+`.claude/agents/README.md` §"External evidence — the reviewers and the test
+writer"; the design record is `specs/four-subagents.md`.
+
 ### 2026-08-05 — To make the model report a new field, `.describe()` the shared contract — then validate the answer server-side
 
 **Pattern:** two halves, and both are needed.
@@ -388,6 +439,177 @@ historical drift is its own task.
 
 ## Codebase Patterns
 
+### 2026-08-08 — Check a body constraint's stated REASON against the frontmatter, not just its conclusion — a right rule with a wrong reason invites you to delete it
+
+**Rule:** when a subagent's body says "you cannot X **because** you have no
+`Tool`", verify that clause against the `tools:` / `disallowedTools:` lines
+before acting on it. The conclusion and the reason drift independently, and the
+dangerous combination is a **true conclusion with a false reason** — because the
+obvious fix is to delete the rule.
+
+**Why:** `planner.md` §Discipline read "You cannot write insights. You have no
+`Skill` tool." Its frontmatter grants `Skill` — necessarily, since the agent's
+whole design is that it opens the same skills `implementer` will (§"Skills — you
+load the same set the implementer will"). Spotting the false half makes the
+natural move "remove the stale constraint". That would have been a bug: the
+conclusion is still correct, for a reason the line never mentions.
+`engineering-insights` appends to an `INSIGHTS.md`, and `planner` has neither
+`Write` nor `Edit` and runs in `permissionMode: plan`. The skill would load and
+fail at the write, spending a turn for nothing.
+
+So the constraint stays; only the reason is corrected. Note the shape: the rule
+survived review precisely *because* its conclusion was right, and nothing
+mechanical compares a body's factual claims to its own frontmatter.
+
+Same class as the entry below about prose falsified by a new agent — both are
+assertions no tooling validates, both read as authority. The cheap check when
+touching any agent: `rg -n 'you have no|you cannot|is denied' .claude/agents/*.md`
+and read each hit against that file's own `tools:` line.
+
+**Where:** the corrected bullet is `.claude/agents/planner.md` §Discipline (last
+item); its frontmatter is `.claude/agents/planner.md:4-5` (`tools:` includes
+`Skill`; `disallowedTools:` covers `Write`, `Edit`, `NotebookEdit`) and `:7`
+(`permissionMode: plan`). The same false claim in the map was
+`.claude/agents/README.md` §"This repo's own record" ("`planner` drops `Skill`
+wholesale"), now naming `researcher`, which is the agent that actually does.
+
+### 2026-08-08 — The `pr-self-review` verdict is written by the MODEL, not by the script — so `Write` is the gate, and denying `Skill` protects nothing
+
+**Rule:** when deciding whether an agent can forge the gate that lets a PR
+through, look at who writes `.devdigest/pr-self-review.json`. It is the model,
+following `pr-self-review/SKILL.md` §3 ("Write `.devdigest/pr-self-review.json`
+in the format `report.md` specifies"). `scripts/pr-self-review.sh` never writes
+it — its four subcommands are `state`, `files`, `gates`, `gate`, all read-only.
+
+So an agent with `disallowedTools: Write, Edit, NotebookEdit` **cannot** forge a
+verdict, whatever else it holds. Removing `Skill` from such an agent buys no
+extra safety and costs the entire skill catalogue plus `engineering-insights`.
+
+**Why:** the reflex is the opposite, and it is wrong in a way that looks
+rigorous. "There is no per-skill deny, therefore the only way to stop an agent
+running `pr-self-review` is to remove `Skill`" (entry below, 2026-08-08) is true
+about *invocation* and irrelevant to *effect*. Both new read-only reviewers were
+first written with `Skill` denied on exactly that reasoning; the worst outcome
+the denial actually prevented was a wasted context window. Meanwhile
+`implementer` — which holds **both** `Write` and `Skill`, and is therefore the
+strictly more dangerous case — has always been protected by a body contract
+alone. Defending the weaker position harder than the stronger one is the tell
+that the threat model was never written down.
+
+Two things follow for any future agent. First, ask what the dangerous *effect*
+needs, not what the dangerous *name* is: here it needs a file write, so deny the
+write. Second, `Bash` re-opens it (`echo … > .devdigest/…`), and that stays a
+body contract because `Bash` cannot be scoped by command pattern in frontmatter
+— so the honest statement is "blocked by mechanism through the obvious path,
+by contract through the shell", not "blocked".
+
+**Where:** the instruction that writes the file is
+`.claude/skills/pr-self-review/SKILL.md:120`; the script's subcommand dispatch
+is `scripts/pr-self-review.sh:376-379`; the hook that reads the verdict is
+`.claude/settings.json` (`PreToolUse` → `Bash`) via `cmd_gate`
+(`scripts/pr-self-review.sh:330-344`). The agents that now keep `Skill` with the
+prohibition as a contract are `.claude/agents/architecture-reviewer.md` and
+`.claude/agents/plan-verifier.md` §Hard constraints; the reasoning is recorded
+in `specs/four-subagents.md`.
+
+### 2026-08-08 — Registering a new agent has a FOURTH surface: a prose sentence that the new agent silently falsifies
+
+**Rule:** `.claude/agents/README.md` §"Writing another agent" lists three
+registration surfaces — that file, `.claude/skills/README.md` §Agents, and
+`AGENTS.md` §Read when. Treat it as three *tables* plus one more job: grep the
+same files for **prose claims about the set** and fix those too.
+
+**Why:** `.claude/agents/README.md` carried, immediately under the set table,
+"Architecture review and security review are **not** in this set. They are
+separate agents and a separate step." Adding `architecture-reviewer` made half
+of that sentence false while every table around it was correctly updated — and
+a false claim two lines under a correct table is worse than no claim, because a
+reader trusts the prose over the row. The same file's §"Why only two skills are
+preloaded" was a second one: its title, its opening sentence ("Both agents can
+reach all 14 skills") and its whole argument assumed exactly two agents held
+`Skill`. `.claude/skills/README.md` had a third — "The pair is a chain, not a
+team" — describing three of what are now seven.
+
+None of these is findable by diffing a table. The cheap check before calling the
+registration done: `rg -n 'not in this set|both agents|the pair|two agents'` over
+`.claude/agents/README.md` and `.claude/skills/README.md`, and read every heading
+that contains a number.
+
+This is the same class as the entry below about `routing.md` — a registry the
+tooling never validates, where the failure is silent and reads as authority.
+
+**Where:** the falsified sentence was `.claude/agents/README.md` §The set
+(now rewritten to say architecture review **is** in the set and security review
+still is not); the retitled section is §"What each agent preloads, and why";
+the rewritten chain sentence is `.claude/skills/README.md` §Agents. The
+five-point contract that needs the fourth point is
+`.claude/agents/README.md` §"Writing another agent".
+
+### 2026-08-08 — Package-level `docs/` and `specs/` already exist and are empty — and `e2e/specs/` is not a spec directory
+
+**Rule:** before deciding where a document goes, know that `client/`, `server/`
+and `reviewer-core/` each already have **both** `docs/` and `specs/`, and `e2e/`
+has `docs/`. All seven hold exactly one file: their own `README.md`. Nothing has
+ever been written into any of them. So "there is no package-scoped home for this
+document" is false, and creating one is wrong.
+
+The trap on top: **`e2e/specs/` is not a spec directory.** It holds nine
+`*.flow.json` deterministic browser flows (`01-app-boot.flow.json`,
+`02-repo-pulls-detail.flow.json`, …). A markdown spec written there would sit
+next to JSON that a runner globs.
+
+**Why:** a root-scoped look does not show this. `docs/` and `specs/` at the root
+have visible content (`docs/l02-experiment.md`, five files in `specs/`), so the
+package copies read as "not a thing here" — while every package `AGENTS.md`
+§Read when already points at them. The result is a document filed one level too
+high, in the shared `docs/`, where it competes with repo-wide decisions.
+
+The routing rule that follows: take the **narrower** home when two fit. A
+repo-wide document is what a package document becomes once a second package
+needs it — the same promotion logic as `frontend-ui-architecture` §2.
+
+**Where:** `client/docs/README.md`, `client/specs/README.md`,
+`server/docs/README.md`, `server/specs/README.md`,
+`reviewer-core/docs/README.md`, `reviewer-core/specs/README.md`,
+`e2e/docs/README.md`; the flows are `e2e/specs/*.flow.json`. The placement table
+that encodes all of this is `.claude/agents/doc-writer.md`
+§"Where each kind of document goes".
+
+### 2026-08-08 — Every agent that needs "which skill governs this file" reads `pr-self-review/routing.md` — never its own memory
+
+**Rule:** `.claude/skills/pr-self-review/routing.md` is this repo's single
+canonical path→skill table. Any agent, skill or session that has to decide which
+skill applies to a changed file derives it from that table and cites the row.
+Do not reconstruct the mapping from the skill catalogue, from a skill's
+`description`, or from what seems obvious.
+
+**Why:** the table is what keeps two agents with disjoint context windows from
+contradicting each other. `planner` names the skills per step by reading it
+(§Method 4); `implementer` loads exactly that list and self-routes against the
+*same* file when it must touch something the plan did not list (§Method 2). If
+each derived its own mapping instead, the plan would be held to one set of rules
+and the implementation to another — and the divergence surfaces only at review,
+as a finding neither agent could have predicted.
+
+It also encodes decisions that are not inferable from a skill's name: that
+`backend-onion-architecture` has nothing to say about a `.tsx` file and must not
+be opened for one (context spent, findings invented); that `zod` is what a
+`vendor/shared` change pulls in; that `e2e/**` and `.github/workflows/**` are
+covered by **no** skill and route to `e2e/AGENTS.md` and `TESTING.md` instead;
+and the sentinel paths (`server/src/db/migrations/**`,
+`reviewer-core/src/grounding.ts`, `INJECTION_GUARD`) that are a deliberate
+decision rather than a drive-by edit.
+
+Consequence when editing: adding a skill to `.claude/skills/` is only half the
+job — a skill with no row in `routing.md` is one no agent will ever be told to
+open. Add the row in the same change.
+
+**Where:** the table is `.claude/skills/pr-self-review/routing.md`, consumed at
+`.claude/skills/pr-self-review/SKILL.md:76` (step 3),
+`.claude/agents/planner.md` §Method 4 and `.claude/agents/implementer.md`
+§Method 2. The catalogue it must stay in step with is
+`.claude/skills/README.md` §Catalog.
+
 ### 2026-08-05 — "Created disabled until vetted" is about WHO wrote the body, not about `source !== 'manual'`
 
 **Rule:** a skill built from this repo's own extracted conventions is created
@@ -599,6 +821,98 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 "fix" there.
 
 ## Tool & Library Notes
+
+### 2026-08-08 — `skills:` and `permissionMode:` exist in subagent frontmatter — and `permissionMode: plan` needs a body rule, because `ExitPlanMode` is stripped
+
+**Quirk:** the entry below lists the frontmatter fields the repo's first subagent
+used. It is not wrong, but it is a floor, not the contract. Claude Code 2.1.223
+(`claude --version`) supports at least `name`, `description`, `tools`,
+`disallowedTools`, `model`, `permissionMode`, `maxTurns`, `skills`, `mcpServers`,
+`hooks`, `memory`, `background`, `effort`, `isolation`, `color`, `initialPrompt`
+— only `name` and `description` are required, and several are gated on
+v2.1.212+, so a definition written against them will silently misbehave on an
+older CLI. Three that change how you design an agent here:
+
+1. **`skills:` is the only deterministic way to get a skill into a subagent.**
+   It injects the skill's **full body** at startup, not its description. Without
+   it a subagent still *can* reach every project skill through the `Skill` tool,
+   but discovery is description-matching — the same non-deterministic mechanism
+   as the main session. So "the agent body mentions the skill by name" is not a
+   trigger, and never was.
+2. **`permissionMode: plan` on a subagent is a trap on its own.** Plan mode's
+   normal exit is `ExitPlanMode`, and that tool is stripped from every subagent
+   (see below). An agent that waits for a plan-approval prompt therefore waits
+   forever. The mode still buys a real enforced no-edit guarantee, so it is worth
+   having — but only with a hard rule in the body.
+3. **`disallowedTools` is applied first, then `tools` resolves against what
+   remains.** A tool named in both is removed. Listing a constraint twice is
+   redundant but harmless, and reads as documentation of intent.
+
+**Workaround:** when using `permissionMode: plan`, state in the body — in the
+hard-constraints section, not in passing — that the agent has no `ExitPlanMode`,
+must never attempt to call it, and that **its final message *is* the plan**.
+`planner.md` does exactly this. For skills, decide per agent: preload the one or
+two that apply to almost every task (`implementer` preloads
+`backend-onion-architecture` + `frontend-ui-architecture`, and its body says so,
+so it does not re-invoke them), and leave the long tail to `Skill` driven by an
+explicit list in the plan. Preloading all 13 would cost tens of thousands of
+tokens at startup for skills most runs never open. Whether that split actually
+routes the right skills is unmeasured — one run proves nothing, and
+`docs/l02-experiment.md` is how it would be settled.
+
+**Where:** fields in use at `.claude/agents/planner.md` (frontmatter +
+§"Hard constraints", the `ExitPlanMode` rule) and `.claude/agents/implementer.md`
+(`skills:` + §"What is already in your context"). Upstream reference:
+`https://code.claude.com/docs/en/sub-agents` §"Supported frontmatter fields" and
+§"Skills". Version checked: `claude --version` → 2.1.223.
+
+### 2026-08-08 — A subagent has no `AskUserQuestion`, and its tool list resolves differently in background than in foreground
+
+**Quirk:** three things about `.claude/agents/*.md` that the frontmatter does not
+hint at, all found while writing the repo's first subagent.
+
+1. **`AskUserQuestion` is stripped from every subagent**, even when named in
+   `tools`. So "ask before guessing" cannot be a tool call — a subagent's only
+   channel to the user is its final message. Same filter also removes `Agent` at
+   the depth limit, `EnterPlanMode`/`ExitPlanMode`, `Workflow`, `TaskOutput`,
+   `ScheduleWakeup`, `EndConversation`.
+2. **A second filter applies to background subagents, which is the default** (as
+   of v2.1.198 Claude Code backgrounds them unless it needs the result now). It
+   keeps every MCP tool but only these built-ins: `Read`, `Grep`, `Glob`, `Bash`,
+   `PowerShell`, `Edit`, `Write`, `NotebookEdit`, `WebFetch`, `WebSearch`,
+   `TodoWrite`, `Skill`, `ToolSearch`, `EnterWorktree`, `ExitWorktree`,
+   `Monitor`, `TaskStop`, `SendMessage`, `Artifact`. Anything else in `tools` is
+   dropped **with no error**, so one definition resolves to two different tool
+   sets depending on where it runs.
+3. **There is no per-skill deny.** `disallowedTools` takes tool names and
+   `mcp__server` patterns — not `Skill(deep-research)`. Blocking one skill means
+   disallowing the whole `Skill` tool, which also cuts the agent off from
+   `engineering-insights`.
+
+**Workaround:** encode the "ask first" requirement as a hard stop in the body —
+return *only* a `## Clarification needed` block as the final message, with the
+default assumptions it will fall back to — and never rely on a tool for it.
+Choose `tools` from the background-safe list above so foreground and background
+behave alike. When `Skill` is disallowed, have the agent surface insight-worthy
+findings as a line in its report for the caller to capture, since it cannot run
+the skill itself. `disallowedTools` is applied first, then `tools` resolves
+against what remains, so listing a constraint in both is redundant but harmless —
+`researcher.md` does it deliberately, as documentation of intent.
+
+**Superseded by:** 2026-08-08 (entry above) — every claim here still holds, but
+the field list it implies is incomplete: `skills:`, `permissionMode:`,
+`maxTurns:`, `hooks:`, `memory:`, `effort:` and `isolation:` are supported too.
+In particular point 3 ("there is no per-skill deny") is unchanged and still the
+reason `planner` denies `Skill` wholesale — but its converse now has an answer:
+`skills:` is how you deterministically get a *specific* skill *in*.
+
+**Where:** the definition is `.claude/agents/researcher.md` (frontmatter +
+§"Hard constraints" + §"Step 0"); registered in `AGENTS.md` §Read when and
+`.claude/skills/README.md` §Agents. Upstream reference:
+`https://code.claude.com/docs/en/sub-agents` §"Available tools" and
+§"Supported frontmatter fields". Note `.claude/agents/**` is not in
+`skills-lock.json`, so unlike most of `.claude/skills/**` it is ours to edit and
+will not be overwritten on sync.
 
 ### 2026-08-04 — Two shell traps on this machine that both exit 0 with no output
 

@@ -449,6 +449,44 @@ and the card's own per-finding rows.
 
 ## Recurring Errors & Fixes
 
+### 2026-08-08 — `@testing-library/user-event` is NOT installed here, so every interactive test uses `fireEvent` — copying that pattern spreads it
+
+**Symptom:** you write a new component test, reach for the interaction API the
+`react-testing-library` skill and the current RTL docs both tell you to use, and
+`userEvent` does not resolve. The path of least resistance is to copy a
+neighbouring test — and every neighbouring test uses `fireEvent`.
+
+**Cause:** `client/package.json` carries `@testing-library/react` and
+`@testing-library/jest-dom` but **not** `@testing-library/user-event`. All eight
+interactive test files use `fireEvent` as a result, and one reaches into the DOM
+directly (`fireEvent.click(container.querySelectorAll("button")[0]!)` at
+`SkillCard.test.tsx:105` and `:115`). Three more read text through
+`Array.from(card.querySelectorAll("span"))` instead of a role or text query.
+
+The distinction that matters: `fireEvent` dispatches one DOM event, while
+`userEvent` simulates the full interaction — pointer events, focus, the
+keyboard sequence a real user produces. So a `fireEvent.click` on a control that
+only responds after focus, or a disabled button, passes when the user's click
+would not.
+
+**Takeaway:** installing it is a **test-only devDependency** and is in scope for
+a testing task, provided it is reported: `cd client && pnpm add -D
+@testing-library/user-event`, then `userEvent.setup()` per test (not in a shared
+`beforeEach`). Do not migrate the existing eight as a drive-by — that is its own
+task with its own review. But do not copy them either: query by role or text,
+and reserve `querySelectorAll` for the case where no accessible query exists,
+saying so in a comment.
+
+**Where:** `client/package.json` (the missing dependency); the eight files are
+`SkillCard.test.tsx`, `ConventionCard.test.tsx`, `FindingCard.test.tsx`,
+`FindingsPanel.test.tsx`, `ReviewRunAccordion.test.tsx`,
+`RunTraceDrawer.test.tsx`, `RunHistory.test.tsx`, `FindingsCell.test.tsx`. The
+rule is `.claude/skills/react-testing-library/SKILL.md` §Query Priority and
+§userEvent, routed by `.claude/skills/pr-self-review/routing.md:18`; the
+permitted-exception wording is `.claude/agents/test-writer.md`
+§"The two permitted exceptions". Upstream:
+`https://testing-library.com/docs/user-event/intro/`.
+
 ### 2026-08-02 — Dropping `border` is NOT enough: `borderColor` and `borderWidth` are shorthands too
 
 **Symptom:** a red Next.js console overlay on the PR detail page — "Updating a
