@@ -96,6 +96,16 @@ async function setupRepoAndPr(db: PgFixture['handle']['db'], workspaceId: string
   return { repo: repo!, pr: pr! };
 }
 
+/** An intent facade that always reports "none derived" and performs no I/O. */
+const nullIntent = () => ({
+  async get() {
+    return null;
+  },
+  async ensure() {
+    return null;
+  },
+});
+
 d('A2 reviews + agents (Testcontainers pg)', () => {
   let pg: PgFixture;
   let workspaceId: string;
@@ -117,6 +127,15 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
       overrides: {
         embedder: new MockEmbedder(),
         git: new MockGitClient({ diff: DIFF }),
+        // Needed since L03: a review run now derives PR intent as shared
+        // pre-work. Left real, that reaches BOTH api.github.com (the seeded
+        // body says "Closes #471") and the OpenRouter API (the `review_intent`
+        // feature default) whenever those keys are configured — which they are
+        // in server/.env. A test must never touch the network, and never spend
+        // money. These tests are about skills and prompt assembly, so intent is
+        // stubbed to "none"; the L03 block below overrides it with real blocks
+        // to assert the wiring.
+        intent: nullIntent(),
         llm: {
           [provider]: new MockLLMProvider(provider, { structured }),
         },
@@ -626,6 +645,132 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
       const off = await makeSkill(app, 'l02-all-off', '## NONE\nReport a WARNING.', false);
       const { skills } = await runWithSkills(app, [off]);
       expect(skills).toBeNull();
+      await app.close();
+    });
+  });
+
+  describe('L03 — the derived intent reaches the prompt', () => {
+    /**
+     * A stub facade. `container.intent` is the sanctioned cross-slice channel,
+     * so overriding it is also the test seam — no DB row and no LLM call for
+     * the intent itself is involved here.
+     */
+    function intentStub(promptBlock: string | null, opts: { throws?: boolean } = {}) {
+      const record = {
+        pr_id: 'stub',
+        intent: 'Add rate limiting.',
+        in_scope: ['limiter'],
+        out_of_scope: [],
+        confidence: 'high' as const,
+        sources: ['pr_title_body' as const],
+      };
+      return {
+        async get() {
+          return null;
+        },
+        async ensure() {
+          if (opts.throws) throw new Error('intent blew up');
+          return promptBlock === null ? null : { record, promptBlock, stale: false };
+        },
+      };
+    }
+
+    function appWithIntent(intent: ReturnType<typeof intentStub>) {
+      return buildApp({
+        config: config(),
+        db: pg.handle.db,
+        overrides: {
+          embedder: new MockEmbedder(),
+          git: new MockGitClient({ diff: DIFF }),
+          llm: { openai: new MockLLMProvider('openai', { structured: REVIEW_FIXTURE }) },
+          intent,
+        },
+      });
+    }
+
+    /**
+     * Wait until THIS run's trace has actually been written.
+     *
+     * Deliberately neither `waitForPrRuns` nor a wait on run status. Both are
+     * racy for a trace assertion, for the SAME structural reason:
+     * `completeAgentRun` marks the run terminal BEFORE `saveRunTrace` persists
+     * the document, so "the run is done" does not imply "the trace exists" —
+     * which is what makes `trace.prompt_assembly` intermittently undefined
+     * (server/INSIGHTS.md, 2026-08-05). Waiting on the row we are about to
+     * assert on cannot race.
+     */
+    async function waitForTrace(runId: string, timeoutMs = 10_000) {
+      const start = Date.now();
+      for (;;) {
+        const [row] = await pg.handle.db
+          .select()
+          .from(t.runTraces)
+          .where(eq(t.runTraces.runId, runId));
+        if (row) return row;
+        if (Date.now() - start > timeoutMs) return row;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+
+    async function runAndTrace(app: Awaited<ReturnType<typeof buildApp>>) {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const agent = (
+        await app.inject({
+          method: 'POST',
+          url: '/agents',
+          payload: {
+            name: `l03-agent-${repo.id.slice(0, 8)}`,
+            provider: 'openai',
+            model: 'gpt-4.1',
+            system_prompt: 'review',
+          },
+        })
+      ).json();
+
+      const body = (
+        await app.inject({
+          method: 'POST',
+          url: `/pulls/${pr.id}/review`,
+          payload: { agentId: agent.id },
+        })
+      ).json();
+      const runId = body.runs[0].run_id;
+      await waitForTrace(runId);
+      const trace = (await app.inject({ method: 'GET', url: `/runs/${runId}/trace` })).json();
+      return { trace, runId };
+    }
+
+    it('an intent block lands in prompt_assembly AND is token-attributed', async () => {
+      const app = await appWithIntent(intentStub('Add rate limiting to /api.'));
+      const { trace } = await runAndTrace(app);
+      expect(trace.prompt_assembly.intent).toBe('Add rate limiting to /api.');
+      expect(trace.prompt_assembly.user).toContain('## PR intent (derived)');
+      // The second edit `promptTokenCounts` needs — without its row this is
+      // silently absent and looks like a trace that predates the feature.
+      expect(trace.prompt_assembly.token_counts.intent).toBeGreaterThan(0);
+      await app.close();
+    });
+
+    it('no intent ⇒ prompt_assembly.intent is null and the run completes normally', async () => {
+      const app = await appWithIntent(intentStub(null));
+      const { trace } = await runAndTrace(app);
+      expect(trace.prompt_assembly.intent ?? null).toBeNull();
+      expect(trace.prompt_assembly.user).not.toContain('## PR intent (derived)');
+      expect(trace.prompt_assembly.token_counts.intent).toBeUndefined();
+      await app.close();
+    });
+
+    it('an ensure() that THROWS still lets the review run to completion', async () => {
+      // The degraded contract, end to end: intent is enrichment, never a
+      // dependency, so a broken derivation must not fail a review.
+      const app = await appWithIntent(intentStub(null, { throws: true }));
+      const { trace, runId } = await runAndTrace(app);
+      const [row] = await pg.handle.db
+        .select()
+        .from(t.agentRuns)
+        .where(eq(t.agentRuns.id, runId));
+      expect(row!.status).toBe('done');
+      expect(trace.prompt_assembly.intent ?? null).toBeNull();
       await app.close();
     });
   });

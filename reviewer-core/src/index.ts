@@ -22,6 +22,10 @@ export {
 // Citation grounding — the mandatory mechanical gate for diff findings.
 export { groundFindings, groundingSummary, type GroundingResult } from './grounding.js';
 
+// Scope gate — the deterministic out-of-scope filter, bounded by a CRITICAL
+// escape hatch. A sibling of grounding: both are gates, not code.
+export { applyScopeGate, scopeSummary, type ScopeResult } from './scope.js';
+
 // Structured-output helpers (Zod → JSON Schema + parse-with-repair).
 export {
   toJsonSchema,

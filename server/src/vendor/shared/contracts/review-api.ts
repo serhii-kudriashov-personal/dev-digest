@@ -56,8 +56,54 @@ export const ReviewRunResponse = z.object({
 });
 export type ReviewRunResponse = z.infer<typeof ReviewRunResponse>;
 
-/** Intent persisted for a PR (the Intent plus the pr_id it scopes). */
-export const PrIntentRecord = Intent.extend({ pr_id: z.string() });
+/**
+ * Source labels for a derived intent. LABELS ONLY — never the content itself.
+ * That is what makes "no diff bodies and no excess content are recorded"
+ * checkable by the type rather than by review.
+ */
+export const IntentSourceLabel = z.enum([
+  'pr_title_body',
+  'linked_issue',
+  'linked_spec',
+  'hunk_headers',
+  'commit_messages',
+]);
+export type IntentSourceLabel = z.infer<typeof IntentSourceLabel>;
+
+/** Deterministic, server-computed confidence tier for a derived intent. */
+export const IntentConfidence = z.enum(['high', 'medium', 'low']);
+export type IntentConfidence = z.infer<typeof IntentConfidence>;
+
+/**
+ * Intent persisted for a PR (the Intent plus the pr_id it scopes), with the
+ * derivation metadata L03 added.
+ *
+ * Every added field is NULLISH, not nullable: rows written before L03 have no
+ * value for any of them, and `.nullable()` rejects a MISSING key.
+ */
+export const PrIntentRecord = Intent.extend({
+  pr_id: z.string(),
+  /** The commit the intent was derived from — what makes staleness decidable. */
+  head_sha: z.string().nullish(),
+  /**
+   * DETERMINISTIC tier, computed server-side from which sources were actually
+   * present. This is the number the UI shows.
+   */
+  confidence: IntentConfidence.nullish(),
+  /**
+   * The model's own self-rated confidence. STORED, NOT TRUSTED — verbalized LLM
+   * confidence is systematically overconfident, and this repo has already
+   * measured `findings.confidence` returning 1.0 for a hallucination.
+   */
+  model_confidence: z.number().min(0).max(1).nullish(),
+  sources: z.array(IntentSourceLabel).nullish(),
+  provider: z.string().nullish(),
+  model: z.string().nullish(),
+  /** ISO timestamp of the derivation. */
+  generated_at: z.string().nullish(),
+  /** Derived at READ time: `head_sha` !== the pull's current head_sha. */
+  stale: z.boolean().nullish(),
+});
 export type PrIntentRecord = z.infer<typeof PrIntentRecord>;
 
 /** Smart-diff response for a PR (the SmartDiff). */

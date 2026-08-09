@@ -66,6 +66,16 @@ export interface PromptParts {
    * undefined → section omitted.
    */
   prDescription?: string;
+  /**
+   * The DERIVED PR intent block (L03) — what this PR is for and what it
+   * deliberately does not cover. Untrusted: it is distilled from the PR body,
+   * the linked issue and the linked spec, all author-controlled, so it is
+   * delimiter-wrapped exactly like `prDescription`. `INJECTION_GUARD` already
+   * names "derived intent/scope" as data and already states that stated intent
+   * can never descope a real defect. Empty / undefined → section omitted, and
+   * the prompt is byte-identical to what it was before.
+   */
+  intent?: string;
   /** The unified diff / user task (untrusted content). */
   diff: string;
   /** Optional task framing line, e.g. "Review PR #482 '…'". */
@@ -101,10 +111,19 @@ export function assemblePrompt(parts: PromptParts): AssembledPrompt {
       ? parts.prDescription.slice(0, MAX_PR_DESCRIPTION_CHARS)
       : undefined;
 
+  // Normalized once, so the trace records a non-null `intent` exactly when the
+  // section was actually emitted — a whitespace-only block must not read as
+  // "an intent was injected".
+  const intentBlock =
+    parts.intent && parts.intent.trim().length > 0 ? parts.intent : undefined;
+
   const userSections: string[] = [];
   if (parts.task) userSections.push(parts.task);
   if (prDescription) {
     userSections.push(`## PR description\n${wrapUntrusted('pr-description', prDescription)}`);
+  }
+  if (intentBlock) {
+    userSections.push(`## PR intent (derived)\n${wrapUntrusted('intent', intentBlock)}`);
   }
   if (skillsBlock) userSections.push(`## Skills / rules\n${skillsBlock}`);
   if (memoryBlock) userSections.push(`## Relevant memory\n${memoryBlock}`);
@@ -134,6 +153,7 @@ export function assemblePrompt(parts: PromptParts): AssembledPrompt {
     callers: parts.callers ?? null,
     repo_map: parts.repoMap ?? null,
     pr_description: prDescription ?? null,
+    intent: intentBlock ?? null,
     user,
   };
 

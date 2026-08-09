@@ -136,3 +136,101 @@ describe('reviewPullRequest (engine)', () => {
     expect(seen.every((s) => s === 'sess-abc')).toBe(true);
   });
 });
+
+describe('reviewPullRequest — the scope gate (L03)', () => {
+  // Two grounded findings on line 11 (which IS in the MockGitClient diff), so
+  // grounding keeps both and only the scope gate can change the outcome.
+  const scopedFixture = {
+    verdict: 'request_changes',
+    summary: 'two issues',
+    score: 50,
+    findings: [
+      {
+        id: 'in',
+        severity: 'WARNING',
+        category: 'bug',
+        title: 'in-scope warning',
+        file: 'src/config.ts',
+        start_line: 11,
+        end_line: 11,
+        rationale: 'related to the stated intent',
+        confidence: 0.8,
+        kind: 'finding',
+        scope: 'in_scope',
+      },
+      {
+        id: 'out',
+        severity: 'WARNING',
+        category: 'style',
+        title: 'out-of-scope warning',
+        file: 'src/config.ts',
+        start_line: 11,
+        end_line: 11,
+        rationale: 'unrelated to the stated intent',
+        confidence: 0.8,
+        kind: 'finding',
+        scope: 'out_of_scope',
+      },
+    ],
+  };
+
+  it('WITHOUT intent: both findings survive and the score is the pre-L03 value', async () => {
+    const llm = new MockLLMProvider('openai', { structured: scopedFixture });
+    const diff = await new MockGitClient().diff();
+    const outcome = await reviewPullRequest({
+      systemPrompt: 's',
+      model: 'gpt-4.1',
+      diff,
+      llm,
+    });
+    expect(outcome.review.findings).toHaveLength(2);
+    expect(outcome.scopeDropped).toHaveLength(0);
+    // Two WARNINGs at a penalty of 12 each ⇒ 100 − 24 = 76, exactly the score
+    // the engine produced before L03.
+    expect(outcome.review.score).toBe(76);
+  });
+
+  it('WITH intent: the sole out-of-scope warning is kept (one signal always survives)', async () => {
+    const llm = new MockLLMProvider('openai', { structured: scopedFixture });
+    const diff = await new MockGitClient().diff();
+    const outcome = await reviewPullRequest({
+      systemPrompt: 's',
+      model: 'gpt-4.1',
+      diff,
+      llm,
+      intent: 'Adds a rate limiter to /api.',
+    });
+    expect(outcome.review.findings).toHaveLength(2);
+    expect(outcome.scopeDropped).toHaveLength(0);
+  });
+
+  it('WITH intent: surplus out-of-scope findings are dropped and reported as events', async () => {
+    const noisy = {
+      ...scopedFixture,
+      findings: [
+        ...scopedFixture.findings,
+        {
+          ...scopedFixture.findings[1]!,
+          id: 'out2',
+          title: 'second out-of-scope warning',
+          severity: 'SUGGESTION',
+        },
+      ],
+    };
+    const llm = new MockLLMProvider('openai', { structured: noisy });
+    const diff = await new MockGitClient().diff();
+    const events: string[] = [];
+    const outcome = await reviewPullRequest({
+      systemPrompt: 's',
+      model: 'gpt-4.1',
+      diff,
+      llm,
+      intent: 'Adds a rate limiter to /api.',
+      onEvent: (e) => events.push(e.msg),
+    });
+    expect(outcome.review.findings.map((f) => f.id)).toEqual(['in', 'out']);
+    expect(outcome.scopeDropped).toHaveLength(1);
+    // Never silent: the suppression is on the record.
+    expect(events.some((m) => m.includes('scope dropped'))).toBe(true);
+  });
+});

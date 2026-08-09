@@ -62,10 +62,12 @@ export function useDeleteRun(prId: string | null | undefined) {
   return useMutation({
     mutationFn: (runId: string) => api.del<{ ok: boolean }>(`/runs/${runId}`),
     // Deleting a run also deletes the review it produced (server-side), so drop
-    // both the timeline and the Review Runs list from cache.
+    // both the timeline and the Review Runs list from cache. Smart Diff's
+    // `finding_lines` feed the per-file badges, so it goes stale too.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
       qc.invalidateQueries({ queryKey: ["reviews", prId] });
+      qc.invalidateQueries({ queryKey: ["smart-diff", prId] });
     },
   });
 }
@@ -89,7 +91,10 @@ export function useDeleteReview(prId: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (reviewId: string) => api.del<{ ok: boolean }>(`/reviews/${reviewId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["reviews", prId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["reviews", prId] });
+      qc.invalidateQueries({ queryKey: ["smart-diff", prId] });
+    },
   });
 }
 
@@ -138,6 +143,25 @@ export function useRunReview() {
       }),
     onSuccess: (_d, { prId }) => {
       qc.invalidateQueries({ queryKey: ["reviews", prId] });
+      // Smart Diff's `finding_lines` are what the per-file badges count, so a
+      // finished run must refresh them too — otherwise the severity chips (from
+      // `usePrReviews`) update and the badges beside them do not.
+      qc.invalidateQueries({ queryKey: ["smart-diff", prId] });
+      // The run history and the spinner both self-heal on their 4s poll, but
+      // only after a visible lag; invalidating makes the finished run land at
+      // once.
+      qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
+      qc.invalidateQueries({ queryKey: ["pr-active-runs", prId] });
+      // `useRunTrace` is fetched with `retry: false`, and `run_traces` does not
+      // exist until the very end of the run — so a drawer opened WHILE the run
+      // was live has cached a 404 that nothing would ever clear, and the log
+      // stayed blank until the tab was remounted. Safe to fire here and only
+      // here: this mutation resolves after the server has persisted the trace
+      // (`run-executor.ts` saves it at :417 and returns at :420), whereas
+      // `useCancelRun` resolves while the run is still winding down and would
+      // just cache another miss. Prefix key — `{ all: true }` fans out to one
+      // run per agent, so there is no single id to target.
+      qc.invalidateQueries({ queryKey: ["run-trace"] });
     },
   });
 }
@@ -162,7 +186,10 @@ export function useFindingAction() {
         reply ? { reply } : undefined,
       ),
     onSuccess: (_d, { prId }) => {
-      if (prId) qc.invalidateQueries({ queryKey: ["reviews", prId] });
+      if (prId) {
+        qc.invalidateQueries({ queryKey: ["reviews", prId] });
+        qc.invalidateQueries({ queryKey: ["smart-diff", prId] });
+      }
     },
   });
 }

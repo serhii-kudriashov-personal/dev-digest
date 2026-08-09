@@ -53,8 +53,12 @@ export const FEATURE_MODELS: FeatureModelDef[] = [
     id: 'review_intent',
     label: 'PR Review · Intent',
     description: 'Derives a PR’s intent and scope before review.',
-    defaultProvider: 'openai',
-    defaultModel: 'gpt-4.1',
+    defaultProvider: 'openrouter',
+    // The DATED snapshot, deliberately, not the `-latest` alias: an alias moves
+    // its target underneath the eval tables and the price book, which makes a
+    // cost or quality regression unattributable. Note this is a DIFFERENT and
+    // cheaper model than the bare `deepseek/deepseek-v4-flash` above.
+    defaultModel: 'deepseek/deepseek-v4-flash-0731',
   },
   {
     id: 'risk_brief',

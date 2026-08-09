@@ -46,6 +46,7 @@ specific row wins for *which sections* to read; the general row still applies.
 | `reviewer-core/src/grounding.ts` | — | sentinel |
 | `reviewer-core/src/prompt.ts` | — | sentinel **if `INJECTION_GUARD` changed** |
 | `reviewer-core/src/llm/**` | `zod` | structured output is Zod → JSON Schema |
+| `reviewer-core/test/**` | `backend-onion-architecture` §9 | ring 1 is tested hermetically — a stub `LLMProvider`, no key, no network, no Docker |
 
 ## Contracts, and everything else
 
@@ -59,6 +60,7 @@ specific row wins for *which sections* to read; the general row still applies.
 | `*CLAUDE.md`, `*AGENTS.md` | — | edit `AGENTS.md`; `CLAUDE.md` must stay a symlink (mode `120000`). The `symlinks` gate checks it. |
 | `*.ts`, `*.tsx` anywhere | `typescript-expert` | lowest priority, and only for a type-level change |
 | `scripts/**`, `docs/**`, `specs/**` | — | repo rules only |
+| `.claude/agents/**` | — | subagent definitions; **not** in `skills-lock.json`, so these are ours. English only, and a new agent is registered in three places: `.claude/agents/README.md`, `.claude/skills/README.md` §Agents, `AGENTS.md` §Read when |
 
 ## No row matched
 

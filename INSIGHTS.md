@@ -11,6 +11,100 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
+### 2026-08-09 — Build a demo PR fixture with a temporary `GIT_INDEX_FILE`, so a half-finished lesson in the working tree is never in the way
+
+**Pattern:** several lessons need a *demo pull request* that exists on GitHub so
+the app can import it — L04 Smart Diff needs a large one carrying a lock file.
+The awkward part is timing: the fixture branch has to fork from `origin/main`,
+but by the time you want to record the demo, the lesson's own work is sitting
+uncommitted on `lab/lab0N`. Build the commit with plumbing and a throwaway
+index; nothing is checked out, so the dirty tree is irrelevant:
+
+```sh
+export GIT_INDEX_FILE=/tmp/fixture.index && rm -f "$GIT_INDEX_FILE"
+git -C "$REPO" read-tree origin/main
+for f in ...; do
+  sha=$(git -C "$REPO" hash-object -w "$STAGING/$f")
+  git -C "$REPO" update-index --add --cacheinfo 100644,"$sha","$f"
+done
+tree=$(git -C "$REPO" write-tree)
+commit=$(git -C "$REPO" commit-tree "$tree" -p origin/main -F msg.txt)
+git -C "$REPO" update-ref refs/heads/demo/<slug> "$commit"
+```
+
+Two things that bite: every `git` call needs `-C "$REPO"` (the loop `cd`s into
+the staging directory, and a bare `git` there is "not a git repository"), and
+`GIT_INDEX_FILE` must be exported *before* `read-tree`.
+
+**Why:** the alternatives both cost something. `git switch -c demo/x
+origin/main` drags the uncommitted lesson across a branch that differs in
+hundreds of files, and refuses outright where a modified file would be
+overwritten. `git worktree add` is clean but materialises a second checkout,
+which is a lot of ceremony for ten files — and note that `git worktree remove`
+is permitted here while `git branch -D` is not, so a worktree can strand the
+branch it created.
+
+**Where:** the fixtures live as `demo/*` branches in the **fork**, not upstream
+— `origin` is `serhii-kudriashov-personal/dev-digest` (PRs #1–#3, #5). Before
+building one, check it will actually group the way the demo needs: run the real
+classifier, `classifyFile` at
+`server/src/modules/smart-diff/helpers.ts`, over the intended file list rather
+than reasoning about the patterns in
+`server/src/modules/smart-diff/constants.ts:40` by eye. The pre-existing `demo/*`
+PRs are all 3–6 files with no lock file, so none of them can demonstrate the
+L04 acceptance criterion at `specs/l04-smart-diff.md:280`.
+
+### 2026-08-08 — A spec-conformance checker must extract the obligations FIRST — and must never be asked to "explain the problem and suggest a fix"
+
+**Pattern:** when writing any agent or prompt that checks code against a written
+spec, plan or acceptance list, fix this order and enforce it structurally:
+
+1. extract every obligation into a numbered list, quoting the source verbatim,
+   **before opening a single source file**, and end the list with a count;
+2. per item, state what it *requires*, then what the code *does*, then compare;
+3. emit exactly one row per item, one verdict from a **closed** enum, and an
+   evidence cell that is a `path:line` actually read or verbatim command output
+   — prose in that cell is itself a defect;
+4. make the row count the receipt: `N` items in, `N` rows out, counts summing
+   to `N`.
+
+And explicitly **forbid** the familiar framing "find the problems and propose
+fixes".
+
+**Why:** that framing is not neutral — it measurably makes the checker worse.
+[arXiv:2508.12358](https://arxiv.org/html/2508.12358v1) reports GPT-4o's
+rate of correctly recognising *correct* code collapsing from 52.4% to 11.0% on
+HumanEval when the prompt asked it to explain problems and propose fixes,
+recovering to 72.0% with a two-phase reflective prompt and 85.4% with a
+behavioural-comparison prompt (summarize spec behaviour and actual behaviour
+independently, then compare). The mechanism is intuitive once seen: the model
+starts hunting for defects before it has committed to a verdict, and it finds
+them whether or not they exist. Anthropic's own
+[best-practices](https://code.claude.com/docs/en/best-practices) says the same
+thing from the other side — "a reviewer prompted to find gaps will usually
+report some, even when the work is sound".
+
+Two supporting results worth carrying: checklist decomposition beats one
+holistic verdict on agreement and variance (CheckEval,
+[arXiv:2403.18771](https://arxiv.org/abs/2403.18771)), and LLM judges are
+self-inconsistent across identical repeated runs — Krippendorff's α 0.265–0.563
+— with few-shot and CoT making no difference
+([arXiv:2510.27106](https://arxiv.org/html/2510.27106v1)). So if a verdict ever
+gates something here, run it twice and escalate disagreement rather than
+trusting one pass.
+
+This generalises past the one agent: it is the same shape as
+`reviewer-core/src/grounding.ts`, which keeps a finding only when its cited
+lines exist in the diff. The non-LLM half of the check is the half that cannot
+be talked out of its answer.
+
+**Where:** the rules are `.claude/agents/plan-verifier.md` §Method (steps 1–6)
+and its `## Conformance` / `## Counts` template; the ban on advice is its
+§"Hard constraints" (`Banned output`) and the two-case admissibility test under
+`## Findings outside the plan`. Sources catalogued in
+`.claude/agents/README.md` §"External evidence — the reviewers and the test
+writer"; the design record is `specs/four-subagents.md`.
+
 ### 2026-08-05 — To make the model report a new field, `.describe()` the shared contract — then validate the answer server-side
 
 **Pattern:** two halves, and both are needed.
@@ -158,6 +252,54 @@ and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65
 (both removed).
 
 ## What Doesn't Work
+
+### 2026-08-08 — Racing `researcher` against `planner` and patching the plan by `SendMessage` mid-flight: the message lands too late, or never
+
+**Tried:** two ways of getting external research into a `planner` run without
+paying for the round trip twice.
+
+1. Launching `researcher` (repo inventory) and `researcher` (external practices)
+   in parallel, then `planner` after them.
+2. After the first attempt died, launching `researcher` (external) and `planner`
+   **concurrently**, then `SendMessage`-ing the research findings to the running
+   `planner` as soon as they arrived.
+
+**Failed:** both, differently.
+
+1. Both `researcher` runs terminated with
+   `Agent terminated early due to an API error: You've hit your session limit`.
+   Neither returned partial output — a subagent that dies this way returns
+   **nothing**, not a truncated report, so the whole run is lost rather than
+   degraded. The main session kept working normally, which makes the limit look
+   like an agent-specific fault rather than an account-wide one.
+2. `SendMessage` is queued "for delivery at its next tool round". A `planner`
+   that is already composing its final message has no next tool round, so the
+   message was never read: the returned plan still carried "the slug is
+   unverified — **needs `researcher`**" as an open question, for a fact that had
+   been verified minutes earlier. The plan is not wrong, it is just stale, and
+   nothing in it says so.
+
+**Instead:** sequence research → plan, and treat the research report as an
+*input* you paste into the planner prompt, not as an update you send later. A
+subagent's prompt is the only channel guaranteed to be read. If you must run them
+concurrently, plan to reconcile the two outputs **yourself** afterwards and
+budget for it — folding four verified findings into a finished plan by hand cost
+more than serializing would have.
+
+Two smaller consequences worth carrying:
+
+- Give the planner the inventory you already have (`path:line`) and ask it to
+  *verify and correct* rather than rediscover. That worked well here — it
+  returned six corrections to line numbers and claims, including five stale
+  docblocks where the brief said two.
+- When a subagent dies on an account limit, its work is gone; there is no resume
+  that recovers a partial report. Doing the inventory inline in the main session
+  is the cheaper fallback, not a re-launch.
+
+**Where:** the plan produced this way is `specs/l03-intent-layer.md`; the
+findings that had to be folded in by hand are its §"External findings of record".
+Agent definitions are `.claude/agents/{researcher,planner}.md`; the set and its
+registration surfaces are `.claude/agents/README.md`.
 
 ### 2026-08-06 — `pr-self-review` cannot gate a PR built in a secondary git worktree — the script `cd`s to the primary root
 
@@ -388,6 +530,253 @@ historical drift is its own task.
 
 ## Codebase Patterns
 
+### 2026-08-09 — Purity is not an address: a pure function does NOT belong in `reviewer-core` just because it has no I/O
+
+**Rule:** when deciding between `reviewer-core/src/**` (ring 1) and
+`server/src/modules/<name>/helpers.ts` (ring 2) for a deterministic function, ask
+what it operates on, not whether it touches I/O. `backend-onion-architecture`
+§8's row "domain logic with no I/O at all → `reviewer-core/src/**`" means **the
+review engine's** domain — prompt, grounding, reduce, scoring. Purity is a
+property every ring-2 helper also has.
+
+**Why:** the skill's tiebreak, "when two rows seem to fit, take the inner one",
+reads as an instruction to push anything pure inward, and it only engages when
+both rows genuinely fit. `reviewer-core/src/scope.ts` is the case that looks like
+a precedent for inward and is not: it earns ring 1 because it consumes `Finding`
+and gates what a review emits — `review/run.ts` calls it. Smart Diff's
+`classifyFile` is equally pure but consumes `pr_files` and produces a **UI
+transport contract** no engine path calls, so moving it inward would widen ring
+1's public API (which grows only via `src/index.ts`) for exactly one ring-2
+consumer, in a package whose `build` is `tsc --noEmit` and whose reason to exist
+is the review pipeline.
+
+The judgement recurs on every deterministic feature, so carry the **flip
+condition** rather than the verdict: if the review pipeline ever wants the same
+computation, it *moves* to `reviewer-core` — it is not duplicated there. Two
+copies across the package boundary is the outcome to refuse; one copy in the
+wrong ring is cheap to relocate.
+
+Note `pnpm arch` is silent on this. Both placements pass every rule — the gate
+enforces import *direction*, never whether a module is at the right address. So
+this is a judgement that has to be made deliberately and written down, which is
+why it is here rather than left to the linter.
+
+**Where:** the ring-2 placement is `server/src/modules/smart-diff/helpers.ts`
+(`classifyFile`), consumed by `service.ts` in the same slice; the ring-1
+counter-example is `reviewer-core/src/scope.ts`, consumed by
+`reviewer-core/src/review/run.ts`; the rows in tension are
+`.claude/skills/backend-onion-architecture/SKILL.md` §8 (placement table) and §7
+(ring 1 as a functional core). Reasoning of record: `specs/l04-smart-diff.md`
+§Risks 2, upheld by the architecture review of that change.
+
+### 2026-08-08 — Adding a prompt slot to `reviewer-core` is TWO edits: `promptTokenCounts` is a hand-written list, not a loop
+
+**Rule:** when you add an optional section to `assemblePrompt` — the `intent`
+slot, or whatever comes after it — add a matching row to the `sections` array in
+the server's `promptTokenCounts` **in the same change**. Adding only the slot
+compiles, passes every test, renders correctly in the trace drawer, and silently
+omits that section from `prompt_assembly.token_counts`.
+
+**Why:** the function looks like it derives its keys from the assembly, and the
+`PromptAssembly` contract it consumes is a Zod object it could iterate. It does
+not — it is an explicit eight-pair literal (`system`, `skills`, `memory`,
+`specs`, `callers`, `repo_map`, `pr_description`, `user`), and its loop skips
+`null` entries. A ninth key on the assembly is simply never asked about.
+
+The failure is invisible in the direction you would check. `token_counts` is
+`.nullish()` and per-key optional by design, precisely so traces written before
+L02 stay parseable — so "my section has no token count" is indistinguishable
+from "this trace predates the feature". Nothing types it, nothing tests it, and
+the trace still renders.
+
+That matters because per-section attribution is the whole point of the field:
+its own contract comment says it exists so that "the skills block added N tokens"
+is a number rather than a guess. A new slot with no row is a slot whose cost you
+cannot argue about — which is exactly when you need the number, since root
+`INSIGHTS.md` (2026-08-02) records a prompt addition making a review measurably
+*worse*.
+
+Note the two files are in different packages, so neither package's typecheck can
+see the coupling.
+
+**Where:** the list is `server/src/modules/reviews/helpers.ts:107-116`
+(`promptTokenCounts`), called at `server/src/modules/reviews/run-executor.ts:343`;
+the slots it must track are `reviewer-core/src/prompt.ts:104-121` and the
+`assembly` object at `:129-138`; the contract is
+`server/src/vendor/shared/contracts/trace.ts:39-64` (`token_counts` at `:64`,
+nullish for the jsonb reason). Planned use in `specs/l03-intent-layer.md` Step 6.
+
+### 2026-08-08 — Check a body constraint's stated REASON against the frontmatter, not just its conclusion — a right rule with a wrong reason invites you to delete it
+
+**Rule:** when a subagent's body says "you cannot X **because** you have no
+`Tool`", verify that clause against the `tools:` / `disallowedTools:` lines
+before acting on it. The conclusion and the reason drift independently, and the
+dangerous combination is a **true conclusion with a false reason** — because the
+obvious fix is to delete the rule.
+
+**Why:** `planner.md` §Discipline read "You cannot write insights. You have no
+`Skill` tool." Its frontmatter grants `Skill` — necessarily, since the agent's
+whole design is that it opens the same skills `implementer` will (§"Skills — you
+load the same set the implementer will"). Spotting the false half makes the
+natural move "remove the stale constraint". That would have been a bug: the
+conclusion is still correct, for a reason the line never mentions.
+`engineering-insights` appends to an `INSIGHTS.md`, and `planner` has neither
+`Write` nor `Edit` and runs in `permissionMode: plan`. The skill would load and
+fail at the write, spending a turn for nothing.
+
+So the constraint stays; only the reason is corrected. Note the shape: the rule
+survived review precisely *because* its conclusion was right, and nothing
+mechanical compares a body's factual claims to its own frontmatter.
+
+Same class as the entry below about prose falsified by a new agent — both are
+assertions no tooling validates, both read as authority. The cheap check when
+touching any agent: `rg -n 'you have no|you cannot|is denied' .claude/agents/*.md`
+and read each hit against that file's own `tools:` line.
+
+**Where:** the corrected bullet is `.claude/agents/planner.md` §Discipline (last
+item); its frontmatter is `.claude/agents/planner.md:4-5` (`tools:` includes
+`Skill`; `disallowedTools:` covers `Write`, `Edit`, `NotebookEdit`) and `:7`
+(`permissionMode: plan`). The same false claim in the map was
+`.claude/agents/README.md` §"This repo's own record" ("`planner` drops `Skill`
+wholesale"), now naming `researcher`, which is the agent that actually does.
+
+### 2026-08-08 — The `pr-self-review` verdict is written by the MODEL, not by the script — so `Write` is the gate, and denying `Skill` protects nothing
+
+**Rule:** when deciding whether an agent can forge the gate that lets a PR
+through, look at who writes `.devdigest/pr-self-review.json`. It is the model,
+following `pr-self-review/SKILL.md` §3 ("Write `.devdigest/pr-self-review.json`
+in the format `report.md` specifies"). `scripts/pr-self-review.sh` never writes
+it — its four subcommands are `state`, `files`, `gates`, `gate`, all read-only.
+
+So an agent with `disallowedTools: Write, Edit, NotebookEdit` **cannot** forge a
+verdict, whatever else it holds. Removing `Skill` from such an agent buys no
+extra safety and costs the entire skill catalogue plus `engineering-insights`.
+
+**Why:** the reflex is the opposite, and it is wrong in a way that looks
+rigorous. "There is no per-skill deny, therefore the only way to stop an agent
+running `pr-self-review` is to remove `Skill`" (entry below, 2026-08-08) is true
+about *invocation* and irrelevant to *effect*. Both new read-only reviewers were
+first written with `Skill` denied on exactly that reasoning; the worst outcome
+the denial actually prevented was a wasted context window. Meanwhile
+`implementer` — which holds **both** `Write` and `Skill`, and is therefore the
+strictly more dangerous case — has always been protected by a body contract
+alone. Defending the weaker position harder than the stronger one is the tell
+that the threat model was never written down.
+
+Two things follow for any future agent. First, ask what the dangerous *effect*
+needs, not what the dangerous *name* is: here it needs a file write, so deny the
+write. Second, `Bash` re-opens it (`echo … > .devdigest/…`), and that stays a
+body contract because `Bash` cannot be scoped by command pattern in frontmatter
+— so the honest statement is "blocked by mechanism through the obvious path,
+by contract through the shell", not "blocked".
+
+**Where:** the instruction that writes the file is
+`.claude/skills/pr-self-review/SKILL.md:120`; the script's subcommand dispatch
+is `scripts/pr-self-review.sh:376-379`; the hook that reads the verdict is
+`.claude/settings.json` (`PreToolUse` → `Bash`) via `cmd_gate`
+(`scripts/pr-self-review.sh:330-344`). The agents that now keep `Skill` with the
+prohibition as a contract are `.claude/agents/architecture-reviewer.md` and
+`.claude/agents/plan-verifier.md` §Hard constraints; the reasoning is recorded
+in `specs/four-subagents.md`.
+
+### 2026-08-08 — Registering a new agent has a FOURTH surface: a prose sentence that the new agent silently falsifies
+
+**Rule:** `.claude/agents/README.md` §"Writing another agent" lists three
+registration surfaces — that file, `.claude/skills/README.md` §Agents, and
+`AGENTS.md` §Read when. Treat it as three *tables* plus one more job: grep the
+same files for **prose claims about the set** and fix those too.
+
+**Why:** `.claude/agents/README.md` carried, immediately under the set table,
+"Architecture review and security review are **not** in this set. They are
+separate agents and a separate step." Adding `architecture-reviewer` made half
+of that sentence false while every table around it was correctly updated — and
+a false claim two lines under a correct table is worse than no claim, because a
+reader trusts the prose over the row. The same file's §"Why only two skills are
+preloaded" was a second one: its title, its opening sentence ("Both agents can
+reach all 14 skills") and its whole argument assumed exactly two agents held
+`Skill`. `.claude/skills/README.md` had a third — "The pair is a chain, not a
+team" — describing three of what are now seven.
+
+None of these is findable by diffing a table. The cheap check before calling the
+registration done: `rg -n 'not in this set|both agents|the pair|two agents'` over
+`.claude/agents/README.md` and `.claude/skills/README.md`, and read every heading
+that contains a number.
+
+This is the same class as the entry below about `routing.md` — a registry the
+tooling never validates, where the failure is silent and reads as authority.
+
+**Where:** the falsified sentence was `.claude/agents/README.md` §The set
+(now rewritten to say architecture review **is** in the set and security review
+still is not); the retitled section is §"What each agent preloads, and why";
+the rewritten chain sentence is `.claude/skills/README.md` §Agents. The
+five-point contract that needs the fourth point is
+`.claude/agents/README.md` §"Writing another agent".
+
+### 2026-08-08 — Package-level `docs/` and `specs/` already exist and are empty — and `e2e/specs/` is not a spec directory
+
+**Rule:** before deciding where a document goes, know that `client/`, `server/`
+and `reviewer-core/` each already have **both** `docs/` and `specs/`, and `e2e/`
+has `docs/`. All seven hold exactly one file: their own `README.md`. Nothing has
+ever been written into any of them. So "there is no package-scoped home for this
+document" is false, and creating one is wrong.
+
+The trap on top: **`e2e/specs/` is not a spec directory.** It holds nine
+`*.flow.json` deterministic browser flows (`01-app-boot.flow.json`,
+`02-repo-pulls-detail.flow.json`, …). A markdown spec written there would sit
+next to JSON that a runner globs.
+
+**Why:** a root-scoped look does not show this. `docs/` and `specs/` at the root
+have visible content (`docs/l02-experiment.md`, five files in `specs/`), so the
+package copies read as "not a thing here" — while every package `AGENTS.md`
+§Read when already points at them. The result is a document filed one level too
+high, in the shared `docs/`, where it competes with repo-wide decisions.
+
+The routing rule that follows: take the **narrower** home when two fit. A
+repo-wide document is what a package document becomes once a second package
+needs it — the same promotion logic as `frontend-ui-architecture` §2.
+
+**Where:** `client/docs/README.md`, `client/specs/README.md`,
+`server/docs/README.md`, `server/specs/README.md`,
+`reviewer-core/docs/README.md`, `reviewer-core/specs/README.md`,
+`e2e/docs/README.md`; the flows are `e2e/specs/*.flow.json`. The placement table
+that encodes all of this is `.claude/agents/doc-writer.md`
+§"Where each kind of document goes".
+
+### 2026-08-08 — Every agent that needs "which skill governs this file" reads `pr-self-review/routing.md` — never its own memory
+
+**Rule:** `.claude/skills/pr-self-review/routing.md` is this repo's single
+canonical path→skill table. Any agent, skill or session that has to decide which
+skill applies to a changed file derives it from that table and cites the row.
+Do not reconstruct the mapping from the skill catalogue, from a skill's
+`description`, or from what seems obvious.
+
+**Why:** the table is what keeps two agents with disjoint context windows from
+contradicting each other. `planner` names the skills per step by reading it
+(§Method 4); `implementer` loads exactly that list and self-routes against the
+*same* file when it must touch something the plan did not list (§Method 2). If
+each derived its own mapping instead, the plan would be held to one set of rules
+and the implementation to another — and the divergence surfaces only at review,
+as a finding neither agent could have predicted.
+
+It also encodes decisions that are not inferable from a skill's name: that
+`backend-onion-architecture` has nothing to say about a `.tsx` file and must not
+be opened for one (context spent, findings invented); that `zod` is what a
+`vendor/shared` change pulls in; that `e2e/**` and `.github/workflows/**` are
+covered by **no** skill and route to `e2e/AGENTS.md` and `TESTING.md` instead;
+and the sentinel paths (`server/src/db/migrations/**`,
+`reviewer-core/src/grounding.ts`, `INJECTION_GUARD`) that are a deliberate
+decision rather than a drive-by edit.
+
+Consequence when editing: adding a skill to `.claude/skills/` is only half the
+job — a skill with no row in `routing.md` is one no agent will ever be told to
+open. Add the row in the same change.
+
+**Where:** the table is `.claude/skills/pr-self-review/routing.md`, consumed at
+`.claude/skills/pr-self-review/SKILL.md:76` (step 3),
+`.claude/agents/planner.md` §Method 4 and `.claude/agents/implementer.md`
+§Method 2. The catalogue it must stay in step with is
+`.claude/skills/README.md` §Catalog.
+
 ### 2026-08-05 — "Created disabled until vetted" is about WHO wrote the body, not about `source !== 'manual'`
 
 **Rule:** a skill built from this repo's own extracted conventions is created
@@ -600,6 +989,218 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 
 ## Tool & Library Notes
 
+### 2026-08-09 — `pnpm add --lockfile-only` in a scratch copy gives a genuine 400-line lockfile diff in two seconds, with no install
+
+**Quirk:** a demo PR that needs a realistic `pnpm-lock.yaml` diff seems to force
+a choice between hand-writing hundreds of lines of fake lock entries and running
+a full `pnpm install` in a checkout you do not want. Neither is necessary. pnpm
+resolves against the registry and rewrites the lock without touching
+`node_modules` when given `--lockfile-only`, and it is happy to do that in a
+directory holding nothing but the two files:
+
+```sh
+mkdir -p "$SCRATCH/lockgen"
+git show origin/main:server/package.json  > "$SCRATCH/lockgen/package.json"
+git show origin/main:server/pnpm-lock.yaml > "$SCRATCH/lockgen/pnpm-lock.yaml"
+cd "$SCRATCH/lockgen" && pnpm add --lockfile-only exceljs
+```
+
+`exceljs` took `server/pnpm-lock.yaml` from 4935 to 5369 lines — 434 added — in
+about two seconds, and updated `package.json` in step. Copy both results into
+the fixture. Because the resolution is real, the diff is real: no invented
+integrity hashes, no lock that contradicts its manifest.
+
+**Workaround:** pick the dependency for its transitive weight when the point is
+a big lock diff — a zero-dependency package moves the lock by ~20 lines and will
+not make "the lock file is collapsed" legible on a video.
+
+**Where:** `server/package.json` is the manifest to copy; this repo is **not** a
+monorepo, so run it against the one package's own lockfile
+(`AGENTS.md` §Repo rules). Note `timeout` does not exist on this machine's
+zsh — do not wrap the command in it.
+
+### 2026-08-08 — A `.nullish()` z.enum DOES survive `toJsonSchema` — and `Finding.kind` had already proved it in production
+
+**Quirk:** adding an optional enum to the structured-output contract looks risky,
+because the only documented precedent (`Finding.skill`) is a nullish **string**,
+and the two convert to different JSON Schema shapes:
+
+| Zod | `zodResponseFormat` output |
+|---|---|
+| `z.string().nullish()` | `{ "type": "string", "nullable": true }` |
+| `z.enum([...]).nullish()` | `{ "anyOf": [{ "type": "string", "enum": [...] }, { "type": "null" }] }` |
+
+Both land in `required` — OpenAI's converter puts **every** property there and
+expresses optionality through nullability instead, which is why a missing key
+still parses on the Zod side while the schema says the field is required.
+
+The part worth knowing before you go looking: **the repo already ships a nullish
+enum in that exact schema.** `Finding.kind` is `FindingKind.nullish()`, and
+`Finding` is handed straight to `completeStructured` as part of `Review`. So the
+`anyOf` shape has been going to real providers since before L03, and
+"unverified" was a question that the existing contract had already answered.
+
+**Workaround:** none needed — use `z.enum([...]).nullish()` directly. Verify a
+new one the cheap way rather than reasoning about it: `toJsonSchema(Review,
+'Review')` and read `properties.findings.items.properties.<field>`. The fallback
+that was planned for this (`z.string().nullish()` with the values named in
+`.describe()` and normalised server-side) is **not** required and would have cost
+a hand-rolled normaliser plus the loss of Zod-side rejection of a bogus value.
+
+Note the general lesson, since the same trap is set for the next optional field:
+check whether a sibling field in the same object already has the shape you are
+unsure about, before treating the question as open. Also note `nullable: true` is
+an OpenAPI-ism rather than standard JSON Schema draft-07 — it is what the bundled
+converter emits for a nullish string, and it is not the shape an enum gets.
+
+**Where:** converter at `reviewer-core/src/llm/structured.ts:19`
+(`toJsonSchema` → `zodResponseFormat`); the pre-existing nullish enum is
+`server/src/vendor/shared/contracts/findings.ts:71` (`kind`), the new one is
+`:112` (`scope`); the schema reaches the model at
+`reviewer-core/src/review/run.ts:176`. Guard test:
+`server/test/prompt-structured.test.ts` ("a NULLISH ENUM survives toJsonSchema").
+This **corrects** `specs/l03-intent-layer.md` §Risks 10, which recorded it as
+unproven.
+
+### 2026-08-08 — OpenRouter structured-output support is per-ENDPOINT, not per-model — and our request carries no guard, so the symptom is a retry loop, not a routing error
+
+**Quirk:** `response_format: { type: 'json_schema', …, strict: true }` is not a
+property of a model on OpenRouter. Its own guide: "Support is determined per
+endpoint, not just per model: the same model may be served by multiple providers,
+and only some of those providers may support structured outputs." And on strict
+mode: "Enforcement varies by provider: some guarantee schema-conforming output,
+while others translate your schema into their own structured-output format or
+treat it as a strong hint."
+
+Measured on `deepseek/deepseek-v4-flash-0731` via
+`/api/v1/models/<slug>/endpoints`: DeepInfra and DigitalOcean advertise
+`structured_outputs`; StreamLake, BaseTen, CoreWeave and GMICloud advertise only
+`response_format`. So the *same* model id can be served by an endpoint that
+honours the schema and by one that treats it as advice, and which you get is a
+routing decision you are not making.
+
+What makes it expensive is the failure mode. `OpenRouterProvider.completeStructured`
+reprompts on a parse failure up to `maxRetries + 1` times and then throws
+`… failed schema validation for <SchemaName>`. That reads as "this model is too
+weak for structured output" — so the natural response is to switch to a bigger,
+pricier model, which may well work purely because it routed elsewhere. Nothing in
+the error mentions the provider.
+
+**Workaround:** send OpenRouter's provider-routing flag —
+`provider: { require_parameters: true }`, documented as "the request won't even
+be routed to that provider" when it does not support every parameter sent. Today
+the request at `openrouter.ts:69-84` has **no** `provider` key at all, and
+`StructuredRequest` has no field to carry one, so this needs a field on the
+shared contract (both copies) threaded through with the same conditional-spread
+shape the file already uses for `session_id` and `usage`.
+
+Make it **opt-in**, not default-on: switching it on globally changes which
+providers serve every existing review run, invisibly and possibly at a different
+price. A new caller can ask for it; changing the fleet is its own decision.
+
+**Where:** the request is `reviewer-core/src/llm/openrouter.ts:69-84` (the
+`response_format` block at `:74-77`, the conditional spreads at `:80` and `:83`);
+the contract with no room for it is `server/src/vendor/shared/adapters.ts:55-70`
+(`StructuredRequest`), copied at `client/src/vendor/shared/adapters.ts`; the
+retry loop that hides the cause is `openrouter.ts:68-115`
+(`parseWithRepair` + the final throw). Upstream:
+`https://openrouter.ai/docs/guides/features/structured-outputs` and
+`https://openrouter.ai/docs/guides/routing/provider-selection`. Verified
+2026-08-08; design decision recorded in `specs/l03-intent-layer.md`
+§"External findings of record" 2.
+
+### 2026-08-08 — `skills:` and `permissionMode:` exist in subagent frontmatter — and `permissionMode: plan` needs a body rule, because `ExitPlanMode` is stripped
+
+**Quirk:** the entry below lists the frontmatter fields the repo's first subagent
+used. It is not wrong, but it is a floor, not the contract. Claude Code 2.1.223
+(`claude --version`) supports at least `name`, `description`, `tools`,
+`disallowedTools`, `model`, `permissionMode`, `maxTurns`, `skills`, `mcpServers`,
+`hooks`, `memory`, `background`, `effort`, `isolation`, `color`, `initialPrompt`
+— only `name` and `description` are required, and several are gated on
+v2.1.212+, so a definition written against them will silently misbehave on an
+older CLI. Three that change how you design an agent here:
+
+1. **`skills:` is the only deterministic way to get a skill into a subagent.**
+   It injects the skill's **full body** at startup, not its description. Without
+   it a subagent still *can* reach every project skill through the `Skill` tool,
+   but discovery is description-matching — the same non-deterministic mechanism
+   as the main session. So "the agent body mentions the skill by name" is not a
+   trigger, and never was.
+2. **`permissionMode: plan` on a subagent is a trap on its own.** Plan mode's
+   normal exit is `ExitPlanMode`, and that tool is stripped from every subagent
+   (see below). An agent that waits for a plan-approval prompt therefore waits
+   forever. The mode still buys a real enforced no-edit guarantee, so it is worth
+   having — but only with a hard rule in the body.
+3. **`disallowedTools` is applied first, then `tools` resolves against what
+   remains.** A tool named in both is removed. Listing a constraint twice is
+   redundant but harmless, and reads as documentation of intent.
+
+**Workaround:** when using `permissionMode: plan`, state in the body — in the
+hard-constraints section, not in passing — that the agent has no `ExitPlanMode`,
+must never attempt to call it, and that **its final message *is* the plan**.
+`planner.md` does exactly this. For skills, decide per agent: preload the one or
+two that apply to almost every task (`implementer` preloads
+`backend-onion-architecture` + `frontend-ui-architecture`, and its body says so,
+so it does not re-invoke them), and leave the long tail to `Skill` driven by an
+explicit list in the plan. Preloading all 13 would cost tens of thousands of
+tokens at startup for skills most runs never open. Whether that split actually
+routes the right skills is unmeasured — one run proves nothing, and
+`docs/l02-experiment.md` is how it would be settled.
+
+**Where:** fields in use at `.claude/agents/planner.md` (frontmatter +
+§"Hard constraints", the `ExitPlanMode` rule) and `.claude/agents/implementer.md`
+(`skills:` + §"What is already in your context"). Upstream reference:
+`https://code.claude.com/docs/en/sub-agents` §"Supported frontmatter fields" and
+§"Skills". Version checked: `claude --version` → 2.1.223.
+
+### 2026-08-08 — A subagent has no `AskUserQuestion`, and its tool list resolves differently in background than in foreground
+
+**Quirk:** three things about `.claude/agents/*.md` that the frontmatter does not
+hint at, all found while writing the repo's first subagent.
+
+1. **`AskUserQuestion` is stripped from every subagent**, even when named in
+   `tools`. So "ask before guessing" cannot be a tool call — a subagent's only
+   channel to the user is its final message. Same filter also removes `Agent` at
+   the depth limit, `EnterPlanMode`/`ExitPlanMode`, `Workflow`, `TaskOutput`,
+   `ScheduleWakeup`, `EndConversation`.
+2. **A second filter applies to background subagents, which is the default** (as
+   of v2.1.198 Claude Code backgrounds them unless it needs the result now). It
+   keeps every MCP tool but only these built-ins: `Read`, `Grep`, `Glob`, `Bash`,
+   `PowerShell`, `Edit`, `Write`, `NotebookEdit`, `WebFetch`, `WebSearch`,
+   `TodoWrite`, `Skill`, `ToolSearch`, `EnterWorktree`, `ExitWorktree`,
+   `Monitor`, `TaskStop`, `SendMessage`, `Artifact`. Anything else in `tools` is
+   dropped **with no error**, so one definition resolves to two different tool
+   sets depending on where it runs.
+3. **There is no per-skill deny.** `disallowedTools` takes tool names and
+   `mcp__server` patterns — not `Skill(deep-research)`. Blocking one skill means
+   disallowing the whole `Skill` tool, which also cuts the agent off from
+   `engineering-insights`.
+
+**Workaround:** encode the "ask first" requirement as a hard stop in the body —
+return *only* a `## Clarification needed` block as the final message, with the
+default assumptions it will fall back to — and never rely on a tool for it.
+Choose `tools` from the background-safe list above so foreground and background
+behave alike. When `Skill` is disallowed, have the agent surface insight-worthy
+findings as a line in its report for the caller to capture, since it cannot run
+the skill itself. `disallowedTools` is applied first, then `tools` resolves
+against what remains, so listing a constraint in both is redundant but harmless —
+`researcher.md` does it deliberately, as documentation of intent.
+
+**Superseded by:** 2026-08-08 (entry above) — every claim here still holds, but
+the field list it implies is incomplete: `skills:`, `permissionMode:`,
+`maxTurns:`, `hooks:`, `memory:`, `effort:` and `isolation:` are supported too.
+In particular point 3 ("there is no per-skill deny") is unchanged and still the
+reason `planner` denies `Skill` wholesale — but its converse now has an answer:
+`skills:` is how you deterministically get a *specific* skill *in*.
+
+**Where:** the definition is `.claude/agents/researcher.md` (frontmatter +
+§"Hard constraints" + §"Step 0"); registered in `AGENTS.md` §Read when and
+`.claude/skills/README.md` §Agents. Upstream reference:
+`https://code.claude.com/docs/en/sub-agents` §"Available tools" and
+§"Supported frontmatter fields". Note `.claude/agents/**` is not in
+`skills-lock.json`, so unlike most of `.claude/skills/**` it is ours to edit and
+will not be overwritten on sync.
+
 ### 2026-08-04 — Two shell traps on this machine that both exit 0 with no output
 
 **Quirk:** a string-splitting helper matched nothing, and neither trap announced
@@ -716,6 +1317,27 @@ catch the divergence because each package typechecks in isolation and both pass.
 **Takeaway:** always edit the canon and port the change in the same commit.
 Before touching contracts, check: `diff -r server/src/vendor/shared
 client/src/vendor/shared`.
+
+**Superseded by:** 2026-08-08 — the recurring error is real and the takeaway
+stands, but two of its specifics are now false, and both mislead in the
+expensive direction (they make you plan work that is already done).
+
+1. **`openrouter` is NOT missing from the client's `Provider` union.**
+   `client/src/vendor/shared/contracts/knowledge.ts:312` reads
+   `z.enum(['openai', 'anthropic', 'openrouter'])`. So setting a client-side
+   default to the `openrouter` provider typechecks today, and no porting step is
+   needed for it. Re-verified 2026-08-08 while planning L03, which had budgeted
+   for exactly that port.
+2. **There IS sync tooling now.** `scripts/check-shared-sync.sh` freezes today's
+   drift as `scripts/shared-sync.baseline` and fails only on **new** drift, with
+   comments and blank lines ignored. It is the check to run, not `diff -r` — the
+   2026-08-02 "What Doesn't Work" entry explains why a blanket `diff -r` can
+   never be empty here. Use `--update` to re-record the baseline deliberately.
+
+The other four names in the symptom above are unchanged and still absent from the
+client copy: `AgentManifest`, `AgentVersionConfig`, `CommitFilesPayload` and
+`sessionId` each appear in `server/src/vendor/shared` and in **no** file under
+`client/src/vendor/shared`. Closing that gap is still its own task.
 
 ## Session Notes
 

@@ -113,6 +113,38 @@ export class ReviewRunExecutor {
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
+    // Derived PR intent (L03) — shared pre-work, done ONCE for every queued
+    // agent. Best-effort in the same shape as the callers digest: a `null` here
+    // simply means the prompt below stays byte-identical to a pre-L03 one.
+    //
+    // The `.catch` is NOT redundant with the facade's never-throw contract, and
+    // it is not belt-and-braces. Unlike the diff load above, this step sits
+    // OUTSIDE the try/catch that calls `failAll`, and `executeRuns` runs in the
+    // background un-awaited by the route — so a throw escaping here would be an
+    // unhandled rejection that leaves every queued run with no status and no
+    // trace. It is a containment boundary, not a duplicate guarantee.
+    //
+    // Because it would also mask a regression in `ensure`, the contract is
+    // enforced where it belongs: a direct test that the service returns `null`
+    // on each failure path, rather than relying on this call site to notice.
+    const intent = await runLog.step(
+      'Deriving PR intent',
+      () =>
+        this.container.intent
+          .ensure(workspaceId, pull.id, { sink: { info: (m) => runLog.info(m) } })
+          .catch(() => null),
+      { kind: 'tool' },
+    );
+    if (intent) {
+      runLog.info(
+        `Intent: ${intent.record.confidence ?? 'unknown'} confidence` +
+          (intent.stale ? ' (STALE — the PR moved since it was derived)' : ''),
+      );
+    } else {
+      runLog.info('No PR intent available — reviewing without it');
+    }
+    const intentBlock = intent?.promptBlock ?? null;
+
     for (const { agent, runId } of jobs) {
       const agentStart = Date.now();
       logger?.info(
@@ -120,7 +152,16 @@ export class ReviewRunExecutor {
         `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
       );
       try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog);
+        const outcome = await this.runOneAgent(
+          workspaceId,
+          pull,
+          repo,
+          diff,
+          agent,
+          runId,
+          runLog,
+          intentBlock,
+        );
         logger?.info(
           {
             runId,
@@ -152,6 +193,8 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     runId: string,
     parentLog: RunLogger,
+    /** Pre-rendered `## PR intent (derived)` block, or null when none. */
+    intentBlock: string | null,
   ): Promise<RunOutcome> {
     const start = Date.now();
     // Narrow the fanned-out pre-work logger to THIS run; the shared diff/intent
@@ -244,6 +287,10 @@ export class ReviewRunExecutor {
         // Same omit-when-empty contract as callers/repoMap above: with no
         // enabled skills the assembled prompt is byte-identical to a pre-L02 run.
         ...(skillBodies.length > 0 ? { skills: skillBodies } : {}),
+        // L03 — the derived intent, on the same contract: no intent means the
+        // section is omitted AND the engine's scope gate is a no-op, so the run
+        // is byte-identical to a pre-L03 one.
+        ...(intentBlock ? { intent: intentBlock } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
@@ -252,6 +299,15 @@ export class ReviewRunExecutor {
         },
       });
       const { tokensIn, tokensOut, costUsd, grounding } = outcome;
+
+      // A scope suppression is never silent: the engine already emitted a
+      // per-finding `info` event, and this is the run-level tally.
+      if (outcome.scopeDropped.length > 0) {
+        runLog.info(
+          `Scope gate suppressed ${outcome.scopeDropped.length} out-of-scope finding(s); ` +
+            'every CRITICAL is always kept',
+        );
+      }
 
       const keptFindings = outcome.review.findings;
 

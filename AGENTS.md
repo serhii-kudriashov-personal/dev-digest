@@ -95,7 +95,16 @@ Vitest 2 · testcontainers · agent-browser
 | `TESTING.md` | writing or fixing a test or a CI workflow |
 | `docs/agent-prompts/` | editing a review agent's `system_prompt` |
 | `docs/l02-experiment.md` | measuring whether a skill (or any prompt change) actually helps |
+| `docs/intent-layer.md` | working on derived PR intent (L03) — sources and their exclusions, the deterministic scope gate, the two confidence numbers, or what the run log does and does not record |
+| `docs/smart-diff.md` | working on reviewer-ordered diffs (L04) — the role classification table, the ordering and split thresholds, or the badge→line navigation |
 | `docs/` | asking "why was it decided this way" |
 | `specs/` | implementing a new feature — read its spec first |
 | `INSIGHTS.md` | at the start of every session, and before any non-trivial change: the traps are written down |
 | `.claude/skills/engineering-insights/SKILL.md` | writing an insight — entry format, sections, routing |
+| `.claude/agents/researcher.md` | delegating a "where does X live" / "what does the upstream doc say" question — read-only, cites `path:line` or a URL, and lists what it could not find |
+| `.claude/agents/planner.md` | delegating "how should we build X here" — read-only, returns a Development Plan (inventory, binding rules, ordered steps, the skills the implementer will load). Save its output to `specs/<slug>.md`; the plan is the handoff |
+| `.claude/agents/implementer.md` | executing an approved `specs/*.md` plan across `client/` and `server/` — writes code, loads the plan's skills, runs the gates on its own changes. Does not review, commit, or open a PR |
+| `.claude/agents/test-writer.md` | writing or repairing tests in `client/`, `server/`, `reviewer-core/` — knows the per-ring styles, the placement rules and the `*.it.test.ts` gate. Never changes production code to make a test pass; no `e2e/` flows |
+| `.claude/agents/architecture-reviewer.md` | asking whether a change respects the onion rings and the frontend placement rules — read-only, runs `pnpm arch`, cites `path:line` plus the verbatim line and the skill section, and separates pre-existing §12 debt from new findings |
+| `.claude/agents/plan-verifier.md` | asking "was `specs/<slug>.md` actually implemented" — read-only, one table row per plan item and acceptance criterion, each with a verdict and typed evidence. Not a code review, and it refuses to substitute generic advice |
+| `.claude/agents/doc-writer.md` | documenting a shipped feature — picks the right `docs/` or `specs/` directory, draws the Mermaid diagram, and registers the document in the matching `AGENTS.md` §Read when. Never writes `INSIGHTS.md` or a `CLAUDE.md` |

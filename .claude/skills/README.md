@@ -20,6 +20,31 @@ Reusable AI skills that provide specialized knowledge and workflows. Canonical l
 | [security](security/SKILL.md) | Full-stack | OWASP Top 10:2025, auth, injection, uploads, secrets |
 | [mermaid-diagram](mermaid-diagram/SKILL.md) | Shared | Mermaid diagrams in markdown (flowcharts, sequence, ERD, …) |
 
+## Agents
+
+Subagents live in `.claude/agents/`, not here — a different mechanism (own
+context window, own tool allowlist, own model) invoked via the Agent tool.
+Full map, artifacts and the sources behind each agent's rules:
+[`.claude/agents/README.md`](../agents/README.md).
+
+| Agent | Model | Description |
+|-------|-------|-------------|
+| [researcher](../agents/researcher.md) | Sonnet | Read-only research in two modes — repo (`path:line` evidence) and external (primary sources, pinned versions). Returns conclusions, evidence, links, and an explicit list of what it could not find. Asks clarifying questions instead of guessing. No `Write`/`Edit`, no `Skill` |
+| [planner](../agents/planner.md) | Opus | Read-only planning. Turns a request into a Development Plan: inventory of what already exists, the repo rules that bind it, ordered steps, and the rule each step is governed by. Loads **the same skills as `implementer`** — same two preloaded, same `routing.md` for the rest — so the plan cannot contradict the rules the implementation is held to. Runs in `permissionMode: plan`; no `Write`/`Edit`, no web. Save its output to `specs/<slug>.md` |
+| [implementer](../agents/implementer.md) | inherits | Executes an approved `specs/*.md` plan in `client/` and `server/`. Preloads `backend-onion-architecture` + `frontend-ui-architecture`, loads the plan's other skills on demand, runs typecheck / lint / tests / `pnpm arch` / `shared:sync` on its own changes. Never runs `pr-self-review`, never commits or opens a PR |
+| [test-writer](../agents/test-writer.md) | inherits | Writes and repairs tests in `client/`, `server/`, `reviewer-core/` — the per-ring styles, the placement rules, the `*.it.test.ts` naming gate. Preloads nothing; routes per task from `routing.md`. Never changes production code to make a test pass, never weakens an assertion, no `e2e/` flows |
+| [architecture-reviewer](../agents/architecture-reviewer.md) | Opus | Read-only boundary review — onion rings and import direction, frontend placement and the server/client split. Preloads both authored architecture skills; runs `pnpm arch` and reports the rules that fired. Every finding carries `path:line`, the verbatim line and the skill section; pre-existing §12 debt is reported separately. Writes no verdict file and blocks nothing |
+| [plan-verifier](../agents/plan-verifier.md) | Opus | Read-only conformance check of an implementation against `specs/<slug>.md`. Extracts every step and acceptance criterion first, then one row per item with a verdict — met / partial / not-met / deviated / unverifiable — and `path:line` or command output as evidence. Preloads **nothing** deliberately; refuses to substitute generic advice for the check |
+| [doc-writer](../agents/doc-writer.md) | Sonnet | Documents shipped features — walkthroughs, ADRs, guides — with Mermaid diagrams, routed to the right `docs/` or `specs/` directory and registered in the matching `AGENTS.md` §Read when. Preloads `mermaid-diagram`. Never writes `INSIGHTS.md` by hand, never replaces a `CLAUDE.md` symlink |
+
+They are a chain, not a team:
+`planner` → plan saved to `specs/` → `implementer` → `test-writer` →
+`plan-verifier` · `architecture-reviewer` → `doc-writer`.
+Subagents share no context and no message channel, so the **file is the handoff** —
+relaying a plan by paraphrase loses exactly the constraints it exists to carry, and
+`plan-verifier` is given the plan's **path**, never a summary of it. None of them can
+call another (subagents have no `Agent` tool); the caller dispatches every hop.
+
 ## What Are Skills?
 
 Skills are modular packages that extend the AI agent with specialized knowledge and workflows. Unlike rules (always applied) or agents (invoked for specific tasks), skills are loaded on-demand when the agent determines they're relevant.

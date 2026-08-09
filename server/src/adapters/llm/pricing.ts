@@ -29,6 +29,14 @@ const PRICING: Record<string, Price> = {
   // Unknown slugs fall through to null cost (explicitly flagged), which is safe.
   'z-ai/glm-4.7-flash': { in: 0, out: 0 }, // free baseline for evals
   'deepseek/deepseek-v4-flash': { in: 0.14, out: 0.28 },
+  // A DIFFERENT, NEWER, CHEAPER snapshot than the bare slug above — not a
+  // freshness suffix on the same model. The bare slug resolves to
+  // `deepseek-v4-flash-20260423` at $0.14/$0.28; this dated one is what
+  // `~deepseek/deepseek-v4-flash-latest` currently aliases to. Do NOT reuse the
+  // row above for this slug, or the cost is attributed from the other
+  // snapshot's prices — silently, with no error. Confirmed against
+  // openrouter.ai/api/v1/models on 2026-08-08; `review_intent` pins it.
+  'deepseek/deepseek-v4-flash-0731': { in: 0.09, out: 0.18 },
   'z-ai/glm-4.7-flashx': { in: 0.15, out: 0.4 },
   'minimax/minimax-m2.5': { in: 0.3, out: 1.2 },
   'z-ai/glm-5.1': { in: 0.6, out: 2.2 },

@@ -112,6 +112,11 @@ export function promptTokenCounts(
     ['callers', assembly.callers],
     ['repo_map', assembly.repo_map],
     ['pr_description', assembly.pr_description],
+    // NOT automatic: this array is an explicit list, not a loop over the
+    // assembly, so every new prompt slot needs a row here or its token cost is
+    // silently absent from the trace — and indistinguishable from a trace that
+    // predates the slot, because `token_counts` is nullish and per-key optional.
+    ['intent', assembly.intent],
     ['user', assembly.user],
   ];
   const counts: Record<string, number> = {};

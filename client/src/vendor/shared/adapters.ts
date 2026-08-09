@@ -61,6 +61,19 @@ export interface StructuredRequest<T> {
   maxTokens?: number;
   timeoutMs?: number;
   maxRetries?: number;
+  /**
+   * OpenRouter provider routing. `{ requireParameters: true }` restricts the
+   * request to providers that support every parameter sent — in particular
+   * `response_format`. Structured-output support on OpenRouter is per ENDPOINT,
+   * not per model, so without this a request can land on a provider that treats
+   * the schema as a hint and the only symptom is the repair loop exhausting its
+   * retries. Ignored by non-OpenRouter providers.
+   *
+   * OPT-IN on purpose: switching it on for every structured call would change
+   * which providers serve every existing review run, invisibly and possibly at
+   * a different price.
+   */
+  providerRouting?: { requireParameters?: boolean };
 }
 
 export interface StructuredResult<T> {

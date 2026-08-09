@@ -161,7 +161,9 @@ export function PrDetailView() {
       />
 
       <div style={s.tabBody}>
-        {tab === "overview" && <OverviewTab prBody={pr.body} />}
+        {tab === "overview" && (
+          <OverviewTab prId={prId} headSha={pr.head_sha} prBody={pr.body} />
+        )}
 
         {tab === "findings" && (
           <FindingsTab
