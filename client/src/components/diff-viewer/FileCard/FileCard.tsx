@@ -15,6 +15,7 @@ import {
   type CommentThread,
   type DiffCommentApi,
 } from "../comments";
+import { findingsForFile, type DiffFindingsApi } from "../findings";
 import { s, chevronFor } from "../styles";
 import { CodeLine } from "../CodeLine";
 import { OutdatedComments } from "../OutdatedComments";
@@ -30,12 +31,44 @@ function threadsForLine(ln: Line, matched: Map<string, CommentThread[]>): Commen
   return out;
 }
 
-export function FileCard({ file, commenting }: { file: PrFile; commenting?: DiffCommentApi }) {
+export function FileCard({
+  file,
+  commenting,
+  findings,
+  defaultOpen,
+  open: openProp,
+  onOpenChange,
+}: {
+  file: PrFile;
+  commenting?: DiffCommentApi;
+  /** Optional findings overlay; omitted, the card renders exactly as before. */
+  findings?: DiffFindingsApi;
+  /** Initial open state when uncontrolled. Defaults to the size heuristic. */
+  defaultOpen?: boolean;
+  /** Controlled open state. When passed, it WINS over every other rule. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const t = useTranslations("shell");
-  const [open, setOpen] = React.useState(
-    (file.additions ?? 0) + (file.deletions ?? 0) <= AUTO_EXPAND_MAX_LINES
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(
+    defaultOpen ?? (file.additions ?? 0) + (file.deletions ?? 0) <= AUTO_EXPAND_MAX_LINES
   );
+  // Controlled when `open` is supplied, uncontrolled otherwise — the standard
+  // pair, so a caller that needs to force a card open (badge navigation) can,
+  // without every other caller having to own the state.
+  const open = openProp ?? uncontrolledOpen;
+  const toggle = () => {
+    const next = !open;
+    if (openProp === undefined) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const lines = React.useMemo(() => parsePatch(file.patch), [file.patch]);
+
+  const allFindings = findings?.findings;
+  const fileFindings = React.useMemo(
+    () => (allFindings ? findingsForFile(file.path, allFindings) : []),
+    [allFindings, file.path]
+  );
 
   // Group this file's comments into threads, then split into ones we can anchor
   // to a rendered line vs. "outdated" (GitHub dropped the line / it's not here).
@@ -54,7 +87,7 @@ export function FileCard({ file, commenting }: { file: PrFile; commenting?: Diff
 
   return (
     <div style={s.fileCard}>
-      <div onClick={() => setOpen((o) => !o)} style={s.fileHeader}>
+      <div onClick={toggle} style={s.fileHeader}>
         <Icon.ChevronRight size={13} style={chevronFor(open)} />
         <Icon.FileText size={14} style={s.fileIcon} />
         <span className="mono" style={s.filePath}>
@@ -85,6 +118,8 @@ export function FileCard({ file, commenting }: { file: PrFile; commenting?: Diff
                 path={file.path}
                 threads={threadsForLine(ln, matched)}
                 commenting={commenting}
+                findings={fileFindings}
+                onFindingClick={findings?.onFindingClick}
               />
             ))
           )}

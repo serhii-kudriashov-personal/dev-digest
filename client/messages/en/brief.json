@@ -31,6 +31,32 @@
     "hunk_headers": "Changed line ranges",
     "commit_messages": "Commit messages"
   },
+  "smartDiff": {
+    "title": "Reviewer-ordered diff",
+    "stats": "{files} files · +{additions} −{deletions}",
+    "filesCount": "{count} files",
+    "findings": "{count} findings",
+    "goToFindings": "Go to the first of {count} findings in {path}",
+    "emptyGroup": "Nothing in this group.",
+    "order": {
+      "smart": "Smart order",
+      "original": "Original order"
+    },
+    "roles": {
+      "core": {
+        "title": "Core",
+        "subtitle": "The substance of the change — review closely"
+      },
+      "wiring": {
+        "title": "Wiring",
+        "subtitle": "Hooks the core into the app"
+      },
+      "boilerplate": {
+        "title": "Boilerplate",
+        "subtitle": "Generated / mechanical — skim"
+      }
+    }
+  },
   "why": {
     "title": "git-why",
     "blame": "blame",

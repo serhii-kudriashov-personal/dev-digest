@@ -124,6 +124,46 @@ shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
 
+### 2026-08-09 — Two panels of one screen reading two query keys go stale ASYMMETRICALLY — and the hook's docblock claimed a mitigation that was never built
+
+**Rule:** when one visual pairing is fed by two query keys, the invalidation list
+is a property of the **screen**, not of either hook. Smart Diff's "Files changed"
+tab renders a per-file `N findings` badge next to per-line severity chips: the
+badge counts `finding_lines` from `["smart-diff", prId]`, the chips come from
+`usePrReviews` → `["reviews", prId]`. Every mutation that invalidates one must
+invalidate the other, or half the screen refreshes and half does not.
+
+**Why:** the failure is invisible in isolation and looks like a caching "feel"
+problem rather than a bug. `hooks/reviews.ts` had four `["reviews", prId]`
+invalidations — run finished, run deleted, review deleted, finding
+accepted/dismissed — and none touched `["smart-diff", prId]`. With
+`staleTime: 30_000` and `refetchOnWindowFocus: false`
+(`src/lib/providers.tsx:28-29`), a completed Run Review repainted the chips while
+the badges beside them kept the *previous* run's counts, for up to 30s, on the
+same row. Nothing errors; the two numbers just disagree.
+
+The part worth remembering is how it survived review. `hooks/smart-diff.ts`
+carried a docblock asserting that "the consumer takes badge and chip data from
+`usePrReviews` and uses this response for grouping and ordering only" — a real,
+correct mitigation, written in the plan, and **never implemented**. The consumer
+reads `entry.finding_lines.length` (`SmartDiffViewer.tsx:138`). So the code
+documented itself as safe while being wrong, and every subsequent reader of that
+hook was told the hazard was already handled.
+
+**A docblock describing a mitigation is not evidence the mitigation exists.**
+When a comment says "X is safe because the consumer does Y", grep for Y. If a
+plan prescribes a mitigation and the implementation takes a different route, the
+docblock is the first thing that goes stale and the last thing anyone rereads.
+
+**Where:** the four paired invalidations are
+`src/lib/hooks/reviews.ts:69-70`, `:95-96`, `:145,149`, `:175-176`; the corrected
+docblock is `src/lib/hooks/smart-diff.ts`; the consumer that makes
+`finding_lines` load-bearing is
+`src/app/repos/[repoId]/pulls/[number]/_components/SmartDiffViewer/SmartDiffViewer.tsx:138`;
+the defaults that set the staleness window are `src/lib/providers.tsx:28-29`.
+Anticipated as Risk 5 of `specs/l04-smart-diff.md`, which prescribed exactly this
+fix for exactly this condition — and the condition arrived in the same change.
+
 ### 2026-08-05 — Promoting a component to `src/components/` must move its CONSTANTS too, and the linter will not tell you
 
 **Rule:** when a route-local component becomes shared, the literals it reads move
@@ -319,6 +359,104 @@ the address moved: the page is now an 8-line wrapper and the selection owner is
 
 ## Tool & Library Notes
 
+### 2026-08-09 — `userEvent` unmounts a HOVER-gated control before your click lands, and the symptom is a silent no-op
+
+**Quirk:** every `@testing-library/user-event` API call re-enters the pointer,
+which dispatches `mouseout` on the *previous* target with `relatedTarget: null`.
+React reads a null `relatedTarget` as "the pointer left this element", so a
+control rendered behind `{hover && <button/>}` unmounts between your hover and
+your click. `user.click(btn)` then dispatches at a detached node: no error, no
+warning, the handler simply never runs and the assertion fails several lines
+later on a state that never changed. A real pointer never does this, because it
+stays inside the row.
+
+Instrumenting it is the only way to see it — `btn.isConnected` is `false` by the
+time the click is delivered.
+
+**Workaround:** drop to `fireEvent` for exactly the hover-and-click step, supply
+the `relatedTarget` the real browser would, and keep `userEvent` for everything
+downstream:
+
+```ts
+fireEvent.mouseOver(add, { relatedTarget: line });  // userEvent's pointer
+fireEvent.click(add);                               // re-entry would unmount `add`
+await user.type(screen.getByRole("textbox"), "…");  // fine from here on
+```
+
+Write the reason in the file. Without it the next reader sees `fireEvent` in a
+`userEvent` test and "tidies" it back into the bug — the 2026-08-08 entry below
+tells them to, and it is right in general.
+
+**Where:** the two sites are
+`src/app/repos/[repoId]/pulls/[number]/_components/SmartDiffViewer/SmartDiffViewer.test.tsx:230`
+and `src/components/diff-viewer/DiffViewer/DiffViewer.test.tsx:129`; the
+hover-gated control is the inline-comment "+" in
+`src/components/diff-viewer/CodeLine/CodeLine.tsx`. Upstream:
+`https://testing-library.com/docs/user-event/pointer`.
+
+### 2026-08-09 — `mock.contexts[0]` is how you assert WHICH element a prototype-stubbed DOM method was called on
+
+**Quirk:** stubbing `Element.prototype.scrollIntoView = vi.fn()` gives you one
+spy shared by every element, so `toHaveBeenCalled()` only proves *something*
+scrolled. That is a much weaker claim than the feature makes: "clicking the badge
+jumps to the first finding" is about **which** node scrolled, and a bug that
+scrolls to the wrong line passes the naive assertion.
+
+**Workaround:** `vi.fn()` records the `this` of each call in `mock.contexts`, so
+the receiver is recoverable:
+
+```ts
+const scrolled = (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>)
+  .mock.contexts[0] as HTMLElement;
+expect(scrolled.id).toBe(lineAnchorId(PATH, 1));
+```
+
+Pairs with the entry below: stub locally, assert on the spy (jsdom computes no
+layout, so every element's scroll position is 0 and `toHaveBeenCalledTimes` plus
+`contexts` is the whole of what you can check).
+
+**Where:** `src/app/repos/[repoId]/pulls/[number]/_components/SmartDiffViewer/SmartDiffViewer.test.tsx:160-161`;
+the id it checks is built by `src/components/diff-viewer/helpers.ts`
+(`lineAnchorId`). Upstream: `https://vitest.dev/api/mock#mock-contexts`.
+
+### 2026-08-09 — jsdom implements NO `Element.prototype.scrollIntoView`, and the repo's only pre-existing caller is untested
+
+**Quirk:** the method does not exist in jsdom at all — it is layout, and jsdom
+has none. A component that calls `el.scrollIntoView(...)` throws
+`scrollIntoView is not a function` the moment a test triggers that path, and the
+failure names the DOM API rather than your component, so it reads like a broken
+test environment.
+
+The trap is that nothing warns you first. `src/test/setup.ts` stubs
+`ResizeObserver` and nothing else, and the repo's one existing caller —
+`ReviewRunAccordion.tsx:63`, in the "expand then scroll to the target run"
+effect — has **no test that reaches it**. So the gap survived until L04 added a
+second scroller (the smart-diff badge → line navigation) and wrote the first
+test that clicks it.
+
+**Workaround:** stub it in the test file that needs it, not globally:
+
+```ts
+beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+```
+
+Local rather than in `src/test/setup.ts` on purpose: that is a shared file and
+there is still exactly one consumer, so promoting it would be sharing on a
+hypothetical second caller (`frontend-ui-architecture` §2). Promote it when
+`ReviewRunAccordion` finally gets the test it is missing.
+
+Assert on the spy (`toHaveBeenCalledTimes`), never on scroll position — jsdom
+computes none, so every element is at 0.
+
+**Where:** the untested caller is
+`src/app/repos/[repoId]/pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:63`;
+the new caller is
+`.../_components/SmartDiffViewer/SmartDiffViewer.tsx` (the effect keyed on the
+navigation target); the stub and the two-click assertion are in
+`.../SmartDiffViewer/SmartDiffViewer.test.tsx`; the setup file that does not
+carry it is `src/test/setup.ts`.
+
 ### 2026-08-05 — `IconName` is the vendored REGISTRY's key set, not lucide's export list — and one key is aliased
 
 **Quirk:** `icon="Pencil"` fails typecheck with a 64-name union in the error, even
@@ -449,6 +587,67 @@ and the card's own per-finding rows.
 
 ## Recurring Errors & Fixes
 
+### 2026-08-09 — A `retry: false` query for a resource that does not exist YET caches the 404 forever when no mutation invalidates its key
+
+**Symptom:** open the Agent Runs tab while a review is running, wait for it to
+finish, and the run's log stays blank. Reloading the page — or leaving the tab
+and coming back — makes it appear. Nothing is wrong with the data: the trace is
+in Postgres the whole time.
+
+**Cause:** three things that are each reasonable alone.
+
+1. `useRunTrace` (`lib/hooks/trace.ts:12`) is keyed `["run-trace", runId]` and
+   carries `retry: false`. A grep for that key across `client/src` returns the
+   hook and nothing else — **no mutation ever invalidated it.**
+2. `run_traces` is written at the very END of a run (`run-executor.ts` completes
+   `agent_runs` at :365 and only saves the trace at :417), so a drawer opened
+   while the run is live fetches a trace that does not exist and gets a 404.
+3. With `retry: false` and no invalidation, that 404 is the cached value for
+   `["run-trace", runId]` for the rest of the session. Only a remount — which
+   refetches because the default `staleTime` is 0 — clears it.
+
+**Takeaway:** the house rule "a mutation must invalidate its query keys"
+(`client/AGENTS.md` §Conventions) has a second half worth stating: **a query
+whose resource is created asynchronously needs an invalidator even though no
+mutation writes it directly.** The fix is one line in `useRunReview.onSuccess`
+(`lib/hooks/reviews.ts`), and the placement is the load-bearing part —
+that mutation resolves *after* the server persisted the trace, while
+`useCancelRun` resolves while the run is still winding down and would only cache
+a second miss. Use the **prefix** key `["run-trace"]`, not `["run-trace", runId]`:
+`{ all: true }` fans out to one run per agent, so there is no single id to
+target. Same class of bug as `server/INSIGHTS.md` 2026-08-08
+("the run is marked DONE before the trace is written") — that entry is the
+server-side face of this race; this is the UI-side one.
+
+### 2026-08-09 — `getByText` normalizes whitespace, so an INDENTED diff line can never be matched by its literal text
+
+**Symptom:** a diff-viewer test asserts a patch body line is on screen and dies
+with `Unable to find an element with the text: "  lodash: 4.17.21"`, followed by
+a full DOM dump that visibly **contains** that exact line. The dump makes it look
+like a rendering bug — the text is right there.
+
+**Cause:** RTL's default `normalizer` trims each element's text and collapses
+runs of whitespace before comparing, and it does **not** normalize the string you
+passed. So the DOM's `"  lodash: 4.17.21"` becomes `"lodash: 4.17.21"` and never
+equals a needle that still carries its two leading spaces. Indentation is
+exactly what a real diff body is full of, and `parsePatch` preserves it
+(`helpers.ts` slices off only the leading `+`/`-`), so any fixture built from a
+realistic patch walks straight into it.
+
+**Takeaway:** in a diff fixture, use assertion lines with **no leading
+whitespace** — it costs nothing and keeps the query literal. When the
+indentation is the thing under test, pass a matcher instead of a string
+(`getByText((_, el) => el?.textContent === RAW)`) or `{ normalizer: (s) => s }`,
+and say in a comment why. Do not "fix" it by trimming the fixture and leaving
+the reason unwritten: the next person re-derives it from the same misleading DOM
+dump.
+
+**Where:** the fixture comment is
+`src/app/repos/[repoId]/pulls/[number]/_components/SmartDiffViewer/SmartDiffViewer.test.tsx`
+(`LOCK_BODY`); the code that preserves indentation is
+`src/components/diff-viewer/helpers.ts` (`parsePatch`). Upstream:
+`https://testing-library.com/docs/dom-testing-library/api-configuration/#normalizer`.
+
 ### 2026-08-08 — `@testing-library/user-event` is NOT installed here, so every interactive test uses `fireEvent` — copying that pattern spreads it
 
 **Symptom:** you write a new component test, reach for the interaction API the
@@ -486,6 +685,14 @@ rule is `.claude/skills/react-testing-library/SKILL.md` §Query Priority and
 permitted-exception wording is `.claude/agents/test-writer.md`
 §"The two permitted exceptions". Upstream:
 `https://testing-library.com/docs/user-event/intro/`.
+
+**Superseded by:** 2026-08-09 — the premise in the title no longer holds. L03
+installed it (`client/package.json:31`, `@testing-library/user-event@^14.6.3`),
+which is what this entry recommended, and new tests use it. Everything else
+stands: the eight `fireEvent` files are still unmigrated, so they remain the
+wrong thing to copy. One exception has since been found where `fireEvent` is the
+correct choice, not a shortcut — hover-gated controls; see the Tool & Library
+Notes entry of that date.
 
 ### 2026-08-02 — Dropping `border` is NOT enough: `borderColor` and `borderWidth` are shorthands too
 

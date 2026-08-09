@@ -11,6 +11,49 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
+### 2026-08-09 — Build a demo PR fixture with a temporary `GIT_INDEX_FILE`, so a half-finished lesson in the working tree is never in the way
+
+**Pattern:** several lessons need a *demo pull request* that exists on GitHub so
+the app can import it — L04 Smart Diff needs a large one carrying a lock file.
+The awkward part is timing: the fixture branch has to fork from `origin/main`,
+but by the time you want to record the demo, the lesson's own work is sitting
+uncommitted on `lab/lab0N`. Build the commit with plumbing and a throwaway
+index; nothing is checked out, so the dirty tree is irrelevant:
+
+```sh
+export GIT_INDEX_FILE=/tmp/fixture.index && rm -f "$GIT_INDEX_FILE"
+git -C "$REPO" read-tree origin/main
+for f in ...; do
+  sha=$(git -C "$REPO" hash-object -w "$STAGING/$f")
+  git -C "$REPO" update-index --add --cacheinfo 100644,"$sha","$f"
+done
+tree=$(git -C "$REPO" write-tree)
+commit=$(git -C "$REPO" commit-tree "$tree" -p origin/main -F msg.txt)
+git -C "$REPO" update-ref refs/heads/demo/<slug> "$commit"
+```
+
+Two things that bite: every `git` call needs `-C "$REPO"` (the loop `cd`s into
+the staging directory, and a bare `git` there is "not a git repository"), and
+`GIT_INDEX_FILE` must be exported *before* `read-tree`.
+
+**Why:** the alternatives both cost something. `git switch -c demo/x
+origin/main` drags the uncommitted lesson across a branch that differs in
+hundreds of files, and refuses outright where a modified file would be
+overwritten. `git worktree add` is clean but materialises a second checkout,
+which is a lot of ceremony for ten files — and note that `git worktree remove`
+is permitted here while `git branch -D` is not, so a worktree can strand the
+branch it created.
+
+**Where:** the fixtures live as `demo/*` branches in the **fork**, not upstream
+— `origin` is `serhii-kudriashov-personal/dev-digest` (PRs #1–#3, #5). Before
+building one, check it will actually group the way the demo needs: run the real
+classifier, `classifyFile` at
+`server/src/modules/smart-diff/helpers.ts`, over the intended file list rather
+than reasoning about the patterns in
+`server/src/modules/smart-diff/constants.ts:40` by eye. The pre-existing `demo/*`
+PRs are all 3–6 files with no lock file, so none of them can demonstrate the
+L04 acceptance criterion at `specs/l04-smart-diff.md:280`.
+
 ### 2026-08-08 — A spec-conformance checker must extract the obligations FIRST — and must never be asked to "explain the problem and suggest a fix"
 
 **Pattern:** when writing any agent or prompt that checks code against a written
@@ -487,6 +530,45 @@ historical drift is its own task.
 
 ## Codebase Patterns
 
+### 2026-08-09 — Purity is not an address: a pure function does NOT belong in `reviewer-core` just because it has no I/O
+
+**Rule:** when deciding between `reviewer-core/src/**` (ring 1) and
+`server/src/modules/<name>/helpers.ts` (ring 2) for a deterministic function, ask
+what it operates on, not whether it touches I/O. `backend-onion-architecture`
+§8's row "domain logic with no I/O at all → `reviewer-core/src/**`" means **the
+review engine's** domain — prompt, grounding, reduce, scoring. Purity is a
+property every ring-2 helper also has.
+
+**Why:** the skill's tiebreak, "when two rows seem to fit, take the inner one",
+reads as an instruction to push anything pure inward, and it only engages when
+both rows genuinely fit. `reviewer-core/src/scope.ts` is the case that looks like
+a precedent for inward and is not: it earns ring 1 because it consumes `Finding`
+and gates what a review emits — `review/run.ts` calls it. Smart Diff's
+`classifyFile` is equally pure but consumes `pr_files` and produces a **UI
+transport contract** no engine path calls, so moving it inward would widen ring
+1's public API (which grows only via `src/index.ts`) for exactly one ring-2
+consumer, in a package whose `build` is `tsc --noEmit` and whose reason to exist
+is the review pipeline.
+
+The judgement recurs on every deterministic feature, so carry the **flip
+condition** rather than the verdict: if the review pipeline ever wants the same
+computation, it *moves* to `reviewer-core` — it is not duplicated there. Two
+copies across the package boundary is the outcome to refuse; one copy in the
+wrong ring is cheap to relocate.
+
+Note `pnpm arch` is silent on this. Both placements pass every rule — the gate
+enforces import *direction*, never whether a module is at the right address. So
+this is a judgement that has to be made deliberately and written down, which is
+why it is here rather than left to the linter.
+
+**Where:** the ring-2 placement is `server/src/modules/smart-diff/helpers.ts`
+(`classifyFile`), consumed by `service.ts` in the same slice; the ring-1
+counter-example is `reviewer-core/src/scope.ts`, consumed by
+`reviewer-core/src/review/run.ts`; the rows in tension are
+`.claude/skills/backend-onion-architecture/SKILL.md` §8 (placement table) and §7
+(ring 1 as a functional core). Reasoning of record: `specs/l04-smart-diff.md`
+§Risks 2, upheld by the architecture review of that change.
+
 ### 2026-08-08 — Adding a prompt slot to `reviewer-core` is TWO edits: `promptTokenCounts` is a hand-written list, not a loop
 
 **Rule:** when you add an optional section to `assemblePrompt` — the `intent`
@@ -906,6 +988,36 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 "fix" there.
 
 ## Tool & Library Notes
+
+### 2026-08-09 — `pnpm add --lockfile-only` in a scratch copy gives a genuine 400-line lockfile diff in two seconds, with no install
+
+**Quirk:** a demo PR that needs a realistic `pnpm-lock.yaml` diff seems to force
+a choice between hand-writing hundreds of lines of fake lock entries and running
+a full `pnpm install` in a checkout you do not want. Neither is necessary. pnpm
+resolves against the registry and rewrites the lock without touching
+`node_modules` when given `--lockfile-only`, and it is happy to do that in a
+directory holding nothing but the two files:
+
+```sh
+mkdir -p "$SCRATCH/lockgen"
+git show origin/main:server/package.json  > "$SCRATCH/lockgen/package.json"
+git show origin/main:server/pnpm-lock.yaml > "$SCRATCH/lockgen/pnpm-lock.yaml"
+cd "$SCRATCH/lockgen" && pnpm add --lockfile-only exceljs
+```
+
+`exceljs` took `server/pnpm-lock.yaml` from 4935 to 5369 lines — 434 added — in
+about two seconds, and updated `package.json` in step. Copy both results into
+the fixture. Because the resolution is real, the diff is real: no invented
+integrity hashes, no lock that contradicts its manifest.
+
+**Workaround:** pick the dependency for its transitive weight when the point is
+a big lock diff — a zero-dependency package moves the lock by ~20 lines and will
+not make "the lock file is collapsed" legible on a video.
+
+**Where:** `server/package.json` is the manifest to copy; this repo is **not** a
+monorepo, so run it against the one package's own lockfile
+(`AGENTS.md` §Repo rules). Note `timeout` does not exist on this machine's
+zsh — do not wrap the command in it.
 
 ### 2026-08-08 — A `.nullish()` z.enum DOES survive `toJsonSchema` — and `Finding.kind` had already proved it in production
 

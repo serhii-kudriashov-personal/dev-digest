@@ -11,6 +11,42 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
+### 2026-08-09 — A value that is returned but rendered NOWHERE has no UI that can notice it breaking — assert it at the boundary that returns it
+
+**Pattern:** when an endpoint returns a field no client consumes yet, put the
+assertion on the **boundary function that emits it**, not only on the helper that
+computes it:
+
+```ts
+// helpers pin the computation…
+expect(suggestSplit(files).too_big).toBe(true);
+// …and this pins that the builder still CARRIES it into the response
+expect(diff.split_suggestion).toEqual(suggestSplit(files));
+expect(SmartDiff.parse(diff)).toBeTruthy();
+```
+
+**Why:** Smart Diff computes `split_suggestion` server-side and nothing renders
+it — the plan's Step 8 prop list omitted it deliberately, leaving the field ahead
+of its UI. That is a normal state for a field a later lesson will pick up, and it
+creates a specific blind spot: with `suggestSplit` unit-tested and no consumer, a
+refactor that stops threading the result into `buildSmartDiff` breaks nothing
+visible, fails no test, and produces a response that still parses — because the
+contract allows the field to be present-and-empty. The regression surfaces
+whenever someone finally builds the UI, by which time the cause is many commits
+back.
+
+Generalises past this feature: the same shape covers a field added for an
+upcoming client, a trace attribute only an eval reads, and anything behind a flag
+that is currently off. The question to ask is "if this silently stopped being
+populated, what would go red?" — and if the answer is nothing, the assertion
+belongs one layer out from where you were about to put it.
+
+**Where:** the computation is `src/modules/smart-diff/helpers.ts` (`suggestSplit`),
+the boundary that carries it is `buildSmartDiff` in the same file; the pair of
+assertions is `test/smart-diff-helpers.test.ts:140-145`, with the reason written
+in the test. The consumer that does not exist yet is the split-suggestion UI —
+`specs/l04-smart-diff.md` §Out of scope records why.
+
 ### 2026-08-08 — A never-throw facade is untestable through its production caller the moment that caller has its own containment `.catch` — test the guarantee at the service
 
 **Pattern:** when a port documents "this never throws" (`RepoIntel`, now
@@ -283,6 +319,36 @@ testcontainers.
 
 ## Codebase Patterns
 
+### 2026-08-09 — `normalizePath` strips `a/` and `b/` as diff prefixes, so a real top-level directory with either name is treated as repo-root
+
+**Rule:** anything that compares a `findings.file` path against a `pr_files.path`
+has to strip the unified-diff prefixes first — a model-authored finding may carry
+`a/src/x.ts` or `b/src/x.ts` where the imported file row says `src/x.ts`, and an
+exact-match join silently finds nothing. `PATH_PREFIX_PATTERN`
+(`/^(\.\/|a\/|b\/)+/`) is that strip, and it is why Smart Diff's badges line up
+with its findings at all.
+
+**Why:** the cost is a real ambiguity, and it is worth knowing before you debug
+it from the other end. A repository that genuinely has a top-level directory
+named `a/` or `b/` gets it stripped too, so `a/util.ts` classifies and splits as
+if it were `util.ts` at the repo root. The regex cannot distinguish the two — a
+diff prefix and a directory name are the same three characters — and no amount of
+care at the call site recovers the information, because `pr_files.path` has
+already lost it.
+
+This is inherent to prefix stripping rather than a defect to fix, so it is pinned
+by a test that **states** the consequence instead of a fixture that dodges it.
+The tell that you have hit it: a `split_suggestion` proposal named `.` where you
+expected `a`, or a file classified `core` that should have matched a per-directory
+rule. It bit once already, in a test fixture that used `a/` and `b/` as ordinary
+directory names and got two buckets collapsed into the root one.
+
+**Where:** the pattern is `src/modules/smart-diff/constants.ts:94`, applied at
+`src/modules/smart-diff/helpers.ts:45-46` and consumed by `classifyFile` (`:54`),
+`findingLinesFor` (`:68,71`) and the split grouping (`:155`); the test that
+states the trade-off rather than hiding it is
+`test/smart-diff-helpers.test.ts` (the `suggestSplit` prefix case).
+
 ### 2026-08-08 — `no-cross-slice-import` scopes its `from` to `^src/modules/` — which is WHY the container may import a slice's service and a sibling slice may not
 
 **Rule:** when slice A needs something slice B owns, put a facade port in
@@ -378,6 +444,38 @@ score and cost — copy their shape) and `:116` (the contradicting comment);
 uppercase siblings at `src/vendor/shared/contracts/observability.ts:111` and
 `contracts/productionize.ts:156`.
 
+### 2026-08-09 — `findings` and `reviews` ARE indexed now — check the schema before you owe a migration
+
+**Rule:** before adding an index for a new read of `findings` or `reviews`,
+read `server/src/db/schema/reviews.ts`. Four indexes exist today:
+`findings_review_id_idx`, `findings_skill_id_idx`, `reviews_pr_kind_idx`
+(`pr_id, kind`) and `reviews_run_id_idx`. A feature that reads findings by
+`review_id`, or reviews by `pr_id` — which is what `reviewsForPull` does, and
+therefore what every read-side view of a PR's findings does — owes **no new
+index and no migration**.
+
+**Why:** the 2026-08-02 entry above states "the `findings` table has no indexes
+at all", and it is the entry a session lands on when it greps for `findings`
+and indexes. Its rule is still right; its factual premise is two migrations
+stale. Acting on the premise means generating a migration for an index that
+already exists, and `pnpm db:generate` goes interactive when one migration both
+drops and adds — so the wasted work is not free.
+
+Insights here are append-only, so the old entry keeps its text and carries a
+`**Superseded by:**` pointer instead. The general shape worth carrying: an
+insight that asserts *the current state of the schema* has a shelf life, unlike
+one that asserts a rule. When you read one, check the schema.
+
+Smart Diff (L04) is the worked example — a whole read-side feature over
+`pr_files` + `findings` with no migration at all
+(`specs/l04-smart-diff.md` §Inventory).
+
+**Where:** the four indexes are `server/src/db/schema/reviews.ts` (`findings`
+table definition and `reviews` table definition); the reader they serve is
+`src/modules/reviews/repository/review.repo.ts` (`reviewsForPull`); the new
+consumer that needed nothing added is
+`src/modules/smart-diff/service.ts`.
+
 ### 2026-08-02 — The `findings` table has no indexes at all — a FK is not an index
 
 **Rule:** any new query that joins or filters `findings` must ship its own index
@@ -396,6 +494,10 @@ scan on every PR-list load, which polls every 60 s.
 `pnpm db:generate` — applied migrations are never edited); DDL at
 `server/src/db/migrations/0000_init.sql:142-158`, FK at `:378`; the current sole
 reader is `src/modules/reviews/repository/review.repo.ts:reviewsForPull`.
+
+**Superseded by:** 2026-08-09 — the premise no longer holds. See the entry of
+that date below; the *rule* (a new query that filters `findings` ships its own
+index) still stands, but "the table has no indexes at all" is now false.
 
 ### 2026-08-02 — The live agent prompt is `agents.system_prompt`, not `docs/agent-prompts/`
 
@@ -631,6 +733,44 @@ than relying on config auto-discovery. Same trap applies to any future
 (`"arch"`); `"type": "module"` at `server/package.json:4`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-09 — Deleting an `agent_runs` row does NOT stop the run: the task keeps executing, keeps spending, and writes its review into the DB minutes after the row is gone
+
+**Symptom:** a demo PR was reset between recording takes with
+`delete from agent_runs where pr_id = …`. Every later run then looked "stuck":
+`status = 'running'` for minutes, `tokens_in`/`grounding`/`score` all NULL, no
+`run_traces` row — while the server sat at 0% CPU with no lock contention, a
+healthy pool, and other endpoints answering in 40ms. Findings nonetheless
+appeared in the UI. The giveaway came from the review row itself: its `run_id`
+pointed at a run **deleted twelve minutes earlier**, and the server log carried
+`Run failed: OpenRouter structured output failed schema validation for Review`
+with `durationMs: 2222448` — a 37-minute zombie finally dying.
+
+**Cause:** two independent things, and they masked each other.
+
+1. The run is an in-process async task. `POST /pulls/:id/review` awaits it (the
+   request logged `responseTime: 272697`), and cancellation is an *in-memory*
+   signal checked at engine checkpoints (`runBus.cancel` →
+   `checkCancelled`, `run-executor.ts:297`). Deleting the row removes the
+   bookkeeping, not the work. The orphan runs to completion, calls
+   `markReviewed` and `insertReviewWithFindings` against a `runId` that no
+   longer exists, and its terminal `completeAgentRun` updates **zero rows** — so
+   nothing ever records that it finished.
+2. `deepseek/deepseek-v4-flash` cannot reliably satisfy the `Review` structured
+   output on a ~700-line diff. One attempt looped — 19 near-identical
+   "Missing input validation on X parameter" findings, all anchored at
+   `start_line: 1`; the next failed schema validation outright after 37 minutes.
+
+**Takeaway:** to reset a PR's review state, **cancel first, wait for the run to
+actually leave `running`, and only then delete** — `POST /runs/:id/cancel`, poll
+`GET /pulls/:id/runs/active` until it is `[]`, then clean. Restarting the server
+is the blunt equivalent: it kills the tasks, and the boot reaper in `app.ts`
+marks the leftover `running` rows. Also note `pull_requests.last_reviewed_sha`
+(`schema/pulls.ts:21`, written by `markReviewed`, `repository/pull.repo.ts:39`)
+is what `deriveReviewStatus` (`modules/pulls/status.ts:52`) reads — deleting
+reviews and runs alone leaves a PR showing `reviewed`; the column must be set
+back to NULL. And when a run "hangs", read the **server log** before profiling
+the process: the real error was sitting there the whole time.
 
 ### 2026-08-08 — The `prompt_assembly` flake is a run-vs-trace ordering race: the run is marked DONE before the trace is written
 
