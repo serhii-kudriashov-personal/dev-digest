@@ -124,6 +124,97 @@ shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
 
+### 2026-08-10 — An OPTIONAL callback prop that no caller passes is a dead feature no gate can see — grep the call sites, not the type
+
+**Rule:** when a feature's interactivity arrives as an optional callback on an
+options object (`DiffFindingsApi.onFindingClick`, `commenting.onSubmit`, …),
+finishing the component is not finishing the feature. Grep for a **caller that
+actually supplies it** before calling the work done:
+
+```sh
+rg -n 'onFindingClick' client/src   # definition + branch + ... a provider?
+```
+
+If every hit is a type, a prop-drill or a `?.` guard, the feature does not exist
+at runtime.
+
+**Why:** L04 shipped the entire chip→finding chain except its first link.
+`findings.ts` declared `onFindingClick?`, `FileCard` drilled it to `CodeLine`,
+and `CodeLine` branched on it correctly — rendering a `<button>` when present and
+a bare `SeverityBadge` when not. `SmartDiffViewer` then built
+`const findingsApi: DiffFindingsApi = { findings }`. So every severity chip in
+the Smart Diff was decoration, and the mentor's review is what found it, because
+**nothing mechanical could**: the prop is optional, so `pnpm typecheck` is green;
+the branch is exercised by the `else` arm, so coverage is green; and the existing
+tests asserted `screen.getByText("Critical")` — which a non-interactive badge
+satisfies exactly as well as a button.
+
+The lesson generalizes past this prop. An optional callback is the one API shape
+where "wired" and "unwired" are both type-correct, so the *only* proof is a test
+that asserts the interaction, not the render. Two assertions, cheap, and they
+pin both directions:
+
+```ts
+await user.click(screen.getByRole("button", { name: /Go to the finding:/ }));
+expect(onFindingClick).toHaveBeenCalledWith(target);          // wired
+expect(screen.queryByRole("button", { name: /Go to the finding:/ })).toBeNull(); // omitted ⇒ not a button
+```
+
+Also worth carrying: the acceptance criterion that *looked* like it covered this
+did not. `specs/l04-smart-diff.md` criterion 5 is the file-level badge → line
+jump, and it reads like "clicking things in the Smart Diff works". The badge and
+the chip are two different targets — inside the diff vs. out to the findings
+screen — and one passing does not imply the other.
+
+**Where:** the optional prop is
+`client/src/components/diff-viewer/findings.ts` (`DiffFindingsApi.onFindingClick`);
+the branch that was never taken is
+`client/src/components/diff-viewer/CodeLine/CodeLine.tsx` (the `anchored.map`);
+the caller that omitted it was
+`client/src/app/repos/[repoId]/pulls/[number]/_components/SmartDiffViewer/SmartDiffViewer.tsx`
+(`findingsApi`); the two tests that now pin it are in
+`.../SmartDiffViewer/SmartDiffViewer.test.tsx`; the added criterion is
+`specs/l04-smart-diff.md` §Acceptance 12.
+
+### 2026-08-10 — "Open it in a new tab" decides state-vs-query-param for you, and it removes work rather than adding it
+
+**Rule:** before choosing where a navigation target lives — React state or a
+search param — settle *how* the reader gets there. A same-tab jump can use
+state; anything that opens a new browser tab must use a param, because the new
+tab is a cold load sharing no React tree with the one it came from. Do not reach
+for `postMessage`, `localStorage` or a store to bridge the two.
+
+**Why:** the chip → finding-card jump was built first as in-place navigation and
+then changed to open a new tab, and the second version is strictly simpler:
+
+| | same tab (state target) | new tab (`?finding=<id>`) |
+|---|---|---|
+| target survives | one React tree | any cold load, reload, shared link |
+| repeat click | needs a nonce, so the Effect dep changes | nothing — one load, one jump |
+| `?severity=` filter | must be **widened in the same URL write**, or the reader lands on a tab whose card is filtered out | fresh tab has no selection, so nothing filters |
+
+That middle row is the trap worth remembering on its own: two `setParam` calls in
+one handler do **not** compose. Each builds `new URLSearchParams(search.toString())`
+from the `search` captured in the render that created the closure, so both start
+from the pre-click URL and the second `router.replace` wins outright. One of the
+two params simply never appears, and which one depends on call order — it reads
+like the router rejected the first write. A same-tab version of this feature needs
+a `setParams({ tab, severity })` multi-write for exactly that reason; the
+new-tab version needs neither the multi-write nor the widening, because a fresh
+URL carries no filter to fight.
+
+Note the opposite precedent in the same screen and why it still stands: the
+Timeline → run-accordion jump keeps its target in state (`targetRunId` /
+`targetNonce`) because it navigates **in place**. The rule is not "params are
+better" — it is that the target's lifetime has to match the navigation's.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/PrDetailView/PrDetailView.tsx`
+(`goToFinding` → `window.open`, and `search.get(FINDING_PARAM)` read back on
+load); the param name is `.../PrDetailView/constants.ts` (`FINDING_PARAM`); the
+in-place counter-example is `.../ReviewRunAccordion/ReviewRunAccordion.tsx`
+(`targetRunId`); the severity helpers a same-tab version would have needed are
+`.../SeverityFilterBar` (`toggleSeverity`, `serializeSeverityParam`).
+
 ### 2026-08-09 — Two panels of one screen reading two query keys go stale ASYMMETRICALLY — and the hook's docblock claimed a mitigation that was never built
 
 **Rule:** when one visual pairing is fed by two query keys, the invalidation list
@@ -358,6 +449,92 @@ the address moved: the page is now an 8-line wrapper and the selection owner is
 (`severities` / `onToggleSeverity`).
 
 ## Tool & Library Notes
+
+### 2026-08-10 — jsdom 25 implements no `window.CSS` at all, so `CSS.escape` throws — do not reach for it when building a selector
+
+**Quirk:** `CSS.escape(id)` is the textbook way to interpolate a value into a
+`querySelector`, and under this repo's test environment it is a `ReferenceError`.
+jsdom does not ship the `CSS` interface:
+
+```sh
+node -e "const {JSDOM}=require('jsdom'); const d=new JSDOM('<div></div>');
+         console.log(typeof d.window.CSS)"   # → undefined  (jsdom 25.0.1)
+```
+
+The failure mode is the same trap as `scrollIntoView` (entry below): production
+code is correct, the test dies naming a DOM global, and it reads like a broken
+environment rather than a line you wrote. Worse than `scrollIntoView`, in fact —
+there is no obvious local stub, because escaping is *logic*, not layout, so
+stubbing it with `vi.fn()` would silently change what the selector matches.
+
+**Workaround:** don't escape — narrow the query instead. Hold a ref to the
+container and look up the attribute inside it:
+
+```ts
+const listRef = React.useRef<HTMLDivElement | null>(null);
+listRef.current?.querySelector(`[data-finding-id="${id}"]`)?.scrollIntoView(…);
+```
+
+Scoping to a ref is better than escaping anyway, for a reason unrelated to jsdom:
+the PR page mounts several `FindingsPanel`s at once (one per review run), so a
+`document`-wide query would happily walk into a sibling run's cards. The values
+interpolated here are DB uuids, and an attribute selector inside a ref is not a
+place a path or a title should ever be substituted — if that ever changes, the
+answer is a ref map, not `CSS.escape`.
+
+**Where:** the scoped lookup is
+`client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx`
+(the navigation Effect, plus `ref={listRef}` on the list); the attribute it reads
+is set by `.../FindingCard/FindingCard.tsx` (`data-finding-id`). Upstream:
+`https://github.com/jsdom/jsdom/issues/1550`.
+
+### 2026-08-10 — An Effect that must keep a memoized list in its deps needs an `id:nonce` ref guard, or every unrelated mutation re-fires it
+
+**Quirk:** "scroll to X once, when asked" and "re-run when the list changes" pull
+in opposite directions, and the React lint rule only enforces one of them. The
+navigation Effect in `FindingsPanel` genuinely needs `shown` as a dependency —
+when the target is hidden by the hide-low-confidence toggle it lifts the toggle
+and relies on the re-run with the new `shown` to finish the jump. But `shown` is
+`useMemo(…, [confident, severities])` over the `findings` prop, and
+`useFindingAction` invalidates `["reviews", prId]`, so **every accept/dismiss
+hands down a fresh `findings` array** and re-fires the Effect. The reader accepts
+some other finding halfway down the list and the viewport yanks back to whatever
+they navigated to earlier.
+
+Dropping `shown` from the deps is the tempting fix and it is wrong twice: it lies
+to `react-hooks/exhaustive-deps`, and it breaks the toggle retry that is the
+reason the dep is there.
+
+**Workaround:** guard on the *instruction*, not the data — a ref holding the
+`id:nonce` already acted on:
+
+```ts
+const jumped = React.useRef<string | null>(null);
+// …
+const key = `${targetFindingId}:${targetFindingNonce}`;
+if (jumped.current === key) return;
+const idx = shown.findIndex((f) => f.id === targetFindingId);
+if (idx === -1) { setHideLow(false); return; }   // NOT recorded — this pass did not jump
+jumped.current = key;
+```
+
+The asymmetry is the whole trick: the early `return` for "filtered out" must
+**not** record the key, so the retry after `setHideLow(false)` still runs, while
+the successful jump does record it and every later `shown` identity change is a
+no-op. One jump per click, and the caller's nonce is what makes the next click a
+new instruction.
+
+Note this is not the same thing as the `seq`/nonce in `SmartDiffViewer` or
+`targetNonce` in `ReviewRunAccordion` — those exist to make a repeat click *fire*.
+This ref exists to stop unrelated re-renders from firing. A feature that jumps
+somewhere generally needs both.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx`
+(`jumped`, and the Effect's dep array ending in `shown`); the invalidation that
+supplies the fresh array is `client/src/lib/hooks/reviews.ts` (`useFindingAction`);
+the nonces that do the opposite job are `.../SmartDiffViewer/SmartDiffViewer.tsx`
+(`ScrollTarget.seq`) and `.../ReviewRunAccordion/ReviewRunAccordion.tsx`
+(`targetNonce`).
 
 ### 2026-08-09 — `userEvent` unmounts a HOVER-gated control before your click lands, and the symptom is a silent no-op
 

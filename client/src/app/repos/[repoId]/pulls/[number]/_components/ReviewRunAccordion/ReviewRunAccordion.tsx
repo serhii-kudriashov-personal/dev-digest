@@ -36,6 +36,8 @@ export function ReviewRunAccordion({
   headSha,
   targetRunId = null,
   targetNonce = 0,
+  targetFindingId = null,
+  targetFindingNonce = 0,
   severities = [],
   onToggleSeverity,
 }: {
@@ -51,6 +53,15 @@ export function ReviewRunAccordion({
    *  (driven from the Timeline: clicking an agent name navigates here). */
   targetRunId?: string | null;
   targetNonce?: number;
+  /**
+   * A finding to navigate to, from `?finding=<id>` (a severity chip in the diff
+   * opens the page in a new browser tab pointed at it). Only the run that
+   * actually produced it reacts; the rest ignore it. This accordion only OPENS —
+   * the scrolling is `FindingsPanel`'s, which knows where the card is, and two
+   * smooth scrolls racing each other look broken.
+   */
+  targetFindingId?: string | null;
+  targetFindingNonce?: number;
   /** Page-wide severity selection (`?severity=`); the counts stay per-run. */
   severities?: Severity[];
   onToggleSeverity?: (sev: Severity) => void;
@@ -66,6 +77,11 @@ export function ReviewRunAccordion({
   const t = useTranslations("prReview");
   const del = useDeleteReview(prId);
   const findings = review.findings;
+  const holdsTargetFinding =
+    targetFindingId != null && findings.some((f) => f.id === targetFindingId);
+  React.useEffect(() => {
+    if (holdsTargetFinding) setOpen(true);
+  }, [holdsTargetFinding, targetFindingNonce]);
   const blockers = findings.filter((f) => f.severity === "CRITICAL" && !f.dismissed_at).length;
   // The header's breakdown counts everything this run found, dismissed included
   // — same rule as the PR list column. `blockers` deliberately does not (it
@@ -189,6 +205,8 @@ export function ReviewRunAccordion({
             headSha={headSha}
             severities={severities}
             onToggleSeverity={onToggleSeverity}
+            targetFindingId={holdsTargetFinding ? targetFindingId : null}
+            targetFindingNonce={targetFindingNonce}
           />
         </div>
       )}

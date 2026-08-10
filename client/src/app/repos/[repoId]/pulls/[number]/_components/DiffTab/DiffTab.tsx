@@ -7,7 +7,7 @@ import { DiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
 import { usePrComments, useCreatePrComment, usePrReviews } from "@/lib/hooks/reviews";
 import { useSmartDiff } from "@/lib/hooks/smart-diff";
 import { notify } from "@/lib/toast";
-import type { PrFile } from "@devdigest/shared";
+import type { FindingRecord, PrFile } from "@devdigest/shared";
 import { SmartDiffViewer } from "../SmartDiffViewer";
 
 interface DiffTabProps {
@@ -16,9 +16,15 @@ interface DiffTabProps {
   files: PrFile[];
   /** Inline commenting is offered only on open PRs (GitHub rejects otherwise). */
   canComment?: boolean;
+  /**
+   * The reader clicked a severity chip on a diff line. Opening the card is the
+   * PAGE's business — it knows the route and does the `window.open` into a new
+   * browser tab — so this tab only reports which finding was clicked.
+   */
+  onGoToFinding?: (finding: FindingRecord) => void;
 }
 
-export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
+export function DiffTab({ prId, filesCount, files, canComment, onGoToFinding }: DiffTabProps) {
   const t = useTranslations("brief");
   const { data: comments } = usePrComments(prId);
   const create = useCreatePrComment(prId);
@@ -91,6 +97,7 @@ export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
           files={files}
           findings={findings}
           commenting={commenting}
+          onFindingClick={onGoToFinding}
         />
       ) : (
         <DiffViewer files={files} commenting={commenting} />

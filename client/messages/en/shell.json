@@ -32,6 +32,7 @@
   },
   "diffViewer": {
     "noDiffText": "No diff text available (binary or unfetched patch).",
+    "openFinding": "Open the finding in a new tab: {title}",
     "noChangedFiles": "No changed files.",
     "commentPlaceholder": "Leave a comment… (⌘/Ctrl+Enter to post)",
     "post": "Comment",

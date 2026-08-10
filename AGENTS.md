@@ -96,7 +96,7 @@ Vitest 2 · testcontainers · agent-browser
 | `docs/agent-prompts/` | editing a review agent's `system_prompt` |
 | `docs/l02-experiment.md` | measuring whether a skill (or any prompt change) actually helps |
 | `docs/intent-layer.md` | working on derived PR intent (L03) — sources and their exclusions, the deterministic scope gate, the two confidence numbers, or what the run log does and does not record |
-| `docs/smart-diff.md` | working on reviewer-ordered diffs (L04) — the role classification table, the ordering and split thresholds, or the badge→line navigation |
+| `docs/smart-diff.md` | working on reviewer-ordered diffs (L04) — the role classification table, the ordering and split thresholds, the badge→line navigation, or the severity chip→finding card navigation |
 | `docs/` | asking "why was it decided this way" |
 | `specs/` | implementing a new feature — read its spec first |
 | `INSIGHTS.md` | at the start of every session, and before any non-trivial change: the traps are written down |

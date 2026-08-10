@@ -36,6 +36,15 @@ interface SmartDiffViewerProps {
   files: PrFile[];
   findings: FindingRecord[];
   commenting?: DiffCommentApi;
+  /**
+   * Clicking a per-line severity chip. The page opens that finding's card in a
+   * new browser tab; this component only reports which one was clicked.
+   *
+   * Without it the chips render as plain badges — the overlay is read-only
+   * either way, so a caller that has nowhere to send the reader simply omits it
+   * (`CodeLine` branches on its presence).
+   */
+  onFindingClick?: (finding: FindingRecord) => void;
 }
 
 /** Which file was asked for, and a sequence number so a repeat click re-fires. */
@@ -45,7 +54,13 @@ interface ScrollTarget {
   seq: number;
 }
 
-export function SmartDiffViewer({ groups, files, findings, commenting }: SmartDiffViewerProps) {
+export function SmartDiffViewer({
+  groups,
+  files,
+  findings,
+  commenting,
+  onFindingClick,
+}: SmartDiffViewerProps) {
   const t = useTranslations("brief");
 
   const filesByPath = React.useMemo(() => {
@@ -76,7 +91,7 @@ export function SmartDiffViewer({ groups, files, findings, commenting }: SmartDi
     setTarget((prev) => ({ path, line, seq: (prev?.seq ?? 0) + 1 }));
   };
 
-  const findingsApi: DiffFindingsApi = { findings };
+  const findingsApi: DiffFindingsApi = { findings, onFindingClick };
 
   return (
     <div style={s.list}>

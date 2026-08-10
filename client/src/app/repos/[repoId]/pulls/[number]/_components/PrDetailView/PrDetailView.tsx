@@ -34,7 +34,7 @@ import {
   serializeSeverityParam,
   toggleSeverity,
 } from "../SeverityFilterBar";
-import { DEFAULT_TAB } from "./constants";
+import { DEFAULT_TAB, FINDING_PARAM } from "./constants";
 import { s } from "./styles";
 
 export function PrDetailView() {
@@ -90,6 +90,18 @@ export function PrDetailView() {
   );
   const onToggleSeverity = (sev: Severity) =>
     setParam(SEVERITY_PARAM, serializeSeverityParam(toggleSeverity(severities, sev)));
+
+  // Files changed → Findings: clicking a severity chip on a diff line opens that
+  // finding's card in a NEW BROWSER TAB, so the reader keeps their place in the
+  // diff. The target therefore has to live in the URL (`?finding=`) rather than
+  // in state — the new tab is a cold load and shares no React tree with this one.
+  // No `?severity=` is carried over: a fresh tab has no selection, so there is
+  // nothing that could filter the card out.
+  const targetFindingId = search.get(FINDING_PARAM);
+  const goToFinding = (finding: FindingRecord) => {
+    const url = `/repos/${repoId}/pulls/${number}?tab=findings&${FINDING_PARAM}=${encodeURIComponent(finding.id)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -178,6 +190,8 @@ export function PrDetailView() {
             headSha={pr.head_sha}
             severities={severities}
             onToggleSeverity={onToggleSeverity}
+            targetFindingId={targetFindingId}
+            targetFindingNonce={1}
             onCancelRuns={(ids) => ids.forEach((id) => cancel.mutate(id))}
             cancelling={cancel.isPending}
             onOpenTrace={(id) => setParam("trace", id)}
@@ -199,6 +213,7 @@ export function PrDetailView() {
             filesCount={pr.files_count}
             files={pr.files}
             canComment={pr.status === "open"}
+            onGoToFinding={goToFinding}
           />
         )}
       </div>

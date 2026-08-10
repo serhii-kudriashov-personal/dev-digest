@@ -27,6 +27,8 @@ export function FindingCard({
   f,
   focused,
   defaultExpanded,
+  expanded: expandedProp,
+  onExpandedChange,
   onAction,
   pending,
   repoFullName,
@@ -34,14 +36,29 @@ export function FindingCard({
 }: {
   f: FindingRecord;
   focused?: boolean;
+  /** Initial expanded state when uncontrolled. */
   defaultExpanded?: boolean;
+  /**
+   * Controlled expanded state. When passed it WINS over `defaultExpanded`, so a
+   * caller that has to force a card open — navigating here from a severity chip
+   * in the diff — can, without every other caller owning the state. Same
+   * uncontrolled/controlled pair as `FileCard`.
+   */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   onAction?: (action: FindingActionKind, reply?: string) => void;
   pending?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
 }) {
   const t = useTranslations("prReview");
-  const [expanded, setExpanded] = React.useState(defaultExpanded ?? false);
+  const [uncontrolledExpanded, setUncontrolledExpanded] = React.useState(defaultExpanded ?? false);
+  const expanded = expandedProp ?? uncontrolledExpanded;
+  const toggleExpanded = () => {
+    const next = !expanded;
+    if (expandedProp === undefined) setUncontrolledExpanded(next);
+    onExpandedChange?.(next);
+  };
   const sevColor = SEV_COLOR[f.severity] ?? SEV_COLOR_FALLBACK;
   const fileHref =
     repoFullName && headSha
@@ -53,7 +70,7 @@ export function FindingCard({
 
   return (
     <div data-finding-id={f.id} style={s.card(!!focused, sevColor, muted)}>
-      <div onClick={() => setExpanded((e) => !e)} style={s.header}>
+      <div onClick={toggleExpanded} style={s.header}>
         <div style={s.badgeWrap}>
           <SeverityBadge severity={f.severity as Severity} compact />
         </div>
