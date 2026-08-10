@@ -59,7 +59,22 @@ Identifiers are flat and human-readable, everywhere: `repo` is the GitHub slug
    line `[devdigest-mcp] ready …` on **stderr**. A diagnostic appearing on stdout
    is a corrupted transport, not a cosmetic issue.
 
-4. **Register the server** — see the next section.
+4. **Or open the MCP Inspector UI.** A visual alternative to step 3 — lets you
+   browse the five tools, fill in arguments through a form, and inspect
+   requests/responses without an MCP client. From `mcp/`:
+
+   ```sh
+   pnpm inspect
+   ```
+
+   This rebuilds the package, then launches `@modelcontextprotocol/inspector` in
+   web mode against `node dist/index.js` and opens the browser at the printed
+   `http://localhost:6274?MCP_INSPECTOR_API_TOKEN=...` URL. The engine must
+   already be answering on `http://localhost:3001` (step 1), same as any other
+   client. Stop it with Ctrl-C; it is a dev-only tool and is never started by
+   `./scripts/dev.sh` or registered anywhere for you.
+
+5. **Register the server** — see the next section.
 
 ## Registering: always-on vs on demand
 

@@ -29,6 +29,7 @@ documented state, not an oversight.
 | Build | `pnpm build` → `dist/index.js` |
 | Run the built server | `node dist/index.js` (or `pnpm start`) |
 | Watch mode | `pnpm dev` |
+| Inspect via web UI | `pnpm inspect` → builds, then launches `@modelcontextprotocol/inspector --web` against `node dist/index.js` |
 
 Env: `DEVDIGEST_API_BASE` (default `http://localhost:3001`). It is the **only**
 environment variable this package reads.
@@ -203,4 +204,5 @@ consumer no engine path calls. `src/sanitize.ts` is the local equivalent.
 | `docs/request-lifecycle.md` | asking why `run_agent_on_pr` polls instead of using SSE, why the poll interval is 2000 ms, why a timeout does not cancel the run or set `isError`, or how the token budget and the untrusted-content fencing were sized |
 | `docs/` | asking why this package is designed the way it is |
 | `specs/` | implementing a new tool |
-| `../INSIGHTS.md` | at the start of every session — this package has no `INSIGHTS.md` of its own yet |
+| `INSIGHTS.md` | at the start of every session — package-level lessons for `mcp/**` |
+| `../INSIGHTS.md` | at the start of every session — repo-wide lessons |
