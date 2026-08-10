@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.shared-dts/
+*.tsbuildinfo
+
+# The on-demand client config documented in README.md §Registering. It carries a
+# machine-specific ABSOLUTE path to dist/index.js, so it must never be committed.
+devdigest.mcp.json

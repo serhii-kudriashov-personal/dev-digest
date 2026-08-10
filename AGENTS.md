@@ -30,6 +30,7 @@ Vitest 2 · testcontainers · agent-browser
 | `client/` | Next.js studio `:3000` — read `client/AGENTS.md` |
 | `reviewer-core/` | review engine, zero I/O — read `reviewer-core/AGENTS.md` |
 | `e2e/` | browser flows — read `e2e/AGENTS.md` |
+| `mcp/` | local MCP server (stdio) — read `mcp/AGENTS.md` |
 | `scripts/` | `dev.sh` local launch, `e2e.sh` hermetic e2e |
 
 ## Repo rules
@@ -42,7 +43,7 @@ Vitest 2 · testcontainers · agent-browser
   what makes it work. Edit `AGENTS.md`; never replace the symlink with a real
   file. On Windows, clone with `git clone -c core.symlinks=true`, or the links
   arrive as one-line text files.
-- **NOT a monorepo.** Four independent `package.json` + lockfiles. Run
+- **NOT a monorepo.** Five independent `package.json` + lockfiles. Run
   `pnpm install` inside a package, never at the root.
 - **Cross-package imports go through tsconfig `paths` only.** Added an alias?
   Add it to every tsconfig that resolves it.
@@ -99,6 +100,7 @@ Vitest 2 · testcontainers · agent-browser
 | `docs/smart-diff.md` | working on reviewer-ordered diffs (L04) — the role classification table, the ordering and split thresholds, or the badge→line navigation |
 | `docs/` | asking "why was it decided this way" |
 | `specs/` | implementing a new feature — read its spec first |
+| `mcp/AGENTS.md` | changing the local MCP server (L05) — adding or editing a tool, or preparing to open a PR that touches `mcp/**` |
 | `INSIGHTS.md` | at the start of every session, and before any non-trivial change: the traps are written down |
 | `.claude/skills/engineering-insights/SKILL.md` | writing an insight — entry format, sections, routing |
 | `.claude/agents/researcher.md` | delegating a "where does X live" / "what does the upstream doc say" question — read-only, cites `path:line` or a URL, and lists what it could not find |

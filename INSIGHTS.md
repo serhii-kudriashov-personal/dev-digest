@@ -11,6 +11,51 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
+### 2026-08-09 — Phrase an acceptance criterion over FIELDS, never over serialized bytes — or its tests will quietly grow fixtures that avoid the violating case
+
+**Pattern:** when writing an acceptance criterion of the form "no X appears in
+the output", say **which fields** it governs and **name the permitted carrier**,
+then assert it as a *path list* rather than a regex over `JSON.stringify`.
+
+```ts
+// returns ['trace_url'] for a URL that contains a uuid,
+// and ['findings[0].id'] for a field that IS one — different values, not
+// two readings of the same regex
+uuidBearingPaths(response)   // → toEqual(['trace_url'])
+```
+
+**Why:** L05's criterion 8 read "no response object emitted by any tool contains
+a UUID, a `confidence`, or a `rationale`". It is unsatisfiable as written: the
+same spec *mandates* a `trace_url`, and every run id the engine mints is a UUID
+(`server/src/modules/_shared/schemas.ts:11`). Two items of one plan contradicted
+each other and the plan did not say which gave way.
+
+The damage is not the contradiction, it is what the tests did with it. All three
+fixtures that could have exercised the collision had drifted to inputs that keep
+the criterion true — `shape.test.ts:59` passed **no** `traceUrl`, `:123` passed
+the non-UUID `http://localhost:3001/x`, `deadline.test.ts` used the literal
+`run-1`. Suite green, criterion violated in production, and `plan-verifier`
+found it only by calling a real engine. **A criterion phrased over bytes selects
+for fixtures that dodge it**, and nobody writes that fixture dishonestly — the
+readable stand-in is the natural thing to type.
+
+Two rules follow. A fixture that cannot mint a production-shaped identifier makes
+the criterion it feeds untestable, so fakes emit real shapes (`FAKE_RUN_ID`, a
+real UUID) even when a human would never read them. And where there is no bug to
+fail against, prove the discriminator is not vacuous some other way — here, by
+running it over three fabricated responses (clean / leaked-field / bare-uuid) and
+confirming it separates them, in a scratch script that is then deleted.
+
+**Where:** the amended criterion and its carve-out are `specs/l05-mcp-server.md`
+§Acceptance 8; the walker is `mcp/test/helpers/fields.ts` (`uuidBearingPaths`,
+`identifierFields`); the direct assertions are `mcp/test/trace-url.test.ts`
+(including the `run_id: null` branch that must emit **no** `trace_url` key —
+which is real because an `agent_runs` row and its `reviews` row can each outlive
+the other, 2026-08-02 below); the fixture that caused it is
+`mcp/test/helpers/fake-engine.ts` (`'run-1'` → `FAKE_RUN_ID`). Still byte-level
+and carrying the same latent weakness: the `list_agents` and `get_conventions`
+assertions in `mcp/test/shape.test.ts`.
+
 ### 2026-08-09 — Build a demo PR fixture with a temporary `GIT_INDEX_FILE`, so a half-finished lesson in the working tree is never in the way
 
 **Pattern:** several lessons need a *demo pull request* that exists on GitHub so
@@ -252,6 +297,62 @@ and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65
 (both removed).
 
 ## What Doesn't Work
+
+### 2026-08-09 — Aliasing tsconfig `paths` at another package's `.ts` sources: fine for `reviewer-core`, wrong for any package that EMITS
+
+**Tried:** giving the new `mcp/` package the shared contracts by copying
+`reviewer-core/tsconfig.json`'s alias verbatim —
+`"@devdigest/shared": ["../server/src/vendor/shared/index.ts"]` — on the
+reasoning that `backend-onion-architecture` §2 blesses that exact inversion
+("a packaging wart, not a direction violation") and that every import would be
+`import type`, so `zod` would be elided.
+
+**Failed:** it typechecks, and then `pnpm build` produces the wrong package.
+`tsc` treats the aliased `.ts` files as **program inputs**, so it
+
+- emits a second copy of every contract into `dist/` — each one `import`ing
+  `zod`, which is not a runtime dependency of that package; and
+- recomputes `rootDir` to the common ancestor of both trees, moving the entry
+  point from `dist/index.js` to `dist/mcp/src/index.js` — which silently breaks
+  any `mcpServers` config, launcher or docs pointing at the former.
+
+The trap is a half-truth everyone repeats: type-only imports are elided from the
+**emitted JS**, not from the **program**. `reviewer-core` never meets this
+because its `build` is `tsc --noEmit`; the precedent does not transfer the moment
+a consumer actually emits.
+
+**Instead:** generate declarations from the canon and alias *those*. A second
+tsconfig with `emitDeclarationOnly: true` writes `.d.ts` into a gitignored
+directory, and every script that could observe drift regenerates it first:
+
+```jsonc
+// mcp/tsconfig.json
+"@devdigest/shared":   ["./.shared-dts/index.d.ts"],
+"@devdigest/shared/*": ["./.shared-dts/*"],
+```
+```json
+"typecheck": "pnpm run shared-dts && tsc --noEmit -p tsconfig.json",
+"test":      "pnpm run shared-dts && vitest run",
+"build":     "pnpm run shared-dts && tsc -p tsconfig.json",
+```
+
+This does **not** violate "`@devdigest/shared` exists twice". That rule exists
+because two *hand-maintained* trees drift silently — which is why
+`scripts/check-shared-sync.sh` exists at all. A derived tree rebuilt from the
+canon before every gate cannot drift silently, so the failure mode the rule
+guards is absent. Verified: `dist/` is flat, 9 modules, and `rg -l zod mcp/dist`
+is empty.
+
+Cost to accept knowingly: `typecheck` now depends on a generation step, and a
+stale `.shared-dts/` is a new drift surface if anyone ever calls `tsc` directly
+instead of through the scripts.
+
+**Where:** `mcp/tsconfig.json:22-33` (the alias plus the comment recording this),
+`mcp/tsconfig.shared-dts.json:9-20` (`emitDeclarationOnly`),
+`mcp/package.json:8-13` (every script prefixed), `mcp/.gitignore:3`. The
+precedent that does not transfer is `reviewer-core/tsconfig.json:22` with
+`reviewer-core/package.json`'s `tsc --noEmit`. Residue from the failed attempt is
+the entry below in "Recurring Errors & Fixes" (2026-08-09).
 
 ### 2026-08-08 — Racing `researcher` against `planner` and patching the plan by `SendMessage` mid-flight: the message lands too late, or never
 
@@ -529,6 +630,80 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-09 — `mcp/vitest.config.ts` has no `resolve.alias`, and that absence IS the enforcement — do not "fix" it
+
+**Rule:** leave `mcp/vitest.config.ts` without a `resolve.alias` for
+`@devdigest/shared`. It looks like an oversight next to the `paths` entry in
+`mcp/tsconfig.json`, and adding one would remove the only mechanical check that
+the package's central convention has.
+
+**Why:** `mcp/` may import from `@devdigest/shared` **type-only** and nothing
+else from another package — that is what makes the alias legal at all
+(`backend-onion-architecture` §2, "a type-only import is not a dependency").
+Nothing enforces it: `pnpm arch` cruises `src ../reviewer-core/src` and does not
+scan `mcp/` (`server/package.json:11`), and `.claude/skills/pr-self-review/routing.md`
+now records that `backend-onion-architecture` has no address for `mcp/**` at all.
+
+The accident that saves it: **vitest does not read tsconfig `paths`.** With no
+alias declared, a *value* import of `@devdigest/shared` from `mcp/src/**` fails
+module resolution the moment any test imports that module — and
+`mcp/src/types.ts` is reachable from several. So a green suite is positive
+evidence that every cross-package import really is elided, rather than an
+assertion that it is. Type-only stays invisible to the runtime; a value import
+goes red immediately.
+
+Two consequences. Adding an alias "so the tests match tsconfig" silently deletes
+the check, and the suite would keep passing while the rule quietly rots. And if a
+future change genuinely needs a runtime import from another package, the tests
+failing to resolve is the **correct** signal — the answer is to reconsider the
+import, not to add the alias.
+
+**Where:** `mcp/vitest.config.ts` (no `resolve` block); the single cross-package
+import is `mcp/src/types.ts:27` (`import type { … } from '@devdigest/shared'`);
+the alias it deliberately does not mirror is `mcp/tsconfig.json:30-31`; the gate
+that does not cover the package is `server/package.json:11`. Noticed by
+`architecture-reviewer`, not claimed by whoever wrote the config.
+
+### 2026-08-09 — A skill an agent LOADED is not a skill an agent APPLIED: §4's slice-privacy rule has to be re-aimed at a package boundary by hand
+
+**Rule:** when a plan or a review says "this type comes from `@devdigest/shared`",
+open the file and check. Do not treat the claim as verified merely because the
+agent that made it had `backend-onion-architecture` loaded.
+
+**Why:** `planner` had the skill open — it cited §2 and §7 correctly — and still
+wrote that the new `mcp/` package would consume `ReviewDto` from
+`@devdigest/shared`. It does not. `ReviewDto` is a plain TS interface at
+`server/src/modules/reviews/helpers.ts:18-32`, and §4 says a slice's public
+surface is its `constants.ts` and facade `types.ts` while its `service`,
+`repository`, `routes`, `helpers` and `run-executor` are **private**. Importing
+it would have reached into another slice's private file *across a package
+boundary* — a worse `no-cross-slice-import`, and one no gate would catch, since
+`pnpm arch` does not scan `mcp/`.
+
+The mechanism is worth understanding rather than blaming: §4 is phrased about
+slice boundaries **inside the server**, and the inference "therefore a fifth
+package may not import it either" is a step the reader must take deliberately.
+A skill answers the question it was written for; the adjacent question looks
+answered and is not. Same shape as the 2026-08-08 entry about a body constraint
+whose stated *reason* was false while its conclusion was right — in both cases
+the surrounding correctness is what makes the gap invisible.
+
+Note also the underlying oddity, pre-existing and not to be fixed as a drive-by:
+§8's placement table says a **wire DTO** belongs in `vendor/shared/contracts/`,
+and `ReviewDto` is the response body of `GET /pulls/:id/reviews` living in ring 2.
+
+The cheap check when a plan names a shared type:
+`rg -n "export (interface|const) <Name>" server/src/vendor/shared server/src/modules`
+— and if the hit is under `modules/`, the consumer declares its own narrow shape
+instead.
+
+**Where:** the resolution is `mcp/src/types.ts:35-42` (`McpReview`, 6 fields
+against `ReviewDto`'s 13, `findings` typed as the shared `Finding`), with the
+uncoupled-mirror warning at `mcp/AGENTS.md` §Gotchas; the private definition is
+`server/src/modules/reviews/helpers.ts:18-32`; the rule is
+`.claude/skills/backend-onion-architecture/SKILL.md` §4; the corrected plan
+section is `specs/l05-mcp-server.md` §"The `ReviewDto` problem".
 
 ### 2026-08-09 — Purity is not an address: a pure function does NOT belong in `reviewer-core` just because it has no I/O
 
@@ -1303,6 +1478,51 @@ diff, never that the claim about them is true.
 **Where:** `findings.confidence`; `agent_runs.grounding`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-09 — Untracked `.js` inside `server/src/vendor/shared`: build residue that no gate in this repo can see
+
+**Symptom:** `git status` shows ~24 untracked files under
+`server/src/vendor/shared/**` — `index.js`, `adapters.js`, and a `.js` +
+`.js.map` pair per contract. `git check-ignore -v server/src/vendor/shared/index.js`
+exits 1: they are **not** ignored, and `server/` has no `.gitignore`. A `git add -A`
+therefore commits a machine-generated **third copy of `@devdigest/shared` into the
+canon** — the exact thing `AGENTS.md` §Repo rules forbids, in the directory
+§"Do not touch" names as vendored.
+
+**Cause:** a `tsc` run whose `paths` alias pointed at the canon's `.ts` sources
+(the entry above, 2026-08-09). The compiler pulled ring 0 into its program and
+emitted alongside the sources. Fixing the alias stops new residue but does not
+remove what was already written — and nothing in the working tree looks wrong.
+
+**Takeaway:** three things, in order of how much time each saves.
+
+1. **No gate can catch this.** `pnpm arch` cannot fire — the only import those
+   files declare is `zod`, which `shared-is-a-leaf` explicitly permits
+   (`server/.dependency-cruiser.cjs:193`). `scripts/check-shared-sync.sh:53`
+   enumerates `-name '*.ts'`, so `.js` does not exist for it. `pr-self-review`
+   *does* list them (`:111` classifies `*/src/vendor/shared/*` as `review`), which
+   is a hint and not a gate. **`git status` on that directory is the only
+   detector.**
+2. Deleting is safe when nothing is tracked — confirm with
+   `git ls-files server/src/vendor/shared | grep '\.js$'` first, then
+   `find server/src/vendor/shared \( -name '*.js' -o -name '*.js.map' \) -delete`.
+   Re-run `cd server && pnpm typecheck` after; it should stay exit 0, because
+   nothing ever depended on them.
+3. The generalisation worth carrying: **any experiment that points a compiler at
+   another package's sources can leave committable output inside that package.**
+   Check the *target* directory, not just your own, before staging.
+
+Unresolved at the time of writing: whether to add `server/.gitignore` for
+`src/vendor/shared/*.js`, or to extend `check-shared-sync.sh`'s enumeration so
+the gate could see a recurrence. Neither is done — currently the only defence is
+this entry.
+
+**Where:** the canon is `server/src/vendor/shared/`; the blind rules are
+`server/.dependency-cruiser.cjs:193` (`shared-is-a-leaf`) and
+`scripts/check-shared-sync.sh:53`; the classifier that lists but does not gate is
+`scripts/pr-self-review.sh:111`. Found independently by both
+`architecture-reviewer` and `plan-verifier` on the same change — neither by a
+tool.
 
 ### 2026-08-01 — `@devdigest/shared` drifts silently between server and client
 
