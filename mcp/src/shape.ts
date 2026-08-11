@@ -18,6 +18,10 @@
  *    no use for.
  */
 import {
+  MAX_BLAST_CALLERS_PER_SYMBOL,
+  MAX_BLAST_ENDPOINTS,
+  MAX_BLAST_PATH_CHARS,
+  MAX_BLAST_SYMBOLS,
   MAX_CONVENTIONS,
   MAX_FINDINGS,
   MAX_RULE_CHARS,
@@ -25,7 +29,7 @@ import {
   MAX_TITLE_CHARS,
 } from './constants.js';
 import { clean, fenceUntrusted } from './sanitize.js';
-import type { Agent, ConventionCandidate, Finding, McpReview } from './types.js';
+import type { Agent, ConventionCandidate, Finding, McpBlast, McpReview } from './types.js';
 
 const SEVERITY_ORDER: Record<string, number> = { CRITICAL: 0, WARNING: 1, SUGGESTION: 2 };
 
@@ -152,5 +156,82 @@ export function toConciseConventions(candidates: ConventionCandidate[]): Concise
   };
   const dropped = accepted.length - kept.length;
   if (dropped > 0) shaped.truncated = `${dropped} more`;
+  return shaped;
+}
+
+// ---- Blast radius --------------------------------------------------------
+
+export interface ConciseBlastSymbol {
+  symbol: string;
+  file: string;
+  kind: string;
+  /** The UNTRUNCATED count, so the caps below never understate the fan-out. */
+  caller_count: number;
+  /** `"file:line"` strings — flat, and one token cheaper than an object each. */
+  callers: string[];
+  endpoints?: string[];
+  crons?: string[];
+}
+
+export interface ConciseBlast {
+  state: string;
+  summary: string;
+  changed_symbols: ConciseBlastSymbol[];
+  truncated?: string;
+  /** Present only when the index is incomplete — why the answer may be partial. */
+  note?: string;
+}
+
+/**
+ * Engine payload → the concise object `get_blast_radius` returns.
+ *
+ * Dropped, in the same spirit as `toConciseReview`: every UUID (there is none on
+ * this contract, and none is added), `rank` (never on the wire), and the
+ * `reason` MACHINE CODE — the caller turns it into a `note` sentence instead,
+ * because a bare `no_rank_graph` tells a model nothing it can act on.
+ *
+ * Every string that reaches the model is repo-authored text — file paths, symbol
+ * names, endpoint and cron strings, and the server's own `summary` — so all of
+ * them go through `clean()` (control characters stripped, length capped). They
+ * are NOT `fenceUntrusted`'d: these are identifiers and short machine-shaped
+ * labels, not third-party prose like a finding title.
+ */
+export function toConciseBlast(payload: McpBlast, note?: string): ConciseBlast {
+  // Keyed by `symbol:file`, not `symbol` alone: two changed symbols can share a
+  // bare name from different declaring files, and a name-only key would let one
+  // entry's callers silently mask the other's.
+  const downstreamBySymbol = new Map(
+    payload.downstream.map((d) => [`${d.symbol}:${d.file}`, d]),
+  );
+
+  const kept = payload.changed_symbols.slice(0, MAX_BLAST_SYMBOLS);
+  const shaped: ConciseBlast = {
+    state: payload.state,
+    summary: clean(payload.summary, MAX_TITLE_CHARS),
+    changed_symbols: kept.map((sym) => {
+      const entry = downstreamBySymbol.get(`${sym.name}:${sym.file}`);
+      const callers = entry?.callers ?? [];
+      const out: ConciseBlastSymbol = {
+        symbol: clean(sym.name, MAX_BLAST_PATH_CHARS),
+        file: clean(sym.file, MAX_BLAST_PATH_CHARS),
+        kind: clean(sym.kind, 60),
+        caller_count: callers.length,
+        callers: callers
+          .slice(0, MAX_BLAST_CALLERS_PER_SYMBOL)
+          .map((c) => `${clean(c.file, MAX_BLAST_PATH_CHARS)}:${c.line}`),
+      };
+      const endpoints = (entry?.endpoints_affected ?? []).slice(0, MAX_BLAST_ENDPOINTS);
+      const crons = (entry?.crons_affected ?? []).slice(0, MAX_BLAST_ENDPOINTS);
+      if (endpoints.length > 0) out.endpoints = endpoints.map((e) => clean(e, 200));
+      if (crons.length > 0) out.crons = crons.map((c) => clean(c, 200));
+      return out;
+    }),
+  };
+
+  const dropped = payload.changed_symbols.length - kept.length;
+  if (dropped > 0) {
+    shaped.truncated = `showing ${kept.length} of ${payload.changed_symbols.length} changed symbols`;
+  }
+  if (note) shaped.note = note;
   return shaped;
 }

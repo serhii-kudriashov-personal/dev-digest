@@ -19,7 +19,39 @@ _Empty so far._
 
 ## Codebase Patterns
 
-_Empty so far._
+### 2026-08-11 — Changing a tool's `description` in `src/tools.ts` is a THREE-file change, and only one of the three is obvious
+
+**Rule:** when you edit any string in `TOOLS`, expect to touch:
+
+1. `src/tools.ts` — the string itself;
+2. `test/tools-list.test.ts` — which asserts **prose content**, not just shape;
+3. `AGENTS.md` §Conventions — which names the spec each description is verbatim
+   from, and §Gotchas if the tool's behaviour changed with it.
+
+Then re-run `test/token-budget.test.ts`, which prints a per-tool breakdown.
+
+**Why:** step 2 is the one that surprises. `tools-list.test.ts` is named as if it
+checked the protocol envelope, and mostly it does — name charset, `required`
+arrays, `additionalProperties: false`, the read-only annotation set. But it also
+carries per-tool content assertions, and L06 hit one:
+`expect(blast?.description.startsWith('Not implemented yet — do not retry.'))`.
+Implementing `get_blast_radius` for real made it fail from a file the change plan
+never listed, with a diff that reads `expected false to be true` and points at a
+line number rather than at the string that moved.
+
+Worth knowing what the budget headroom actually bought: the placeholder's entry
+was ~60 tokens and the real one is **135**, taking `tools/list` from ~540 to
+**616 / 1200**. `TOOL_DEFINITION_TOKEN_BUDGET`'s own comment predicted exactly
+this ("a later lesson implementing `get_blast_radius` for real will roughly double
+that entry"), so the ceiling did not need raising — which is the whole argument for
+sizing a gate with headroom instead of one word above today's number.
+
+**Where:** the definitions are `src/tools.ts` (`TOOLS`); the content assertion is
+`test/tools-list.test.ts` (`get_blast_radius describes the real tool, verbatim
+from its spec`); the budget and its per-tool `stdout` breakdown are
+`test/token-budget.test.ts` against `src/constants.ts`
+(`TOOL_DEFINITION_TOKEN_BUDGET`); the verbatim-source convention, which now names
+**two** specs, is `AGENTS.md` §Conventions.
 
 ## Tool & Library Notes
 
@@ -56,7 +88,27 @@ the built server on the first try.
 
 ## Recurring Errors & Fixes
 
-_Empty so far._
+### 2026-08-11 — `toConciseBlast`'s `downstreamBySymbol` was keyed by `d.symbol` alone — two changed symbols can share a bare name from different files
+
+**Symptom:** none observed via this package's own tests (its fixtures happened
+to use distinct names), but the identical bug was live: caught via the client's
+React key warning in `BlastRadiusCard.tsx`, same root contract.
+
+**Cause:** `DownstreamImpact.symbol` is not unique across `payload.downstream`
+— two changed symbols in different files can share a name (e.g. two test
+suites each with a local `renderWithIntl` helper). `toConciseBlast`
+(`src/shape.ts`) built `downstreamBySymbol` as a `Map` keyed by `d.symbol`
+alone, so the second same-named entry would silently overwrite the first in
+the map, and both `changed_symbols` rows sharing that name would resolve to
+whichever entry inserted last.
+
+**Takeaway:** the wire contract now carries `file` on every `DownstreamImpact`
+(`@devdigest/shared`). Key `downstreamBySymbol` — and the lookup against it —
+by `` `${symbol}:${file}` ``, not `symbol` alone. Full root-cause writeup is in
+`server/INSIGHTS.md` (2026-08-11).
+
+**Where:** `src/shape.ts` (`toConciseBlast`), `src/types.ts` (`isBlastPayload`
+now also checks `d.file`).
 
 ## Session Notes
 

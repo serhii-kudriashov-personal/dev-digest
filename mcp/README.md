@@ -15,7 +15,7 @@ stdio transport, no remote server, no OAuth, no hosting, no credentials.
 | `run_agent_on_pr` | `repo`, `pr`, `agent` | runs one agent over a PR and **waits** (up to 120 s) for the verdict and findings |
 | `get_findings` | `repo`, `pr`, `agent?` | the most recent completed review, without starting a new one |
 | `get_conventions` | `repo` | the accepted coding conventions for a repository |
-| `get_blast_radius` | `repo`, `pr` | placeholder — not implemented in this version |
+| `get_blast_radius` | `repo`, `pr` | which symbols the PR's files declare, who calls them, and the endpoints/crons those callers serve — read from the prebuilt code index, no parsing and no model call |
 
 Identifiers are flat and human-readable, everywhere: `repo` is the GitHub slug
 `owner/name`, `pr` is the pull-request number, `agent` is a name from

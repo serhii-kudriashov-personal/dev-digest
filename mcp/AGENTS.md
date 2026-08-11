@@ -109,7 +109,9 @@ The SDK does **not** validate tool arguments against the declared `inputSchema` 
 - **Build with `tsc` to `dist/`, not `tsx`.** The client spawns this process
   fresh on every session, so the per-spawn transform cost is real.
 - **The tool descriptions in `src/tools.ts` are verbatim** from
-  `specs/l05-mcp-server.md` §"The verbatim definitions". A paraphrase is a
+  `specs/l05-mcp-server.md` §"The verbatim definitions" — **except
+  `get_blast_radius`, whose source is `specs/l06-blast-radius.md` §Contracts 5**,
+  the lesson that replaced L05's placeholder with the real tool. A paraphrase is a
   defect: the token budget and the design-principle mapping were computed from
   those exact strings. Change the spec first, then this file, then re-run
   `test/token-budget.test.ts`.
@@ -168,8 +170,15 @@ consumer no engine path calls. `src/sanitize.ts` is the local equivalent.
   work the user already paid for and leaves a `cancelled` row `get_findings` can
   never satisfy. The result is `status: "timed_out"` with `isError: false`, on
   purpose — `isError: true` would invite a retry that starts a *second* paid run.
-- **`get_blast_radius` makes no HTTP call.** A stub must not spend the API's
-  rate-limit budget.
+- **`get_blast_radius` is a real tool as of L06, and its `isError` semantics are
+  the opposite of the L05 placeholder's.** It makes one `GET /pulls/:id/blast`
+  beyond resolution — a cheap read served from the persisted repo-intel index,
+  which parses no code and calls no model. A `state` of `full` or `partial`
+  returns `ok(...)`, with `partial` adding a `note` sentence rather than the
+  server's machine `reason` code. A `state` of `degraded` returns
+  `fail(MESSAGES.blastUnavailable(repo))` — `isError: true`, because the fix is a
+  user action ("re-analyze the repository"), unlike the placeholder, which could
+  never succeed and therefore never set the flag.
 - **`PrMeta.id` is `.nullish()`.** A null id means the PR was listed from GitHub
   but never persisted — that is the "not imported" answer, not a crash.
 - **`GET /repos/:id/pulls` syncs from GitHub inside the request**
@@ -199,6 +208,7 @@ consumer no engine path calls. `src/sanitize.ts` is the local equivalent.
 |---|---|
 | `README.md` | wiring the server into an MCP client, or troubleshooting a tool call |
 | `../specs/l05-mcp-server.md` | the source of truth for this package's design and acceptance |
+| `../specs/l06-blast-radius.md` | the source of truth for `get_blast_radius` — its verbatim description, its concise result shape, and why a degraded index is an `isError` result |
 | `../server/src/vendor/shared/contracts/` | the contracts every response is derived from |
 | `../server/src/modules/reviews/routes.ts` | the endpoints `run_agent_on_pr` and `get_findings` drive |
 | `docs/request-lifecycle.md` | asking why `run_agent_on_pr` polls instead of using SSE, why the poll interval is 2000 ms, why a timeout does not cancel the run or set `isError`, or how the token budget and the untrusted-content fencing were sized |

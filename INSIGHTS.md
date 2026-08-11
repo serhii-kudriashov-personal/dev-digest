@@ -11,6 +11,60 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ## What Works
 
+### 2026-08-11 — Parallel `researcher` runs on DISJOINT scopes, then one `planner` told to "verify and correct" a supplied inventory — the corrections are the deliverable
+
+**Pattern:** for a lesson-sized feature, the shape that paid off was three
+sequenced phases, not two:
+
+1. A cheap inline sweep in the main session to find the *nouns* — which module,
+   which contract, which facade method already exists.
+2. **Two `researcher` runs launched in one message, on scopes that do not
+   overlap** — here "server: the facade, its two code paths, the precedent
+   slices" and "client: the PR page and its i18n; plus `mcp/`". Disjoint scopes
+   matter for a reason beyond speed: their reports can be pasted into the next
+   prompt without reconciling contradictions.
+3. **One `planner`, handed the whole inventory as `path:line` claims with the
+   instruction "verify and correct, do not rediscover."**
+
+The third phase is where the value was. The planner returned ~6 corrections to
+facts I had supplied confidently, and two of them changed the design:
+`MAX_CALLERS_PER_SYMBOL` is applied to the **flattened** caller list rather than
+per symbol (so the feature's "20 per symbol" requirement could not be met by
+consuming the facade as-is), and `stats.ranked` — the obvious signal for "was the
+rank graph built" — is a **trap**, because `pipeline/incremental.ts` writes rank
+rows without writing `ranked`, so a healthy refresh would report "no rank graph".
+Neither was findable from the feature request; both were found by an agent
+re-checking someone else's homework.
+
+**Why:** "verify and correct" is a different task from "research this", and it is
+cheaper and more accurate. The agent is not searching an open space — it is
+checking a bounded list of claims, each with an address, which is the shape that
+`plan-verifier`'s design already exploits (2026-08-08, below). It also means the
+main session's own errors get caught before they reach the implementer: the
+combined-clamp fact would otherwise have surfaced as a failing acceptance
+criterion at the end.
+
+Note what this does **not** claim. The entry under "What Doesn't Work"
+(2026-08-08) records two variants that failed — racing `researcher` against
+`planner`, and patching a running `planner` by `SendMessage` — and both are still
+wrong for the reasons given there. In particular the parallel `researcher` pair
+that died in that session died on an **account session limit**, not on a design
+flaw, so this run is evidence that the sequencing works and is *not* evidence that
+parallel subagents are immune to that limit. If one dies it returns nothing at
+all, and the fallback is still to do that half inline.
+
+One measured cost worth budgeting: the planner's run was the long pole (~19
+minutes), longer than both researchers combined. Sequencing is not free; it is
+just cheaper than reconciling two outputs by hand.
+
+**Where:** the three phases produced `specs/l06-blast-radius.md`; the two
+corrections named above are its `## Inventory` rows for the combined clamp
+(`server/src/modules/repo-intel/service.ts:386`) and for `stats.ranked`
+(`pipeline/full.ts:260` writes it, `pipeline/incremental.ts:245-255` does not),
+and the second is why that spec's Step 4 probes `getTopFilesByRank` instead.
+Agent definitions are `.claude/agents/{researcher,planner}.md`; the failed
+variants are under "What Doesn't Work" (2026-08-08).
+
 ### 2026-08-09 — Phrase an acceptance criterion over FIELDS, never over serialized bytes — or its tests will quietly grow fixtures that avoid the violating case
 
 **Pattern:** when writing an acceptance criterion of the form "no X appears in
@@ -297,6 +351,71 @@ and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65
 (both removed).
 
 ## What Doesn't Work
+
+### 2026-08-11 — Asserting a negative to a subagent from a truncated `grep -il | head`: it cannot reject the premise, so it investigates a phantom
+
+**Tried:** opening a feature session with one broad inventory sweep, then handing
+the result to two `researcher` agents as established fact. The sweep was
+
+```sh
+grep -rn "blast|Blast|BLAST" --include="*.ts" --include="*.tsx" -il . \
+  | grep -v node_modules | head -50
+```
+
+and from it I told `researcher`, under a heading marked **"Critical check"**:
+"a `get_blast_radius` tool appears in the running MCP server's tool list, yet
+`grep -i blast mcp/src` found nothing. Resolve this contradiction. **This matters
+a lot.**"
+
+**Failed:** there was no contradiction. `get_blast_radius` was in
+`mcp/src/tools.ts:107-123` and `mcp/src/handlers.ts:65-68,270` the whole time —
+a deliberate, tested placeholder, with `specs/l05-mcp-server.md:592` recording
+the decision to defer the real implementation. The agent spent a large part of
+its run checking whether `mcp/dist/**` was stale and hunting for a
+`.mcp.json` / `~/.claude.json` registration that could explain the phantom, and
+its report had to close with "could not determine whether the claim reflects a
+stale dist, an outdated config, or simply a mistaken earlier grep."
+
+Two independent causes, and the second is the expensive one.
+
+1. **The command cannot support a negative.** `-il` overrides `-n` — the output
+   is a *file list*, not matches — and `head -50` truncates it. So a path's
+   **absence from the output means nothing**, while the output reads exactly like
+   evidence of absence. `mcp/src/tools.ts` and `mcp/src/handlers.ts` were in fact
+   *present* in that listing; I read the server-side rows and stopped.
+2. **A subagent cannot reject a false premise.** `AskUserQuestion` is stripped
+   from every subagent, so its only channel is its final message — by which point
+   the turns are spent. Worse, the emphasis actively hurt: "critical" and "this
+   matters a lot" told it to dig *harder* into the phantom rather than to test
+   whether the premise held. Confidence in a prompt is not free; it is a
+   multiplier on whatever the premise is.
+
+**Instead:** two rules, and the second one is the one that generalises.
+
+- A negative claim that will **drive someone else's work** gets its own targeted,
+  untruncated command, run for that purpose: `rg -n get_blast_radius mcp/src`.
+  Never infer "X does not exist" from a sweep that was shaped to answer a
+  different question.
+- In a subagent prompt, phrase anything short of verified as a **question to
+  check**, not a contradiction to resolve — "does `get_blast_radius` exist in
+  `mcp/src`? If it does, report its state" costs the same tokens and cannot send
+  the agent anywhere false. Reserve emphatic framing for facts that were actually
+  verified; on a shaky premise it converts directly into wasted turns.
+
+Same family as the two entries below — 2026-08-03 (`grep` here is **ugrep**,
+where `-Z` means fuzzy match) and 2026-08-04 (BSD `sed`, and `read` dropping a
+final unterminated line): on this machine the standard text tools fail **silently
+and exit 0**. The new part is that the silent failure was mine reading a
+truncated list as a complete one, and that a subagent laundered it into a
+confident-looking investigation.
+
+**Where:** the false premise was in the prompt of the `researcher` run that
+produced the client+MCP inventory for `specs/l06-blast-radius.md`; the code that
+was there all along is `mcp/src/tools.ts:107-123`, `mcp/src/handlers.ts:65-68`
+(`BLAST_RADIUS_PLACEHOLDER`), `:270` and `:277`, with the deferral recorded at
+`specs/l05-mcp-server.md:592` and the behaviour pinned by
+`mcp/test/errors.test.ts:139-149`. The no-`AskUserQuestion` constraint is
+catalogued under "Tool & Library Notes" (2026-08-08).
 
 ### 2026-08-09 — Aliasing tsconfig `paths` at another package's `.ts` sources: fine for `reviewer-core`, wrong for any package that EMITS
 
@@ -630,6 +749,57 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-11 — A REQUIRED new field on a contract that is embedded in a jsonb-persisted parent goes on a sibling response schema — `.nullish()` is only the answer when the field may be absent
+
+**Rule:** before adding a field to anything in `vendor/shared/contracts/`, check
+whether that schema is **composed into** a document persisted as `jsonb`. If it
+is, and the new field must be **required**, do not extend it in place and do not
+weaken the field to `.nullish()` to make it fit. Declare a transport schema next
+to the other response types:
+
+```ts
+// contracts/review-api.ts — NOT contracts/brief.ts
+export const BlastRadiusResponse = BlastRadius.extend({
+  state: BlastState,                    // required: the server always computes it
+  reason: BlastStateReason.nullish(),   // absent on the 'full' path
+});
+```
+
+**Why:** the 2026-08-02 entry ("a field added to a persisted-jsonb contract must
+be `.nullish()`") is the right rule for an *optional* field and gives no answer
+for a required one — and the tempting reading is that `.nullish()` is the price of
+admission, so you weaken a field the server always sets. That loses the only thing
+the type was buying: with `state` optional, no consumer can be written against
+"every response says how complete it is", and the client cannot tell an old server
+from a degraded index.
+
+The trap is that the parent is easy to miss. `BlastRadius` looks like a standalone
+contract; it is a member of `PrBrief`, which is the declared shape of the
+`pr_brief.json` column — a table that is **empty today** and reserved for a later
+lesson, so nothing fails and no test goes red. The break would arrive in whatever
+lesson first writes that column, as documents unparseable against a schema
+someone tightened months earlier.
+
+Two consequences. The split is also the honest one — a persisted document and a
+wire response are different things that happened to share fields — and
+`review-api.ts` already had the precedent (`PrIntentRecord`, `SmartDiffResponse`),
+so the pattern costs one `.extend()`. And the existing round-trip test keeps
+passing untouched, which is the receipt: assert **both** that the persisted schema
+still parses a document without the new key and that the response schema rejects
+one missing it.
+
+The cheap check when adding a contract field:
+`rg -n "<SchemaName>" server/src/vendor/shared server/src/db/schema` — a hit in
+`db/schema` (directly or through a parent) means the jsonb rule applies.
+
+**Where:** the wrapper is `server/src/vendor/shared/contracts/review-api.ts`
+(`BlastState`, `BlastStateReason`, `BlastRadiusResponse`), ported to
+`client/src/vendor/shared/contracts/review-api.ts` in the same commit; the
+untouched persisted member is `contracts/brief.ts:17-44` (`BlastRadius`), embedded
+in `PrBrief` at `:116-122`, whose column is `server/src/db/schema/reviews.ts:122-127`;
+the four assertions that pin both directions are in `server/test/contracts.test.ts`.
+Reasoning of record: `specs/l06-blast-radius.md` §Contracts 1.
 
 ### 2026-08-09 — `mcp/vitest.config.ts` has no `resolve.alias`, and that absence IS the enforcement — do not "fix" it
 
@@ -1564,6 +1734,35 @@ client copy: `AgentManifest`, `AgentVersionConfig`, `CommitFilesPayload` and
 _Empty so far._
 
 ## Open Questions
+
+### 2026-08-11 — Which lesson number is Blast Radius? Three sources disagree, and the specs directory is the only one that matches what shipped
+
+**Question:** should `README.md:86` and `server/src/modules/repo-intel/README.md:9-12,41`
+be corrected? Both tag Blast Radius as **L04**, paired with the MCP server. But
+`specs/l03-intent-layer.md` and `specs/l04-smart-diff.md` are already taken by
+Intent and Smart Diff, `mcp/` is L05 in root `AGENTS.md` §Map with
+`specs/l05-mcp-server.md` to match, and Blast Radius therefore shipped as
+`specs/l06-blast-radius.md`. So the two READMEs preserve the course's *original*
+lesson map while `specs/` records the *delivered* order, and they have diverged by
+two.
+
+**Blocked:** on a decision about which one is canonical, not on work. The lesson
+numbers are course narrative, so renumbering a README is an editorial call about
+the teaching material rather than a code fix — which is why
+`specs/l06-blast-radius.md` §Context read deliberately left both files alone and
+recorded the conflict instead. Whoever closes it should do the whole set in one
+commit (`README.md`, `server/src/modules/repo-intel/README.md`, and the `(L0N)`
+tags in each `AGENTS.md` §Read when row) rather than fixing the one they happened
+to open, since a half-renumbered map is worse than a consistently stale one.
+
+Worth knowing meanwhile: an `L0N` tag in this repo tells you nothing reliable
+about ordering — read `specs/` for that. Same class as the 2026-08-08 entry about
+prose that a new agent silently falsified: a lesson tag reads as authority and
+nothing validates it.
+
+**Where:** `README.md:86`; `server/src/modules/repo-intel/README.md:9-12,41`;
+against `specs/l0{3,4,5,6}-*.md` and the `mcp/AGENTS.md` row in root `AGENTS.md`
+§Read when.
 
 ### 2026-08-02 — The `pnpm arch` boundary gate is not wired into CI, so nothing enforces it on a PR
 

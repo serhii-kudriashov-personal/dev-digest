@@ -7,10 +7,11 @@
  *    so the model takes the next step instead of getting stuck. A dry 404 is a
  *    dead end.
  *  - **`isError` means "you can fix this by trying again".** A malformed
- *    argument, an unknown agent and a rate limit all set it. The 120-second
- *    deadline and the `get_blast_radius` placeholder deliberately do NOT — the
- *    first would invite a retry that starts a second paid run, the second a
- *    retry that can never succeed in this version.
+ *    argument, an unknown agent and a rate limit all set it, and so does an
+ *    unusable code index — the fix there is a user action (re-analyze the
+ *    repository), which is exactly what an actionable error is for. The
+ *    120-second deadline deliberately does NOT: it would invite a retry that
+ *    starts a second paid run.
  */
 import { ApiError, BadShapeError, EngineDownError } from './api-client.js';
 import type { ApiClient } from './api-client.js';
@@ -22,10 +23,12 @@ import {
   latestReview,
   reviewForRun,
   toConciseAgents,
+  toConciseBlast,
   toConciseConventions,
   toConciseReview,
 } from './shape.js';
 import {
+  isBlastPayload,
   isConventionsPayload,
   isReviewArray,
   isRunCreated,
@@ -50,6 +53,8 @@ const MESSAGES = {
     `No review exists for ${repo}#${pr} yet. Call run_agent_on_pr to create one.`,
   noConventions: (repo: string) =>
     `No accepted conventions for ${repo}. Extract them in the web UI under the repository's Conventions tab.`,
+  blastUnavailable: (repo: string) =>
+    `The code index for ${repo} cannot answer this yet. Re-analyze the repository in the web UI at http://localhost:3000, then retry.`,
   invalidPr: () => 'The "pr" argument must be a whole pull-request number, for example 42.',
   rateLimited: () =>
     'The DevDigest API is rate-limiting this MCP server. Wait a minute, then retry.',
@@ -62,10 +67,13 @@ const MESSAGES = {
     'The review is still running after 120 seconds. It will finish on its own — call get_findings with the same repo, pr, and agent in a minute to read the result.',
 } as const;
 
-const BLAST_RADIUS_PLACEHOLDER = {
-  status: 'not_implemented',
-  message: 'Blast radius is not available in this version of DevDigest.',
-} as const;
+/**
+ * Why a `partial` state is worth a sentence rather than the machine `reason`
+ * code: the model has to decide whether to trust the list, and "some callers may
+ * be missing" is actionable where `index_partial` is not.
+ */
+const BLAST_PARTIAL_NOTE =
+  'The code index is incomplete, so some callers may be missing. Treat this list as a lower bound.';
 
 // ---- Result helpers ------------------------------------------------------
 
@@ -264,10 +272,38 @@ export function createHandlers(deps: HandlerDeps): Record<string, Handler> {
   };
 
   /**
-   * Placeholder only, and NO HTTP call at all — a stub must not spend the API's
-   * 120/min rate-limit budget.
+   * One GET beyond resolution. The endpoint is served entirely from the persisted
+   * repo-intel index — it parses no code and calls no model — so this is a cheap
+   * read, not a job.
    */
-  const getBlastRadius: Handler = async () => ok(BLAST_RADIUS_PLACEHOLDER);
+  const getBlastRadius: Handler = async (args) => {
+    const ctx: ErrorContext = {
+      baseUrl: api.baseUrl,
+      repo: typeof args.repo === 'string' ? args.repo : String(args.repo ?? ''),
+      pr: args.pr,
+    };
+    try {
+      // Named fields only — the raw `arguments` object is never spread into a URL
+      // (`security` §A08), and the base URL stays env-derived.
+      const repo = validateRepo(args.repo);
+      const pr = validatePr(args.pr);
+      ctx.repo = repo;
+
+      const repoId = await resolver.resolveRepoId(repo);
+      const prId = await resolver.resolvePullId(repoId, pr);
+
+      const body = await api.get(`/pulls/${prId}/blast`);
+      if (!isBlastPayload(body)) throw new BadShapeError('/pulls/:id/blast', api.baseUrl);
+
+      // A degraded index IS an actionable error: nothing was computed, and the
+      // fix is a user action rather than a retry of this call.
+      if (body.state === 'degraded') return fail(MESSAGES.blastUnavailable(repo));
+
+      return ok(toConciseBlast(body, body.state === 'partial' ? BLAST_PARTIAL_NOTE : undefined));
+    } catch (err) {
+      return mapError(err, ctx);
+    }
+  };
 
   return {
     list_agents: listAgents,
