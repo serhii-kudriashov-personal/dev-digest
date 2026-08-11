@@ -42,7 +42,7 @@ export class BlastService {
    * a missing or foreign PR must stop here rather than fall through to its data.
    */
   async build(workspaceId: string, prId: string): Promise<BlastRadiusResponse> {
-    const pull = await this.container.reviewRepo.getPull(workspaceId, prId);
+    const pull = await this.container.reviewRepo.getPull(workspaceId, prId, { requireOpen: false });
     if (!pull) throw new NotFoundError('Pull request not found');
 
     // `patch` is dropped: the response carries no diff text.

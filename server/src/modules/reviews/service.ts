@@ -106,7 +106,7 @@ export class ReviewService {
     targets: AgentRow[],
     logger?: Logger,
   ): Promise<{ runs: { run_id: string; agent_id: string; agent_name: string }[]; reviews: ReviewDto[] }> {
-    const pull = await this.repo.getPull(workspaceId, prId);
+    const pull = await this.repo.getPull(workspaceId, prId, { requireOpen: true });
     if (!pull) throw new NotFoundError('Pull request not found');
     const repo = await this.repo.getRepo(pull.repoId);
     if (!repo) throw new NotFoundError('Repo not found');
@@ -158,7 +158,7 @@ export class ReviewService {
   // ===========================================================================
 
   async reviewsForPull(workspaceId: string, prId: string): Promise<ReviewDto[]> {
-    const pull = await this.repo.getPull(workspaceId, prId);
+    const pull = await this.repo.getPull(workspaceId, prId, { requireOpen: false });
     if (!pull) throw new NotFoundError('Pull request not found');
     const rows = await this.repo.reviewsForPull(prId);
     const names = new Map<string, string>();
