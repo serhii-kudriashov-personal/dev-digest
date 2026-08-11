@@ -3,6 +3,7 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 import { SeverityBadge } from "@devdigest/ui";
 import type { FindingRecord } from "@devdigest/shared";
 import { commentTargetFor, type CommentThread, type DiffCommentApi, cs } from "../comments";
@@ -28,6 +29,7 @@ export function CodeLine({
   findings?: FindingRecord[];
   onFindingClick?: (finding: FindingRecord) => void;
 }) {
+  const t = useTranslations("shell");
   const [hover, setHover] = React.useState(false);
   const [composing, setComposing] = React.useState(false);
 
@@ -86,7 +88,7 @@ export function CodeLine({
                   key={f.id}
                   type="button"
                   onClick={() => onFindingClick(f)}
-                  aria-label={f.title}
+                  aria-label={t("diffViewer.openFinding", { title: f.title })}
                   style={s.findingChipBtn}
                 >
                   {/* Never `compact`: that drops the label and leaves an icon

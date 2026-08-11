@@ -287,6 +287,17 @@ Not loaded, deliberately: `zod` (no `z.object` is added or changed), `drizzle-or
 9. A PR in another workspace returns 404, not data.
 10. `cd server && pnpm arch` exits 0 with no new `pathNot` exemption added to `.dependency-cruiser.cjs`.
 11. Switching to **Original order** renders exactly today's `DiffViewer` output, and inline commenting still works in both orders.
+12. Clicking a per-line **severity chip** opens that finding's card in a **new browser tab** — `?tab=findings&finding=<id>` via `window.open(…, "_blank", "noopener,noreferrer")` — so the reader keeps their place in the diff. On that cold load the run that produced the finding opens, and the card is focused, expanded and scrolled into view. The target is a query param precisely because a new tab shares no React state with the tab it came from; no `?severity=` is carried over, so nothing can filter the card out. With no `onFindingClick` supplied the chip is not a button at all. Pinned by `SmartDiffViewer.test.tsx` and `FindingsPanel.test.tsx`.
+
+    > **Added 2026-08-10, after mentor review.** This criterion was missing from
+    > the original list, and so was the wire it describes. Step 8 specified
+    > `DiffFindingsApi.onFindingClick` and `CodeLine` branched on it correctly,
+    > but no caller ever supplied it — so every severity chip rendered as a plain
+    > badge and Smart Diff was a view with no way into the findings it marked.
+    > The gap survived because criterion 5 (badge → line) reads like it covers
+    > "clicking things in the Smart Diff", and it does not: the badge and the
+    > chip are two different targets. An optional prop that nothing passes is
+    > invisible to typecheck, lint and every existing test.
 
 ---
 

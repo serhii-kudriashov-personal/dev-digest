@@ -29,6 +29,13 @@ interface FindingsTabProps {
   /** Page-wide severity selection (`?severity=`); counts stay per-run. */
   severities: Severity[];
   onToggleSeverity: (sev: Severity) => void;
+  /**
+   * A finding to jump to, from `?finding=<id>` — a severity chip in the diff
+   * opens the page in a new browser tab pointed at it. Handed to every
+   * accordion; only the run that produced it reacts.
+   */
+  targetFindingId?: string | null;
+  targetFindingNonce?: number;
   onOpenTrace: (id: string) => void;
   onDelete: (id: string) => void;
   onRunDone: () => void;
@@ -48,6 +55,8 @@ export function FindingsTab({
   headSha,
   severities,
   onToggleSeverity,
+  targetFindingId = null,
+  targetFindingNonce = 0,
   onOpenTrace,
   onDelete,
   onRunDone,
@@ -196,6 +205,8 @@ export function FindingsTab({
             headSha={headSha}
             targetRunId={target?.runId ?? null}
             targetNonce={target?.n ?? 0}
+            targetFindingId={targetFindingId}
+            targetFindingNonce={targetFindingNonce}
             severities={severities}
             onToggleSeverity={onToggleSeverity}
           />

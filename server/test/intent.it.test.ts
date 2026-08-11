@@ -183,6 +183,14 @@ d('Testcontainers: PR intent', () => {
     expect(prompt).not.toContain('export function config');
   });
 
+  it('instructs the model to answer in English, whatever the PR is written in', async () => {
+    await derive();
+    // Asserted on the assembled messages rather than on the constant, because
+    // the guarantee is that the instruction REACHES the model: `assemblePrompt`
+    // is what decides which slot survives into `messages`.
+    expect(promptOf()).toContain('Answer in ENGLISH');
+  });
+
   it('takes a linked plan/spec into account, read through git.readFile', async () => {
     const res = await derive();
     expect(res.json().sources).toContain('linked_spec');

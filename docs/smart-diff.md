@@ -133,6 +133,8 @@ sequenceDiagram
     participant T as DiffTab
     participant S as GET /pulls/:id/smart-diff
     participant R as GET /pulls/:id/reviews
+    participant P as PrDetailView
+    participant F as FindingsTab
 
     U->>T: opens "Files changed"
     T->>S: useSmartDiff(prId) — grouping, order, badge counts
@@ -142,9 +144,14 @@ sequenceDiagram
     T->>U: Smart order (default) · Original order
     U->>T: clicks an "N findings" badge
     T->>T: force that FileCard open, then scrollIntoView(lineAnchorId)
+    U->>T: clicks a per-line severity chip
+    T->>P: PrDetailView.goToFinding(finding)
+    P->>P: window.open(?tab=findings&finding=<id>, "_blank")
+    Note over F: NEW browser tab, cold load
+    F->>F: open the run that produced it, expand + scroll to its card
 ```
 
-Four things in that picture are load-bearing:
+Five things in that picture are load-bearing:
 
 - **Ordering is enrichment.** While `useSmartDiff` is loading or has failed,
   `DiffTab` falls back to the plain `DiffViewer`. A reviewer never loses the
@@ -165,6 +172,60 @@ Four things in that picture are load-bearing:
 - **Boilerplate stays collapsed whatever it contains**, findings included. That
   is the point of the group, and 30 000 lines of generated YAML expanding on a
   flagged line would bury everything above it.
+- **The badge and the chip go to two different places.** The file-level "N
+  findings" badge moves the viewport *within* the diff — open the card, scroll to
+  the line. The per-line severity chip opens the finding's own card in a **new
+  browser tab**. Both are needed: the badge answers "where in this file", the
+  chip answers "what did the reviewer actually say" — and it answers it without
+  costing the reader the place they had reached in the diff.
+
+## Chip → finding card
+
+The chip is a `<button>` only when a caller supplies `onFindingClick`
+(`CodeLine.tsx` branches on it); with the prop omitted the overlay renders as
+plain badges, which is what keeps the shared diff-viewer usable from a screen
+that has nowhere to send the reader.
+
+`DiffTab` does not perform the navigation, it only reports the click upwards —
+it owns neither the tab state nor the findings screen. `PrDetailView` turns that
+into `window.open("…?tab=findings&finding=<id>", "_blank")`, and two things
+follow from the new tab:
+
+- **The target is a query param, not state.** A new tab is a cold load that
+  shares no React tree with the one the reader came from, so `?finding=<id>` is
+  the only channel that survives. This is the opposite choice from the Timeline →
+  run-accordion jump (`targetRunId` / `targetNonce`, both state), and the reason
+  is exactly that one navigates in place and this one does not. The upside is
+  free: the URL is now shareable and reloadable, which a state target never was.
+- **No `?severity=` is carried over.** A fresh tab has no selection, so `severities`
+  is empty, so nothing can filter the target card out. Had this stayed an in-place
+  tab switch it would have needed the page-wide filter widened in the same URL
+  write — two `setParam` calls would each rebuild from the same stale `search`
+  and the second would discard the first.
+
+Downstream, the target is handed to **every** run accordion and only the run
+that produced the finding reacts (`findings.some(f => f.id === target)`) — the
+finding contract carries `review_id`, but matching on the findings already in
+memory needs no lookup. The accordion only *opens*; `FindingsPanel` does the
+scrolling, because it is the component that knows where the card is and two
+smooth scrolls racing each other look broken.
+
+`FindingsPanel` then focuses the card, forces it expanded, and scrolls to
+`[data-finding-id]` scoped to its own list. Two edges it handles:
+
+- **`hideLow` gives way.** If the reader has hidden low-confidence findings and
+  navigates to one, the toggle is lifted rather than the jump silently doing
+  nothing. Severity is not handled here — the page already widened it.
+- **One jump per load.** `shown` must be a dependency of that Effect (the
+  `hideLow` retry needs the re-run) and it changes identity on every
+  accept/dismiss, so a `jumped` ref keyed `id:nonce` is what stops an unrelated
+  accept from yanking the viewport back to the deep-linked card. The nonce is a
+  constant `1` here — with the target in the URL there is no "click it again"
+  to distinguish, and the panel still accepts one for the in-place callers.
+
+Expansion uses the same uncontrolled/controlled pair as `FileCard`: the card
+owns its state until navigation forces it open, and from then on the panel holds
+it so the reader can still collapse it again.
 
 `lineAnchorId(path, line)` is defined once, in the shared diff-viewer, and
 exported from its barrel: the element that carries the DOM id and the code that

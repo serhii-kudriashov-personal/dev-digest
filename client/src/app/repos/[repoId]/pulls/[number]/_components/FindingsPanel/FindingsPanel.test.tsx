@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { FindingRecord } from "@devdigest/shared";
@@ -136,5 +136,84 @@ describe("FindingsPanel severity filter", () => {
     fireEvent.click(screen.getByRole("switch"));
     expect(chip("Critical")).toHaveTextContent("1");
     expect(screen.queryByText("Unsure critical")).toBeNull();
+  });
+});
+
+/**
+ * Arriving from a severity chip in the Files-changed tab. jsdom has no layout,
+ * so `Element.prototype.scrollIntoView` does not exist — stubbed locally, and
+ * `mock.contexts` is what proves WHICH card was scrolled to rather than merely
+ * that something was.
+ */
+describe("FindingsPanel — jumping to one finding", () => {
+  /** Distinct rationales: the rationale only renders while a card is EXPANDED. */
+  const JUMPABLE: FindingRecord[] = [
+    finding({ id: "c1", severity: "CRITICAL", title: "Hardcoded secret", rationale: "RATIONALE c1" }),
+    finding({
+      id: "c2",
+      severity: "CRITICAL",
+      title: "Unsure critical",
+      confidence: 0.2,
+      rationale: "RATIONALE c2",
+    }),
+    finding({ id: "w1", severity: "WARNING", title: "N+1 query", rationale: "RATIONALE w1" }),
+  ];
+
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const panel = (props: Partial<React.ComponentProps<typeof FindingsPanel>> = {}) => (
+    <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
+      <FindingsPanel findings={JUMPABLE} prId="pr1" {...props} />
+    </NextIntlClientProvider>
+  );
+
+  const scrolledTo = () =>
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mock.contexts[0] as HTMLElement;
+
+  it("expands the target card and scrolls to THAT card", () => {
+    render(panel({ targetFindingId: "w1", targetFindingNonce: 1 }));
+
+    // `defaultExpanded` opens the FIRST card only, so `w1`'s rationale being
+    // readable is the navigation having forced its card open.
+    expect(screen.getByText("RATIONALE w1")).toBeInTheDocument();
+    expect(scrolledTo().getAttribute("data-finding-id")).toBe("w1");
+  });
+
+  it("does nothing when this run does not hold the finding", () => {
+    render(panel({ targetFindingId: "not-in-this-run", targetFindingNonce: 1 }));
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("lifts hide-low-confidence rather than scrolling to a card that is filtered out", () => {
+    const { rerender } = render(panel());
+    fireEvent.click(screen.getByRole("switch"));
+    expect(screen.queryByText("Unsure critical")).toBeNull();
+
+    // `c2` is the low-confidence one, and it is now hidden. Navigating to it has
+    // to make the toggle give way, or the jump is a silent no-op.
+    rerender(panel({ targetFindingId: "c2", targetFindingNonce: 1 }));
+
+    expect(screen.getByText("Unsure critical")).toBeInTheDocument();
+    expect(scrolledTo().getAttribute("data-finding-id")).toBe("c2");
+  });
+
+  it("jumps once per click, not on every findings refresh", () => {
+    const { rerender } = render(panel({ targetFindingId: "w1", targetFindingNonce: 1 }));
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+
+    // What an accept/dismiss does: same target, a new `findings` identity. The
+    // viewport has to stay where the reader left it.
+    rerender(panel({ findings: [...JUMPABLE], targetFindingId: "w1", targetFindingNonce: 1 }));
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+
+    // A second click on the same chip DOES jump again — that is the nonce.
+    rerender(panel({ targetFindingId: "w1", targetFindingNonce: 2 }));
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
   });
 });

@@ -319,6 +319,48 @@ testcontainers.
 
 ## Codebase Patterns
 
+### 2026-08-10 — A prompt that summarises user-authored text must state its OUTPUT LANGUAGE, because the model mirrors its input and nothing downstream translates
+
+**Rule:** any prompt whose input is text a human wrote (a PR body, a commit
+message, a linked issue, a spec file) has to name the output language explicitly.
+Do not rely on the prompt itself being written in English — that sets the
+*instruction* language, not the *answer* language, and the model follows its
+input.
+
+**Why:** `INTENT_SYSTEM` asked for three fields in fluent English and never said
+which language to answer in. Every one of its five sources is author-controlled
+(`pr_title_body`, `linked_issue`, `linked_spec`, `hunk_headers`,
+`commit_messages`), so a PR described in Ukrainian yields a Ukrainian `intent` —
+and then two things consume it without translating:
+
+- `renderIntentBlock` puts it in the `## PR intent (derived)` section of the
+  review prompt, where it becomes context for an English-instructed reviewer;
+- `IntentCard` renders it verbatim on the Overview tab.
+
+The repo rule "All Markdown is written in English … whatever language the request
+came in" (root `AGENTS.md` §Repo rules) is about files people write, so nothing
+extended it to model output. The instruction is the only place this is fixable:
+the schema's `.describe()` fields are per-field and would have to repeat it, and
+there is no post-processing step to hook.
+
+Worth knowing what the fix is *not*: it is not `temperature`, and it is not the
+task line. `INTENT_TASK` interpolates the PR title verbatim, so on a
+Ukrainian-titled PR the task string itself is mixed-language and pulls the answer
+further toward the input.
+
+Same shape as the L02 lesson that a rule added to a prompt must state its own
+severity (root `INSIGHTS.md` 2026-08-02): what the prompt does not say, the model
+decides — and it decides from the data.
+
+**Where:** the instruction is `server/src/modules/intent/constants.ts`
+(`INTENT_SYSTEM`, the `Answer in ENGLISH` line, with the reason in the docblock
+above it); it is asserted on the assembled messages rather than on the constant in
+`server/test/intent.it.test.ts` ("instructs the model to answer in English"),
+because the guarantee is that it survives `assemblePrompt` into `messages`. The
+two consumers that do not translate are `renderIntentBlock`
+(`server/src/modules/intent/helpers.ts`) and
+`client/src/app/repos/[repoId]/pulls/[number]/_components/IntentCard/`.
+
 ### 2026-08-09 — `normalizePath` strips `a/` and `b/` as diff prefixes, so a real top-level directory with either name is treated as repo-root
 
 **Rule:** anything that compares a `findings.file` path against a `pr_files.path`

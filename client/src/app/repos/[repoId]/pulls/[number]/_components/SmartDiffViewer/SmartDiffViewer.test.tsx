@@ -241,6 +241,41 @@ describe("SmartDiffViewer", () => {
     });
   });
 
+  it("a severity chip on a flagged line reports THAT finding to the page", async () => {
+    // The other half of the feature: the file-level badge moves the viewport
+    // inside the diff, the per-line chip opens the finding's card in a new
+    // browser tab (the page does the `window.open`, this component only reports
+    // the click). Without this wire the chip is decoration and Smart Diff is a
+    // view with no way into the findings it marks.
+    const user = userEvent.setup();
+    const path = "server/src/modules/billing/service.ts";
+    const target = finding({ file: path, start_line: 2, title: "Unbounded request rate" });
+    const onFindingClick = vi.fn();
+    renderViewer({
+      groups: groups({ [path]: [2] }),
+      findings: [target],
+      onFindingClick,
+    });
+
+    await user.click(screen.getByRole("button", { name: /Open the finding in a new tab: Unbounded request rate/ }));
+
+    expect(onFindingClick).toHaveBeenCalledTimes(1);
+    expect(onFindingClick).toHaveBeenCalledWith(target);
+  });
+
+  it("renders the chip as plain text when the page offers nowhere to go", () => {
+    // `onFindingClick` is optional, and the overlay is read-only either way — so
+    // omitting it must not leave a button that does nothing.
+    const path = "server/src/modules/billing/service.ts";
+    renderViewer({
+      groups: groups({ [path]: [2] }),
+      findings: [finding({ file: path, start_line: 2 })],
+    });
+
+    expect(screen.getByText("Critical")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open the finding in a new tab:/ })).not.toBeInTheDocument();
+  });
+
   it("before the first review: every group renders, with no badges and no chips", () => {
     renderViewer();
 
