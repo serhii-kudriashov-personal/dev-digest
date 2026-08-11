@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 import type { Container } from '../../platform/container.js';
+import { ConfigError } from '../../platform/errors.js';
 
 export interface RequestContext {
   workspaceId: string;
@@ -19,5 +20,8 @@ export async function getContext(
     container.auth.currentUser(req),
     container.auth.currentWorkspace(req),
   ]);
+  if (!user.id || !workspace.id) {
+    throw new ConfigError('Auth provider resolved no user or workspace id');
+  }
   return { workspaceId: workspace.id, userId: user.id };
 }
