@@ -27,8 +27,12 @@ export class ReviewRepository {
 
   // ---- PR lookup (workspace-scoped) --------------------------------------
 
-  getPull(workspaceId: string, prId: string): Promise<PullRow | undefined> {
-    return pullRepo.getPull(this.db, workspaceId, prId);
+  getPull(
+    workspaceId: string,
+    prId: string,
+    opts?: { requireOpen?: boolean },
+  ): Promise<PullRow | undefined> {
+    return pullRepo.getPull(this.db, workspaceId, prId, opts);
   }
 
   getRepo(repoId: string): Promise<typeof t.repos.$inferSelect | undefined> {

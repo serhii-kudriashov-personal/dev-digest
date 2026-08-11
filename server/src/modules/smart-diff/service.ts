@@ -37,7 +37,7 @@ export class SmartDiffService {
   async build(workspaceId: string, prId: string): Promise<SmartDiff> {
     const repo = this.container.reviewRepo;
 
-    const pull = await repo.getPull(workspaceId, prId);
+    const pull = await repo.getPull(workspaceId, prId, { requireOpen: false });
     if (!pull) throw new NotFoundError('Pull request not found');
 
     // `patch` is dropped here on purpose: the response carries paths, counts and

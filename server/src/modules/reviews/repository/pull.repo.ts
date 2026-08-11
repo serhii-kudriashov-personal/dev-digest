@@ -3,6 +3,7 @@ import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { Intent } from '@devdigest/shared';
 import type { PullRow } from '../../../db/rows.js';
+import { ConflictError } from '../../../platform/errors.js';
 
 // ---- PR lookup (workspace-scoped) -----------------------------------------
 
@@ -10,11 +11,15 @@ export async function getPull(
   db: Db,
   workspaceId: string,
   prId: string,
+  opts?: { requireOpen?: boolean },
 ): Promise<PullRow | undefined> {
   const [row] = await db
     .select()
     .from(t.pullRequests)
     .where(and(eq(t.pullRequests.workspaceId, workspaceId), eq(t.pullRequests.id, prId)));
+  if (row && opts?.requireOpen && row.status === 'closed') {
+    throw new ConflictError('Pull request is closed', { prId });
+  }
   return row;
 }
 
