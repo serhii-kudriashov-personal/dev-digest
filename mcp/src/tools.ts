@@ -23,13 +23,13 @@
  *    three flat values everywhere means the deadline message asks for a call the
  *    model has already made once. Tradeoff: when several runs of the same agent
  *    exist on one PR, `get_findings` returns the most recent by `created_at`.
- * 2. `get_blast_radius` is registered even though it is a placeholder. Hiding it
- *    would make the shipped tool set disagree with the documented one, and an env
- *    flag would make `tools/list` non-deterministic across machines — which is
- *    the premise of the budget test. `isError` stays FALSE on its result:
- *    `isError: true` is the MCP signal for "the model can fix this by retrying",
- *    which is the exact behaviour to avoid on a tool that will never work in this
- *    version.
+ * 2. `get_blast_radius`'s description is verbatim from
+ *    `specs/l06-blast-radius.md` §Contracts 5, not from `specs/l05-mcp-server.md`
+ *    — L05 shipped it as a placeholder and L06 implemented it. Its `isError`
+ *    semantics changed with it: a degraded index now DOES set `isError: true`,
+ *    because the fix is a user action ("re-analyze the repository"), which is
+ *    exactly what an actionable error is for. The placeholder deliberately did
+ *    not, because nothing could have made it succeed.
  */
 
 export const TOOLS = [
@@ -107,9 +107,10 @@ export const TOOLS = [
   {
     name: 'get_blast_radius',
     description:
-      'Not implemented yet — do not retry. This tool will map which parts of a codebase ' +
-      'a pull request can affect; for now it returns a placeholder, so answer ' +
-      'blast-radius questions from get_findings and the diff instead.',
+      'Map what else a pull request can affect: the symbols its changed files declare, ' +
+      'who calls them, and which HTTP endpoints or scheduled jobs those callers serve. ' +
+      'Served from a prebuilt index — no code is parsed and no model is called. When the ' +
+      'index is missing or incomplete the result says so instead of guessing.',
     inputSchema: {
       type: 'object',
       properties: {

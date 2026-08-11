@@ -319,6 +319,89 @@ testcontainers.
 
 ## Codebase Patterns
 
+### 2026-08-11 — `repo_index_state.status='partial'` does NOT mean "a working index": it can mean the whole T3 block was skipped, and then "no callers" is indistinguishable from "no data"
+
+**Rule:** never branch on `repo_index_state.status` alone before reading anything
+that joins `file_rank`. `partial` covers two states that look identical to a
+consumer and are not:
+
+1. a working index that ran out of budget partway — callers resolve fine;
+2. an index where the entire tier-3 block was skipped, so `file_edges`,
+   `file_rank` and `file_facts` were **never written**.
+
+In case 2, `getResolvedCallers` INNER JOINs `references` to `file_rank`
+(`src/modules/repo-intel/repository.ts:503-531`) and returns **zero rows** — byte
+-identical to "this symbol genuinely has no callers". Any feature that renders
+that as an empty list is asserting an absence it never established.
+
+The cheap capability probe, needing no new SQL and no repository edit:
+
+```ts
+// only when status === 'partial'; 'full' already implies the rank step succeeded
+const rankGraphPresent =
+  (await container.repoIntel.getTopFilesByRank(repoId, 1)).length > 0;
+```
+
+**Why:** `tryGetIndexState` deliberately does **not** flag `partial` as degraded —
+its own comment says "'partial' is still a working index — no degraded flag"
+(`repository.ts:215-218`), which is correct for its purpose and misleading as a
+capability signal. And the obvious alternative signal is a trap: **`stats.ranked`
+is written only by the FULL pipeline** (`pipeline/full.ts:260`) and never by the
+incremental one (`pipeline/incremental.ts:245-256` writes `edgesWritten` but no
+`ranked`), so a healthy incremental refresh that rewrote every rank row would
+report "no rank graph". `tryGetIndexState` does not project `stats.ranked` at all,
+so it is not even reachable through the facade — reading it would mean widening
+the projection for a signal that is wrong.
+
+Note also the asymmetry that makes `full` cheap: the pipeline records `full` only
+when the graph/rank step succeeded (`pipeline/full.ts:252-254`;
+`pipeline/incremental.ts:243` additionally requires the prior state to be `full`),
+so the probe is owed on `partial` and on nothing else — the happy path pays
+nothing.
+
+**Where:** the probe and the truth table are
+`src/modules/blast/helpers.ts` (`decideBlastState`, row 5 → `no_rank_graph`),
+called from `src/modules/blast/service.ts`; the empirical proof is
+`server/test/blast.it.test.ts` case 3, which deletes every `file_rank` row for the
+repo under `status='partial'` and asserts `state:'degraded'`,
+`reason:'no_rank_graph'` and a non-empty `summary` rather than `downstream: []`
+alone. Reasoning of record: `specs/l06-blast-radius.md` §Contracts 3 and Risk 2.
+
+### 2026-08-11 — A read-time cap named `MAX_..._PER_SYMBOL` was applied to the FLATTENED list, so every symbol after the first got zero
+
+**Rule:** when a cap's name says "per X", check where the `.slice()` actually
+sits. `tryPersistentBlast` ended with
+`callers.slice(0, MAX_CALLERS_PER_SYMBOL)` over the **flattened, rank-sorted**
+caller list, so with 20 callers on the hottest symbol every later changed symbol
+came back with an empty array. A consumer cannot tell that from "this symbol has
+no callers", which is the exact masking such a feature must not do.
+
+Two things the fix needs beyond moving the slice:
+
+- **Make the sort total first.** `callers.sort((a, b) => b.rank - a.rank)` is not
+  a deterministic order here: every `rank` is `0` whenever the hotness-free
+  PageRank collapses (`hotness` is always 0 under Option B, and `rank = pagerank`),
+  and symmetric files tie exactly. Without `|| file ASC || line ASC` the retained
+  20 differ between two calls on identical data.
+- **Restate the new bound in the docblock.** The method can now return
+  `MAX_CALLERS_PER_SYMBOL × changedSymbols.length` rows, not 20; the consuming
+  slice is what bounds the total (`blast/constants.ts`'s
+  `MAX_CHANGED_SYMBOLS = 50` → ≤ 1000).
+
+Fixing it in the facade rather than in the consumer was safe because
+`getBlastRadius` had **no production caller at all** at the time
+(`rg -n getBlastRadius src test` → the interface, the impl, a docblock and one
+shape test) and no test pinned the combined semantics. Check that before changing
+a facade's semantics; if a caller exists, the per-symbol grouping still belongs in
+the facade, not duplicated in each consumer.
+
+**Where:** `src/modules/repo-intel/service.ts` (`tryPersistentBlast`, the
+`keptPerSymbol` map and the three-key sort) with the new bound stated in its
+docblock; the constant is `src/modules/repo-intel/constants.ts:30`; the hermetic
+proof is `server/test/repo-intel-blast-clamp.test.ts` (25 callers × 2 symbols → 20
+each, top-of-group retained, stable across two calls with every rank tied), and
+the end-to-end one is `server/test/blast.it.test.ts` case 7.
+
 ### 2026-08-09 — `normalizePath` strips `a/` and `b/` as diff prefixes, so a real top-level directory with either name is treated as repo-root
 
 **Rule:** anything that compares a `findings.file` path against a `pr_files.path`

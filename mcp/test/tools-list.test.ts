@@ -87,9 +87,19 @@ describe('tools/list', () => {
     }
   });
 
-  it('get_blast_radius opens with the refusal', () => {
+  it('get_blast_radius describes the real tool, verbatim from its spec', () => {
+    // L05 shipped this as a placeholder whose description opened with a refusal;
+    // L06 implemented it. The string is verbatim from
+    // `specs/l06-blast-radius.md` §Contracts 5 — a paraphrase is a defect,
+    // because the token budget was computed from these exact bytes.
     const blast = tools.find((t) => t.name === 'get_blast_radius');
-    expect(blast?.description.startsWith('Not implemented yet — do not retry.')).toBe(true);
+    expect(blast?.description).toBe(
+      'Map what else a pull request can affect: the symbols its changed files declare, ' +
+        'who calls them, and which HTTP endpoints or scheduled jobs those callers serve. ' +
+        'Served from a prebuilt index — no code is parsed and no model is called. When the ' +
+        'index is missing or incomplete the result says so instead of guessing.',
+    );
+    expect(blast?.description).not.toContain('Not implemented');
   });
 
   it('instructions are three lines and never restate a parameter description', () => {

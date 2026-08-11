@@ -11,9 +11,9 @@ import type {
 } from "@devdigest/shared";
 import {
   FileCard,
-  lineAnchorId,
   type DiffCommentApi,
   type DiffFindingsApi,
+  type DiffLineTargetApi,
 } from "@/components/diff-viewer";
 import { ROLE_COLOR, ROLE_DEFAULT_OPEN } from "./constants";
 import { s, squareFor } from "./styles";
@@ -36,16 +36,22 @@ interface SmartDiffViewerProps {
   files: PrFile[];
   findings: FindingRecord[];
   commenting?: DiffCommentApi;
+  /**
+   * Card-open + scroll-to-line orchestration, owned by the tab that renders this
+   * viewer — the same instance also serves the plain `DiffViewer` and the
+   * Blast Radius card's `?goto=` handoff, so a target set from either place lands
+   * on whichever viewer is on screen.
+   */
+  lineTarget: DiffLineTargetApi;
 }
 
-/** Which file was asked for, and a sequence number so a repeat click re-fires. */
-interface ScrollTarget {
-  path: string;
-  line: number;
-  seq: number;
-}
-
-export function SmartDiffViewer({ groups, files, findings, commenting }: SmartDiffViewerProps) {
+export function SmartDiffViewer({
+  groups,
+  files,
+  findings,
+  commenting,
+  lineTarget,
+}: SmartDiffViewerProps) {
   const t = useTranslations("brief");
 
   const filesByPath = React.useMemo(() => {
@@ -53,28 +59,6 @@ export function SmartDiffViewer({ groups, files, findings, commenting }: SmartDi
     for (const file of files) map.set(file.path, file);
     return map;
   }, [files]);
-
-  // A card is uncontrolled until something forces it open; from then on its
-  // state lives here, so the reader can still collapse it again.
-  const [openByPath, setOpenByPath] = React.useState<Record<string, boolean>>({});
-  const [target, setTarget] = React.useState<ScrollTarget | null>(null);
-
-  // The ONE legitimate Effect here: it synchronises with the DOM, which is an
-  // external system. Opening the card happens in the click handler below, and
-  // React batches it with `setTarget`, so by the time this runs the line has
-  // been rendered and can be found. `seq` is what makes a SECOND click on the
-  // same badge scroll again.
-  React.useEffect(() => {
-    if (!target) return;
-    document
-      .getElementById(lineAnchorId(target.path, target.line))
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [target]);
-
-  const goToFinding = (path: string, line: number) => {
-    setOpenByPath((prev) => ({ ...prev, [path]: true }));
-    setTarget((prev) => ({ path, line, seq: (prev?.seq ?? 0) + 1 }));
-  };
 
   const findingsApi: DiffFindingsApi = { findings };
 
@@ -98,11 +82,9 @@ export function SmartDiffViewer({ groups, files, findings, commenting }: SmartDi
                 entry={entry}
                 role={group.role}
                 file={filesByPath.get(entry.path)}
-                open={openByPath[entry.path]}
-                onOpenChange={(next) =>
-                  setOpenByPath((prev) => ({ ...prev, [entry.path]: next }))
-                }
-                onGoToFinding={goToFinding}
+                open={lineTarget.openByPath[entry.path]}
+                onOpenChange={(next) => lineTarget.setOpen(entry.path, next)}
+                onGoToFinding={lineTarget.goTo}
                 findings={findingsApi}
                 commenting={commenting}
               />

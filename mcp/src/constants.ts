@@ -38,6 +38,19 @@ export const MAX_SUGGESTION_CHARS = 400;
 export const MAX_RULE_CHARS = 500;
 export const MAX_ERROR_CHARS = 300;
 
+/**
+ * Blast-radius caps. The server already bounds its response (50 symbols × 20
+ * callers), but that is sized for a UI a human scrolls — a model pays per token,
+ * so this client cuts harder and says so with a `truncated` marker.
+ */
+export const MAX_BLAST_SYMBOLS = 10;
+/** 5 is enough to see the shape of the fan-out; `caller_count` carries the rest. */
+export const MAX_BLAST_CALLERS_PER_SYMBOL = 5;
+/** Endpoints and crons are short strings, so this cap rarely bites. */
+export const MAX_BLAST_ENDPOINTS = 10;
+/** File paths and symbol names are repo-authored text — `clean()` and cap them. */
+export const MAX_BLAST_PATH_CHARS = 300;
+
 /** Argument bounds. Checked before any URL is built. */
 export const MAX_REPO_CHARS = 200;
 export const MAX_AGENT_CHARS = 200;

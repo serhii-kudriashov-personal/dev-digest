@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Finding, Verdict } from './findings.js';
-import { Intent, SmartDiff } from './brief.js';
+import { BlastRadius, Intent, SmartDiff } from './brief.js';
 
 /**
  * A2 — Review-Core API surface contracts. These extend the core
@@ -109,3 +109,38 @@ export type PrIntentRecord = z.infer<typeof PrIntentRecord>;
 /** Smart-diff response for a PR (the SmartDiff). */
 export const SmartDiffResponse = SmartDiff;
 export type SmartDiffResponse = z.infer<typeof SmartDiffResponse>;
+
+/** How much of the answer the persisted index could actually support. */
+export const BlastState = z.enum(['full', 'partial', 'degraded']);
+export type BlastState = z.infer<typeof BlastState>;
+
+/**
+ * WHY the state is not 'full'. A machine code, not prose: the UI maps it to its
+ * own i18n string. Absent on the 'full' path.
+ */
+export const BlastStateReason = z.enum([
+  'flag_off',          // REPO_INTEL_ENABLED=false
+  'no_index',          // no repo_index_state row for the repo
+  'index_failed',      // repo_index_state.status = 'failed' | 'degraded'
+  'no_rank_graph',     // status='partial' AND file_rank is empty: the T3 block never ran,
+                       // so resolved callers CANNOT be read (INNER JOIN to file_rank)
+  'files_not_indexed', // the PR's source files carry no symbols in the index yet
+  'index_partial',     // a working but incomplete index
+]);
+export type BlastStateReason = z.infer<typeof BlastStateReason>;
+
+/**
+ * Response of `GET /pulls/:id/blast`.
+ *
+ * `BlastRadius` itself is NOT extended in place: it is embedded in `PrBrief`,
+ * the declared shape of the `pr_brief.json` jsonb column, and every document a
+ * later lesson writes there would lack a newly-required key (root `INSIGHTS.md`
+ * 2026-08-02). So the transport shape extends it here — `state` is required
+ * because the server always computes it, and `reason` is `.nullish()` because it
+ * is absent on the 'full' path.
+ */
+export const BlastRadiusResponse = BlastRadius.extend({
+  state: BlastState,
+  reason: BlastStateReason.nullish(),
+});
+export type BlastRadiusResponse = z.infer<typeof BlastRadiusResponse>;

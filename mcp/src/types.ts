@@ -24,7 +24,15 @@
  * interface whenever `server/src/modules/reviews/helpers.ts` changes.
  * ---------------------------------------------------------------------------
  */
-import type { Agent, ConventionCandidate, Finding, PrMeta, Repo, RunSummary } from '@devdigest/shared';
+import type {
+  Agent,
+  BlastRadiusResponse,
+  ConventionCandidate,
+  Finding,
+  PrMeta,
+  Repo,
+  RunSummary,
+} from '@devdigest/shared';
 
 /**
  * The subset of `ReviewDto` the tools read. `findings` is typed as the SHARED
@@ -40,6 +48,18 @@ export interface McpReview {
   created_at: string;
   findings: Finding[];
 }
+
+/**
+ * Body of `GET /pulls/:id/blast`.
+ *
+ * Unlike `McpReview`, this one IS a shared contract
+ * (`vendor/shared/contracts/review-api.ts`, `BlastRadiusResponse`), so the type
+ * comes from the canon through `.shared-dts` rather than being re-declared.
+ * `state` is widened to `string` because the runtime guard below is what actually
+ * narrows it, and an engine from a different commit could send a value this
+ * client's copy of the enum does not know.
+ */
+export type McpBlast = Omit<BlastRadiusResponse, 'state'> & { state: string };
 
 /** Body of `POST /pulls/:id/review` (`server/src/modules/reviews/routes.ts:43`). */
 export interface RunCreated {
@@ -61,7 +81,15 @@ export type ToolResult = {
   isError?: boolean;
 };
 
-export type { Agent, ConventionCandidate, Finding, PrMeta, Repo, RunSummary };
+export type {
+  Agent,
+  BlastRadiusResponse,
+  ConventionCandidate,
+  Finding,
+  PrMeta,
+  Repo,
+  RunSummary,
+};
 
 // ---- Runtime response guards --------------------------------------------
 // Hand-rolled on purpose: Zod is a devDependency for TYPE RESOLUTION of the
@@ -134,5 +162,35 @@ export function isRunCreated(value: unknown): value is RunCreated {
     isRecord(value) &&
     Array.isArray(value.runs) &&
     value.runs.every((r) => isRecord(r) && typeof r.run_id === 'string')
+  );
+}
+
+/**
+ * Checks only the fields `toConciseBlast` reads. `reason` is deliberately not
+ * checked: it is `.nullish()` on the contract and only ever rendered as a string,
+ * so a missing or unexpected value degrades to "no explanation" rather than to a
+ * bad-shape error the model cannot act on.
+ */
+export function isBlastPayload(value: unknown): value is McpBlast {
+  return (
+    isRecord(value) &&
+    typeof value.state === 'string' &&
+    typeof value.summary === 'string' &&
+    Array.isArray(value.changed_symbols) &&
+    value.changed_symbols.every(
+      (s) => isRecord(s) && typeof s.name === 'string' && typeof s.file === 'string',
+    ) &&
+    Array.isArray(value.downstream) &&
+    value.downstream.every(
+      (d) =>
+        isRecord(d) &&
+        typeof d.symbol === 'string' &&
+        Array.isArray(d.callers) &&
+        d.callers.every(
+          (c) => isRecord(c) && typeof c.file === 'string' && typeof c.line === 'number',
+        ) &&
+        Array.isArray(d.endpoints_affected) &&
+        Array.isArray(d.crons_affected),
+    )
   );
 }

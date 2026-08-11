@@ -359,6 +359,49 @@ the address moved: the page is now an 8-line wrapper and the selection owner is
 
 ## Tool & Library Notes
 
+### 2026-08-11 — A CSS custom property that does not exist fails SILENTLY, and `IntentCard/styles.ts` already ships three of them — read `styles.css`, never a neighbouring `styles.ts`
+
+**Quirk:** `color: "var(--text-tertiary)"` typechecks, lints, renders, and passes
+every test — and does nothing, because `--text-tertiary` is **not defined**. The
+design system declares `--text-primary`, `--text-secondary` and `--text-muted`
+only (`src/vendor/ui/styles.css:15-17`, mirrored for light at `:55-57`). The
+element silently inherits its parent's colour, which is close enough that nobody
+notices in review.
+
+Three more that plausible names get wrong: there is **no `--danger`/`--danger-bg`**
+(the danger tokens are `--crit` / `--crit-bg`), **no `--bg-subtle`** (the raised
+surfaces are `--bg-surface`, `--bg-elevated`, `--bg-hover`), and `--font-mono`
+**does** exist (`:114`) so the usual `"var(--font-mono, ui-monospace), monospace"`
+fallback chain is noise here.
+
+This is the same class as the 2026-08-05 `IconName` entry below — read the
+registry, not the docs and not a sibling — except worse in one way: a wrong
+`IconName` is a typecheck error with a 64-name union in the message, while a wrong
+CSS variable has **no gate at all**. Nothing in `pnpm typecheck`, `pnpm lint` or
+`pnpm test` can see it, so it has to be checked by hand.
+
+**Workaround:** grep the token block before writing a `styles.ts`, and do not copy
+a colour from an adjacent component's styles:
+
+```sh
+grep -nE '^\s+--' client/src/vendor/ui/styles.css | sed -n '1,60p'
+```
+
+`IntentCard/styles.ts` is specifically the wrong file to copy from — it uses
+`--text-tertiary` in `listTitle`, `meta` and `nodeFile`-equivalent positions.
+Matching it visually means using `--text-muted`, which is what those labels
+render as anyway. Left as-is rather than fixed as a drive-by; a deliberate sweep
+is its own task.
+
+**Where:** the token blocks are `src/vendor/ui/styles.css:10-45` (dark) and
+`:49-80` (light), `--font-mono` at `:114`; the file carrying the undefined token
+is `src/app/repos/[repoId]/pulls/[number]/_components/IntentCard/styles.ts`; the
+new file that uses only defined tokens is
+`.../_components/BlastRadiusCard/styles.ts`, with the danger pair named in
+`.../BlastRadiusCard/constants.ts` (`STATE_BADGE`). Related: the `IconName`
+registry entry (2026-08-05) below — `Radar` is **not** registered, so a
+blast-radius card icon has to be one of the ~90 keys that are (`Workflow` here).
+
 ### 2026-08-09 — `userEvent` unmounts a HOVER-gated control before your click lands, and the symptom is a silent no-op
 
 **Quirk:** every `@testing-library/user-event` API call re-enters the pointer,
