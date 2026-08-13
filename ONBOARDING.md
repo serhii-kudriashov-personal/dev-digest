@@ -47,7 +47,7 @@ Everything else is local.
 
 ## 3. Package map and how they connect
 
-Four **independent** packages — this is **not** a pnpm workspace. Each has its
+Five **independent** packages — this is **not** a pnpm workspace. Each has its
 own `package.json` and its own lockfile. Code is shared between them **only
 through tsconfig path aliases**, not through published modules.
 
@@ -57,13 +57,16 @@ through tsconfig path aliases**, not through published modules.
 | `client/` | `@devdigest/web` | Next.js 15 web studio | 3000 |
 | `reviewer-core/` | `@devdigest/reviewer-core` | pure review engine, zero I/O | — |
 | `e2e/` | `@devdigest/e2e` | deterministic browser flows | — |
+| `mcp/` | `@devdigest/mcp` | MCP server (stdio), HTTP client of the API | — |
 | `server/src/vendor/shared` | `@devdigest/shared` | Zod contracts for everyone | — |
 
 ```mermaid
 flowchart TB
+  MCPCLIENT["MCP client<br/>Claude Code / Claude Desktop"]
   subgraph host["Your machine"]
     WEB["client/ · @devdigest/web<br/>Next.js 15 · :3000"]
     API["server/ · @devdigest/api<br/>Fastify 5 · :3001"]
+    MCP["mcp/ · @devdigest/mcp<br/>stdio server, separate process"]
   end
   PG[("Postgres + pgvector<br/>:5432 · Docker")]
   CORE["reviewer-core/<br/>pure logic, zero I/O"]
@@ -77,12 +80,15 @@ flowchart TB
   CORE -->|"LLMProvider (injected)"| LLM
   API --> GH
   E2E -.->|"drives the browser"| WEB
+  MCPCLIENT -.->|"spawns over stdio"| MCP
+  MCP -->|"REST :3001<br/>(no direct DB or reviewer-core access)"| API
 
   SH_S["server/src/vendor/shared<br/>@devdigest/shared — CANON"]
   SH_C["client/src/vendor/shared<br/>COPY (has drifted)"]
   SH_S -.-> API
   SH_S -.-> CORE
   SH_C -.-> WEB
+  SH_S -.->|"type-only"| MCP
   SH_S -. "manual sync" .-> SH_C
 ```
 
@@ -97,6 +103,11 @@ The things worth internalising immediately:
   trivially mockable in tests.
 - **`repo-intel` is not a separate package** — it's a module inside the server:
   [`server/src/modules/repo-intel`](server/src/modules/repo-intel).
+- **`mcp/` is a separate process, not a request path into the other three.** An
+  MCP client (Claude Code, Claude Desktop) spawns it over **stdio**; it never
+  touches Postgres or `reviewer-core` directly, and reaches everything else by
+  being a thin HTTP client of the API on `:3001` — see
+  [`mcp/docs/request-lifecycle.md`](mcp/docs/request-lifecycle.md).
 - **`@devdigest/shared`** holds Zod contracts that double as Fastify route
   schemas: one definition drives both request validation and response
   serialization.
@@ -225,9 +236,11 @@ touch the pipeline internals:
 
 ### 7.1. Not a monorepo, yet with cross-package imports
 
-Four separate lockfiles, while `server` imports `reviewer-core`'s TypeScript
-sources through a tsconfig alias. Consequence: changing `reviewer-core` requires
-no build — but breaking the server is easy, and no package manager will warn you.
+Five separate install boundaries — four `pnpm-lock.yaml` (`server/`, `client/`,
+`e2e/`, `mcp/`) plus `reviewer-core/`'s own `package-lock.json` — while `server`
+imports `reviewer-core`'s TypeScript sources through a tsconfig alias.
+Consequence: changing `reviewer-core` requires no build — but breaking the
+server is easy, and no package manager will warn you.
 
 ### 7.2. `@devdigest/shared` exists in two copies, and they have already drifted
 

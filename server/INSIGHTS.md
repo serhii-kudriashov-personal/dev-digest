@@ -361,6 +361,89 @@ two consumers that do not translate are `renderIntentBlock`
 (`server/src/modules/intent/helpers.ts`) and
 `client/src/app/repos/[repoId]/pulls/[number]/_components/IntentCard/`.
 
+### 2026-08-11 — `repo_index_state.status='partial'` does NOT mean "a working index": it can mean the whole T3 block was skipped, and then "no callers" is indistinguishable from "no data"
+
+**Rule:** never branch on `repo_index_state.status` alone before reading anything
+that joins `file_rank`. `partial` covers two states that look identical to a
+consumer and are not:
+
+1. a working index that ran out of budget partway — callers resolve fine;
+2. an index where the entire tier-3 block was skipped, so `file_edges`,
+   `file_rank` and `file_facts` were **never written**.
+
+In case 2, `getResolvedCallers` INNER JOINs `references` to `file_rank`
+(`src/modules/repo-intel/repository.ts:503-531`) and returns **zero rows** — byte
+-identical to "this symbol genuinely has no callers". Any feature that renders
+that as an empty list is asserting an absence it never established.
+
+The cheap capability probe, needing no new SQL and no repository edit:
+
+```ts
+// only when status === 'partial'; 'full' already implies the rank step succeeded
+const rankGraphPresent =
+  (await container.repoIntel.getTopFilesByRank(repoId, 1)).length > 0;
+```
+
+**Why:** `tryGetIndexState` deliberately does **not** flag `partial` as degraded —
+its own comment says "'partial' is still a working index — no degraded flag"
+(`repository.ts:215-218`), which is correct for its purpose and misleading as a
+capability signal. And the obvious alternative signal is a trap: **`stats.ranked`
+is written only by the FULL pipeline** (`pipeline/full.ts:260`) and never by the
+incremental one (`pipeline/incremental.ts:245-256` writes `edgesWritten` but no
+`ranked`), so a healthy incremental refresh that rewrote every rank row would
+report "no rank graph". `tryGetIndexState` does not project `stats.ranked` at all,
+so it is not even reachable through the facade — reading it would mean widening
+the projection for a signal that is wrong.
+
+Note also the asymmetry that makes `full` cheap: the pipeline records `full` only
+when the graph/rank step succeeded (`pipeline/full.ts:252-254`;
+`pipeline/incremental.ts:243` additionally requires the prior state to be `full`),
+so the probe is owed on `partial` and on nothing else — the happy path pays
+nothing.
+
+**Where:** the probe and the truth table are
+`src/modules/blast/helpers.ts` (`decideBlastState`, row 5 → `no_rank_graph`),
+called from `src/modules/blast/service.ts`; the empirical proof is
+`server/test/blast.it.test.ts` case 3, which deletes every `file_rank` row for the
+repo under `status='partial'` and asserts `state:'degraded'`,
+`reason:'no_rank_graph'` and a non-empty `summary` rather than `downstream: []`
+alone. Reasoning of record: `specs/l06-blast-radius.md` §Contracts 3 and Risk 2.
+
+### 2026-08-11 — A read-time cap named `MAX_..._PER_SYMBOL` was applied to the FLATTENED list, so every symbol after the first got zero
+
+**Rule:** when a cap's name says "per X", check where the `.slice()` actually
+sits. `tryPersistentBlast` ended with
+`callers.slice(0, MAX_CALLERS_PER_SYMBOL)` over the **flattened, rank-sorted**
+caller list, so with 20 callers on the hottest symbol every later changed symbol
+came back with an empty array. A consumer cannot tell that from "this symbol has
+no callers", which is the exact masking such a feature must not do.
+
+Two things the fix needs beyond moving the slice:
+
+- **Make the sort total first.** `callers.sort((a, b) => b.rank - a.rank)` is not
+  a deterministic order here: every `rank` is `0` whenever the hotness-free
+  PageRank collapses (`hotness` is always 0 under Option B, and `rank = pagerank`),
+  and symmetric files tie exactly. Without `|| file ASC || line ASC` the retained
+  20 differ between two calls on identical data.
+- **Restate the new bound in the docblock.** The method can now return
+  `MAX_CALLERS_PER_SYMBOL × changedSymbols.length` rows, not 20; the consuming
+  slice is what bounds the total (`blast/constants.ts`'s
+  `MAX_CHANGED_SYMBOLS = 50` → ≤ 1000).
+
+Fixing it in the facade rather than in the consumer was safe because
+`getBlastRadius` had **no production caller at all** at the time
+(`rg -n getBlastRadius src test` → the interface, the impl, a docblock and one
+shape test) and no test pinned the combined semantics. Check that before changing
+a facade's semantics; if a caller exists, the per-symbol grouping still belongs in
+the facade, not duplicated in each consumer.
+
+**Where:** `src/modules/repo-intel/service.ts` (`tryPersistentBlast`, the
+`keptPerSymbol` map and the three-key sort) with the new bound stated in its
+docblock; the constant is `src/modules/repo-intel/constants.ts:30`; the hermetic
+proof is `server/test/repo-intel-blast-clamp.test.ts` (25 callers × 2 symbols → 20
+each, top-of-group retained, stable across two calls with every rank tied), and
+the end-to-end one is `server/test/blast.it.test.ts` case 7.
+
 ### 2026-08-09 — `normalizePath` strips `a/` and `b/` as diff prefixes, so a real top-level directory with either name is treated as repo-root
 
 **Rule:** anything that compares a `findings.file` path against a `pr_files.path`
@@ -775,6 +858,67 @@ than relying on config auto-discovery. Same trap applies to any future
 (`"arch"`); `"type": "module"` at `server/package.json:4`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-11 — Blast Radius `DownstreamImpact.symbol` was not a unique key across `blast.downstream` — two changed symbols can share a bare name from different files
+
+**Symptom:** the console showed `Encountered two children with the same key,
+'renderWithIntl'` from `BlastRadiusCard.tsx`. Not a hypothetical fixture: two
+test files in the PR's diff each declared a local `renderWithIntl` helper, so
+the indexer emitted two `changed_symbols` rows with the same `name` but
+different `file`.
+
+**Cause:** `foldBlastResult` (`src/modules/blast/helpers.ts`) grouped callers
+and the "own declaring file" exclusion by `sym.name` alone —
+`declFileBySymbol: Map<string, string>` kept only the FIRST file seen per name.
+For the second same-named symbol, a caller sitting in *its* declaring file was
+not recognized as a self-reference and leaked into the output as a fake
+downstream caller. On the client, `entry.symbol` was the React key (duplicate
+→ the warning) and `declFile` was resolved by
+`changed_symbols.find(sym => sym.name === entry.symbol)`, which always
+returned the first match — mislabeling the second entry's declaring file.
+`mcp/src/shape.ts`'s `toConciseBlast` had the identical bug: `downstreamBySymbol`
+was a `Map` keyed by `d.symbol` alone.
+
+The root limitation runs deeper than any of those call sites: `BlastCallerRow.
+viaSymbol` (`src/modules/repo-intel/types.ts:67`) is a bare name, and
+`getResolvedCallers` (called from `tryPersistentBlast`,
+`src/modules/repo-intel/service.ts:348`) resolves references by name via a
+`Set<string>`, not by declaration id. The persisted index cannot tell which of
+two same-named declarations a given caller actually reaches — that is a real
+resolution-granularity limit, not just a bug in the fold step, and fixing it
+would mean threading declaration ids through the indexer's reference-resolution
+query, well beyond a `helpers.ts` fix.
+
+**Takeaway:** added `file: z.string()` to the `DownstreamImpact` contract
+(`src/vendor/shared/contracts/brief.ts` — **and** the `client/src/vendor/shared`
+copy, per root AGENTS.md's "change the canon, sync the copy in the same
+commit") so every entry carries its own declaring file, giving every consumer
+an honest unique key (`` `${file}:${symbol}` ``) even where caller *attribution*
+between two same-named declarations still can't be told apart. `foldBlastResult`
+now collects **every** declaring file per name into a `Set` before excluding
+self-references, so the exclusion is correct regardless of which same-named
+declaration a caller sits near; both same-named entries still legitimately
+share the same caller group (the index genuinely can't split them further),
+but each now carries its correct, distinct `file`. When adding a field to a
+wire contract that already has a "this is the only shape a consumer keys on"
+assumption baked in three places (client React key, an MCP dedup `Map`, a
+lookup `.find()`), grep every reader of that field's name before assuming the
+fix is local to where the field is computed.
+
+**Where:** contract — `src/vendor/shared/contracts/brief.ts:31-38` (canon) and
+`client/src/vendor/shared/contracts/brief.ts:31-38` (copy). Fold —
+`src/modules/blast/helpers.ts:142-201` (`foldBlastResult`). Root limitation —
+`src/modules/repo-intel/types.ts:63-72` (`BlastCallerRow`),
+`src/modules/repo-intel/service.ts:321-413` (`tryPersistentBlast`,
+`getResolvedCallers` call at `:348`). Client —
+`client/src/app/repos/[repoId]/pulls/[number]/_components/BlastRadiusCard/BlastRadiusCard.tsx`
+and `BlastGraph.tsx` (both re-keyed on `` `${file}:${symbol}` ``). MCP —
+`mcp/src/shape.ts` (`toConciseBlast`'s `downstreamBySymbol`), `mcp/src/types.ts`
+(`isBlastPayload`). Tests updated for the new required field: `server/test/
+blast-helpers.test.ts`, `server/test/contracts.test.ts`, `mcp/test/
+errors.test.ts`, and the client's `BlastRadiusCard.test.tsx`. Also documented
+in `docs/blast-radius.md` under "Folding, and the two things the facade does
+not do".
 
 ### 2026-08-09 — Deleting an `agent_runs` row does NOT stop the run: the task keeps executing, keeps spending, and writes its review into the DB minutes after the row is gone
 

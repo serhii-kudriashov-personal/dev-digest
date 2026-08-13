@@ -4,6 +4,7 @@ import {
   Finding,
   Intent,
   BlastRadius,
+  BlastRadiusResponse,
   Risks,
   PrHistory,
   SmartDiff,
@@ -122,20 +123,30 @@ describe('AI contracts parse fixtures', () => {
     expect(() =>
       Intent.parse({ intent: 'x', in_scope: ['a'], out_of_scope: ['b'] }),
     ).not.toThrow();
+    const blast = {
+      changed_symbols: [{ name: 'rateLimit', file: 'a.ts', kind: 'function' }],
+      downstream: [
+        {
+          symbol: 'rateLimit',
+          file: 'a.ts',
+          callers: [{ name: 'publicRouter', file: 'b.ts', line: 23 }],
+          endpoints_affected: ['GET /x'],
+          crons_affected: ['c'],
+        },
+      ],
+      summary: 's',
+    };
+    // The PERSISTED shape stays byte-identical: `BlastRadius` is embedded in
+    // `PrBrief` (the `pr_brief.json` jsonb column), so it must keep parsing a
+    // document that has no `state` key at all.
+    expect(() => BlastRadius.parse(blast)).not.toThrow();
+    // `state` lives on the non-persisted RESPONSE wrapper, where it is required…
     expect(() =>
-      BlastRadius.parse({
-        changed_symbols: [{ name: 'rateLimit', file: 'a.ts', kind: 'function' }],
-        downstream: [
-          {
-            symbol: 'rateLimit',
-            callers: [{ name: 'publicRouter', file: 'b.ts', line: 23 }],
-            endpoints_affected: ['GET /x'],
-            crons_affected: ['c'],
-          },
-        ],
-        summary: 's',
-      }),
+      BlastRadiusResponse.parse({ ...blast, state: 'degraded', reason: 'no_rank_graph' }),
     ).not.toThrow();
+    expect(BlastRadiusResponse.safeParse(blast).success).toBe(false);
+    // …and `reason` is `.nullish()`, so the 'full' path may omit it entirely.
+    expect(() => BlastRadiusResponse.parse({ ...blast, state: 'full' })).not.toThrow();
     expect(() =>
       Risks.parse({
         risks: [{ kind: 'security', title: 't', explanation: 'e', severity: 'high', file_refs: [] }],

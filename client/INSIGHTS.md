@@ -536,6 +536,49 @@ the nonces that do the opposite job are `.../SmartDiffViewer/SmartDiffViewer.tsx
 (`ScrollTarget.seq`) and `.../ReviewRunAccordion/ReviewRunAccordion.tsx`
 (`targetNonce`).
 
+### 2026-08-11 — A CSS custom property that does not exist fails SILENTLY, and `IntentCard/styles.ts` already ships three of them — read `styles.css`, never a neighbouring `styles.ts`
+
+**Quirk:** `color: "var(--text-tertiary)"` typechecks, lints, renders, and passes
+every test — and does nothing, because `--text-tertiary` is **not defined**. The
+design system declares `--text-primary`, `--text-secondary` and `--text-muted`
+only (`src/vendor/ui/styles.css:15-17`, mirrored for light at `:55-57`). The
+element silently inherits its parent's colour, which is close enough that nobody
+notices in review.
+
+Three more that plausible names get wrong: there is **no `--danger`/`--danger-bg`**
+(the danger tokens are `--crit` / `--crit-bg`), **no `--bg-subtle`** (the raised
+surfaces are `--bg-surface`, `--bg-elevated`, `--bg-hover`), and `--font-mono`
+**does** exist (`:114`) so the usual `"var(--font-mono, ui-monospace), monospace"`
+fallback chain is noise here.
+
+This is the same class as the 2026-08-05 `IconName` entry below — read the
+registry, not the docs and not a sibling — except worse in one way: a wrong
+`IconName` is a typecheck error with a 64-name union in the message, while a wrong
+CSS variable has **no gate at all**. Nothing in `pnpm typecheck`, `pnpm lint` or
+`pnpm test` can see it, so it has to be checked by hand.
+
+**Workaround:** grep the token block before writing a `styles.ts`, and do not copy
+a colour from an adjacent component's styles:
+
+```sh
+grep -nE '^\s+--' client/src/vendor/ui/styles.css | sed -n '1,60p'
+```
+
+`IntentCard/styles.ts` is specifically the wrong file to copy from — it uses
+`--text-tertiary` in `listTitle`, `meta` and `nodeFile`-equivalent positions.
+Matching it visually means using `--text-muted`, which is what those labels
+render as anyway. Left as-is rather than fixed as a drive-by; a deliberate sweep
+is its own task.
+
+**Where:** the token blocks are `src/vendor/ui/styles.css:10-45` (dark) and
+`:49-80` (light), `--font-mono` at `:114`; the file carrying the undefined token
+is `src/app/repos/[repoId]/pulls/[number]/_components/IntentCard/styles.ts`; the
+new file that uses only defined tokens is
+`.../_components/BlastRadiusCard/styles.ts`, with the danger pair named in
+`.../BlastRadiusCard/constants.ts` (`STATE_BADGE`). Related: the `IconName`
+registry entry (2026-08-05) below — `Radar` is **not** registered, so a
+blast-radius card icon has to be one of the ~90 keys that are (`Workflow` here).
+
 ### 2026-08-09 — `userEvent` unmounts a HOVER-gated control before your click lands, and the symptom is a silent no-op
 
 **Quirk:** every `@testing-library/user-event` API call re-enters the pointer,
@@ -763,6 +806,30 @@ s.label}`); consumers are `src/components/findings-hover-card/SeverityBadges.tsx
 and the card's own per-finding rows.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-11 — Blast Radius: `entry.symbol` is not a unique React key — two changed symbols can share a bare name from different files
+
+**Symptom:** `Encountered two children with the same key, 'renderWithIntl'` in
+`BlastRadiusCard.tsx` — not synthetic, a real PR with two test files each
+declaring a local `renderWithIntl` helper.
+
+**Cause:** `DownstreamImpact` (the wire shape) carried only a `symbol` name,
+which two changed symbols in different files can share. `SymbolNode` was keyed
+on `entry.symbol` alone, `BlastGraph`'s `<g>` on `node.symbol` alone, and the
+card guessed each entry's declaring file with
+`changed_symbols.find(sym => sym.name === entry.symbol)`, which always
+resolves to the FIRST matching file — silently mislabeling the second entry.
+
+**Takeaway:** the contract now carries `file` on every `DownstreamImpact`
+(synced in both `src/vendor/shared` and the server canon — root AGENTS.md).
+Key on `` `${entry.file}:${entry.symbol}` ``, and read `entry.file` directly
+instead of reconstructing it by matching on a name that is not guaranteed
+unique. Full root-cause writeup — including why the server's persisted index
+genuinely cannot attribute a caller to one of two same-named declarations —
+is in `server/INSIGHTS.md` (2026-08-11).
+
+**Where:** `src/app/repos/[repoId]/pulls/[number]/_components/BlastRadiusCard/BlastRadiusCard.tsx`,
+`BlastGraph.tsx`.
 
 ### 2026-08-09 — A `retry: false` query for a resource that does not exist YET caches the 404 forever when no mutation invalidates its key
 

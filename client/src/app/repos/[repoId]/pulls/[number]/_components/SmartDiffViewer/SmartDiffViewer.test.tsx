@@ -10,13 +10,18 @@
  * EXIST — the navigation test throws `not a function` without the stub below.
  * It is stubbed locally rather than in `src/test/setup.ts`: that is a shared
  * file and this is still the only consumer.
+ *
+ * `lineTarget` is a required prop as of L06: the card-open + scroll-to-line
+ * orchestration moved into `components/diff-viewer` when the Blast Radius card
+ * became its second consumer. The harness below calls the real hook, so these
+ * tests still exercise the production behaviour rather than a fake.
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
 import type { FindingRecord, PrFile, SmartDiffGroup } from "@devdigest/shared";
-import type { DiffCommentApi } from "@/components/diff-viewer";
+import { useDiffLineTarget, type DiffCommentApi } from "@/components/diff-viewer";
 import messages from "../../../../../../../../messages/en/brief.json";
 import shellMessages from "../../../../../../../../messages/en/shell.json";
 import { SmartDiffViewer } from "./SmartDiffViewer";
@@ -81,10 +86,26 @@ const finding = (over: Partial<FindingRecord> & { file: string; start_line: numb
   ...over,
 });
 
-function renderViewer(props: Partial<React.ComponentProps<typeof SmartDiffViewer>> = {}) {
+type ViewerProps = Partial<Omit<React.ComponentProps<typeof SmartDiffViewer>, "lineTarget">>;
+
+/** Owns the real `useDiffLineTarget` instance, the way `DiffTab` does. */
+function Harness(props: ViewerProps) {
+  const lineTarget = useDiffLineTarget();
+  return (
+    <SmartDiffViewer
+      groups={groups()}
+      files={FILES}
+      findings={[]}
+      {...props}
+      lineTarget={lineTarget}
+    />
+  );
+}
+
+function renderViewer(props: ViewerProps = {}) {
   return render(
     <NextIntlClientProvider locale="en" messages={{ brief: messages, shell: shellMessages }}>
-      <SmartDiffViewer groups={groups()} files={FILES} findings={[]} {...props} />
+      <Harness {...props} />
     </NextIntlClientProvider>,
   );
 }

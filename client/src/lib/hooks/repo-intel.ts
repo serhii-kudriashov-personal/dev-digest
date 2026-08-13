@@ -44,6 +44,12 @@ export function useResyncRepoIntel(repoId: string | null | undefined) {
     mutationFn: () => api.post<{ status: string }>(`/repos/${repoId}/resync`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["repo-intel-state", repoId] });
+      // A resync is the only user action that can change what `GET
+      // /pulls/:id/blast` answers, so the Blast Radius card must not keep
+      // rendering the previous index's state. A PREFIX invalidation is correct
+      // here: blast is keyed by `prId` while resync is keyed by `repoId`, so the
+      // specific PRs to invalidate are not knowable from this scope.
+      qc.invalidateQueries({ queryKey: ["blast"] });
     },
   });
 }

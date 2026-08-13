@@ -3,7 +3,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { SectionLabel, Button, Chip } from "@devdigest/ui";
-import { DiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
+import { DiffViewer, useDiffLineTarget, type DiffCommentApi } from "@/components/diff-viewer";
 import { usePrComments, useCreatePrComment, usePrReviews } from "@/lib/hooks/reviews";
 import { useSmartDiff } from "@/lib/hooks/smart-diff";
 import { notify } from "@/lib/toast";
@@ -22,9 +22,24 @@ interface DiffTabProps {
    * browser tab — so this tab only reports which finding was clicked.
    */
   onGoToFinding?: (finding: FindingRecord) => void;
+  /**
+   * `<path>:<line>` handed over from another tab (the Blast Radius card's caller
+   * rows). `PrDetailView` reads it from the URL and owns clearing it.
+   */
+  goto?: string | null;
+  /** Called once the target has been handed to the viewer, so the param clears. */
+  onGotoConsumed?: () => void;
 }
 
-export function DiffTab({ prId, filesCount, files, canComment, onGoToFinding }: DiffTabProps) {
+export function DiffTab({
+  prId,
+  filesCount,
+  files,
+  canComment,
+  onGoToFinding,
+  goto,
+  onGotoConsumed,
+}: DiffTabProps) {
   const t = useTranslations("brief");
   const { data: comments } = usePrComments(prId);
   const create = useCreatePrComment(prId);
@@ -64,6 +79,35 @@ export function DiffTab({ prId, filesCount, files, canComment, onGoToFinding }: 
   // renders. A reviewer never loses the diff because a sort could not be built.
   const showSmart = smartOrder && !!smart;
 
+  // This tab owns the card-open + scroll-to-line instance, because it renders
+  // whichever viewer applies — so a target set from either order mode lands.
+  const lineTarget = useDiffLineTarget();
+
+  // The Effect below must fire on a NEW `goto` and on nothing else. `files` is a
+  // fresh array on every PR refetch and `onGotoConsumed` is an inline arrow from
+  // the parent, so both go through refs rather than into the dependency list —
+  // reading them there would re-scroll on an unrelated render, and suppressing
+  // the lint rule instead would hide exactly that.
+  const latest = React.useRef({ files, onGotoConsumed, goTo: lineTarget.goTo });
+  latest.current = { files, onGotoConsumed, goTo: lineTarget.goTo };
+
+  // Synchronising with the URL, which is an external system: `?goto=` arrives
+  // from another tab and has to become one imperative scroll, then be cleared so
+  // the same value can arrive again.
+  React.useEffect(() => {
+    if (!goto) return;
+    // rsplit on the LAST colon: the line number never contains one, a path may.
+    const sep = goto.lastIndexOf(":");
+    if (sep <= 0) return;
+    const path = goto.slice(0, sep);
+    const line = Number(goto.slice(sep + 1));
+    if (!Number.isInteger(line) || line <= 0) return;
+    // No card exists for a file outside this PR's diff — nothing to open.
+    if (!latest.current.files.some((f) => f.path === path)) return;
+    latest.current.goTo(path, line);
+    latest.current.onGotoConsumed?.();
+  }, [goto]);
+
   return (
     <section>
       <SectionLabel
@@ -98,9 +142,10 @@ export function DiffTab({ prId, filesCount, files, canComment, onGoToFinding }: 
           findings={findings}
           commenting={commenting}
           onFindingClick={onGoToFinding}
+          lineTarget={lineTarget}
         />
       ) : (
-        <DiffViewer files={files} commenting={commenting} />
+        <DiffViewer files={files} commenting={commenting} lineTarget={lineTarget} />
       )}
     </section>
   );

@@ -73,13 +73,32 @@ export function PrDetailView() {
 
   const tab = search.get("tab") ?? DEFAULT_TAB;
   const traceRunId = search.get("trace");
-  const setParam = (key: string, val: string | null) => {
+  /**
+   * Update several search params in ONE navigation. Two sequential `setParam`
+   * calls would each rebuild from the same `search` snapshot, so the second
+   * `router.replace` drops the first update — and the Blast Radius handoff sets
+   * `tab` and `goto` together.
+   */
+  const setParams = (entries: Record<string, string | null>) => {
     const sp = new URLSearchParams(search.toString());
-    if (val == null) sp.delete(key);
-    else sp.set(key, val);
+    for (const [key, val] of Object.entries(entries)) {
+      if (val == null) sp.delete(key);
+      else sp.set(key, val);
+    }
     router.replace(`/repos/${repoId}/pulls/${number}${sp.toString() ? `?${sp.toString()}` : ""}`);
   };
+  const setParam = (key: string, val: string | null) => setParams({ [key]: val });
   const setTab = (t: string) => setParam("tab", t);
+
+  /**
+   * `?goto=<path>:<line>` — the Blast Radius card's cross-tab handoff.
+   *
+   * THIS component owns every search param on the screen and is the only one that
+   * clears `goto`: it does so when `DiffTab` reports the target handed off, which
+   * is also what makes a second click on the same caller row work (the param has
+   * to be absent for the next identical value to register as a change).
+   */
+  const goto = search.get("goto");
 
   // Severity filter: ONE selection for the whole page (each run's accordion
   // still shows its own counts). Living in the query makes it survive reload
@@ -174,7 +193,19 @@ export function PrDetailView() {
 
       <div style={s.tabBody}>
         {tab === "overview" && (
-          <OverviewTab prId={prId} headSha={pr.head_sha} prBody={pr.body} />
+          <OverviewTab
+            prId={prId}
+            headSha={pr.head_sha}
+            prBody={pr.body}
+            repoFullName={repoFullName}
+            files={pr.files}
+            // One `router.replace`, not two: `tab` and `goto` have to land in the
+            // same navigation or the second call would rebuild from the same
+            // `search` snapshot and drop the first.
+            onOpenCaller={(path, line) =>
+              setParams({ tab: "diff", goto: `${path}:${line}` })
+            }
+          />
         )}
 
         {tab === "findings" && (
@@ -214,6 +245,8 @@ export function PrDetailView() {
             files={pr.files}
             canComment={pr.status === "open"}
             onGoToFinding={goToFinding}
+            goto={goto}
+            onGotoConsumed={() => setParam("goto", null)}
           />
         )}
       </div>

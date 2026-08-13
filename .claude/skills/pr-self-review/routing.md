@@ -48,6 +48,14 @@ specific row wins for *which sections* to read; the general row still applies.
 | `reviewer-core/src/llm/**` | `zod` | structured output is Zod → JSON Schema |
 | `reviewer-core/test/**` | `backend-onion-architecture` §9 | ring 1 is tested hermetically — a stub `LLMProvider`, no key, no network, no Docker |
 
+## MCP server — `mcp/`
+
+| Path | Load | Sections that matter most |
+|---|---|---|
+| `mcp/src/**` | `security` | input handling, untrusted content, secrets, logging to stderr |
+| `mcp/src/api-client.ts` | `security` | every outbound call; the base URL is env-derived, never a tool argument |
+| `mcp/test/**` | — | no DB — tests are `*.test.ts`, never `*.it.test.ts` |
+
 ## Contracts, and everything else
 
 | Path | Load | Note |
@@ -66,6 +74,10 @@ specific row wins for *which sections* to read; the general row still applies.
 
 Say so. A `docs/`-only diff loads nothing, and the coverage footer must show
 zero skills rather than an unqualified "reviewed, clean". Silence is not a pass.
+
+`backend-onion-architecture` does **not** cover `mcp/**`: the rings it addresses
+are `server/` and `reviewer-core/`, so opening it for an MCP file spends context
+and invents constraints — the same reason no row hands it a `.tsx` file.
 
 ## Scope discipline
 
