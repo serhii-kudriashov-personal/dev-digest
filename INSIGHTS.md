@@ -24,6 +24,7 @@ entry nobody is told to open.
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-16 | Works | `specs/**`, design review, `.claude/agents/spec-writer.md` | Check every string a design mock draws against the feature's own specified input list, not against plausibility |
 | 2026-08-16 | Errors | `INSIGHTS.md` index rows, superseding an entry, `.claude/agents/**` | A superseded entry whose INDEX ROW still states the stale claim keeps propagating it — the index is the part agents actually read |
 | 2026-08-16 | Doesn't | `plans/**`, `Done when` checks, `.claude/agents/implementation-planner.md` | A literal-string `Done when` grep goes unsatisfiable when another resolved open question in the same plan introduces the matching token |
 | 2026-08-11 | Works | `.claude/agents/**`, subagent orchestration | Parallel `researcher` on DISJOINT scopes, then one planner told to "verify and correct" a supplied inventory |
@@ -94,6 +95,31 @@ Fixes · Open = Open Questions.
 ---
 
 ## What Works
+
+### 2026-08-16 — Check every string a design mock draws against the feature's own specified input list, not against plausibility
+
+**Pattern:** during `spec-writer`'s design review, treat each concrete detail a
+mockup renders as a claim about what the model *can* produce, and verify it
+against the feature's stated inputs — not against whether the string looks
+reasonable. A mock will happily draw a specific, plausible-sounding output that
+its own inputs cannot actually produce.
+
+**Why:** the "PR Why + Risk Brief" mock (`specs/2026-08-16-pr-why-risk-brief.md`)
+showed a review-focus reason `src/config.ts:12 — live Stripe key (sk_live_...)
+committed in plaintext`. The feature's specified inputs are intent, blast
+radius, diff stats, the linked issue and specs — raw diff hunk bodies are
+explicitly excluded — so nothing in the assembled model input tells it what is
+actually on line 12. The string reads as entirely plausible; only cross-checking
+it against the input list (not the plausibility of the claim) surfaces that it
+is unproducible as specified. This is the same family as the two truthfulness
+traps already on this index — uncalibrated confidence and unknown-cost-as-zero
+— except one step earlier in the pipeline: it is caught at design-review time,
+before acceptance criteria are written, not after the model is wired up.
+
+**Where:** `specs/2026-08-16-pr-why-risk-brief.md` (design review row #12,
+"Truthfulness"); the fix landed as AC-17 through AC-21 (findings added as a
+sixth, restricted input) plus AC-24 (secret-shaped literals redacted from
+stored/displayed/logged text).
 
 ### 2026-08-11 — Parallel `researcher` runs on DISJOINT scopes, then one `planner` told to "verify and correct" a supplied inventory — the corrections are the deliverable
 
