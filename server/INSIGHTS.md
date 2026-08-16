@@ -9,6 +9,53 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ---
 
+## Index
+
+This file is ~17k tokens. **Read this table first, then open only the entries
+whose `Scope` intersects the files you are about to change.** Rules and rationale
+for the index are in root `INSIGHTS.md` §Index; **appending an entry means
+appending its row here in the same edit.**
+
+| Date | Section | Scope | Entry |
+|---|---|---|---|
+| 2026-08-09 | Works | `server/test/**`, response assertions | A value returned but rendered NOWHERE has no UI that can notice it breaking — assert it at the boundary |
+| 2026-08-08 | Works | `server/src/modules/**/service.ts`, facade tests | A never-throw facade is untestable through a caller with its own `.catch` — test the guarantee at the service |
+| 2026-08-03 | Works | `server/test/*.it.test.ts`, vitest config | `--no-file-parallelism` makes the integration suite deterministic AND faster; re-running is the wrong fix |
+| 2026-08-08 | Doesn't | `server/test/reviews.it.test.ts`, `run-executor.ts`, provider mocks | A pre-work step made the suite spend REAL money — `.env` holds live keys and the file mocks only ONE provider |
+| 2026-08-05 | Doesn't | `server/src/modules/**`, ports from upstream | Porting `upstream/reference/full-build`'s conventions module fails three of this repo's gates |
+| 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
+| 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
+| 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-10 | Patterns | prompts under `server/src/modules/**`, intent | A prompt that summarises user text must state its OUTPUT LANGUAGE |
+| 2026-08-11 | Patterns | `server/src/modules/repo-intel/**`, blast radius | `repo_index_state.status='partial'` does NOT mean "a working index" |
+| 2026-08-11 | Patterns | `server/src/modules/repo-intel/service.ts` | A cap named `MAX_..._PER_SYMBOL` was applied to the FLATTENED list |
+| 2026-08-09 | Patterns | `server/src/modules/smart-diff/**`, diff paths | `normalizePath` strips `a/` and `b/`, so a real top-level directory with either name breaks |
+| 2026-08-08 | Patterns | `server/.dependency-cruiser.cjs`, `server/src/platform/**` | `no-cross-slice-import` scopes its `from` to `^src/modules/` — which is why the container may import a slice's service |
+| 2026-08-05 | Patterns | `reviewer-core/src/prompt.ts` callers, `server/src/modules/**` | A non-review caller of `assemblePrompt` must use the `diff` slot, and will be mislabelled |
+| 2026-08-02 | Patterns | `server/src/modules/pulls/status.ts` | A PR-list rollup may already exist there — and its docblock may lie |
+| 2026-08-09 | Patterns | `server/src/db/schema/**`, migrations | `findings` and `reviews` ARE indexed now — check the schema before you owe a migration |
+| 2026-08-02 | Patterns | `server/src/db/schema/**` | The `findings` table has no indexes at all — a FK is not an index |
+| 2026-08-02 | Patterns | `agents.system_prompt`, `docs/agent-prompts/**` | The live agent prompt is the DB column, not the markdown file |
+| 2026-08-08 | Tools | model ids, model config | `deepseek/deepseek-v4-flash` and `…-flash-latest` are DIFFERENT models at different prices |
+| 2026-08-05 | Tools | `server/src/db/migrations/**`, `pnpm db:generate` | `db:generate` goes INTERACTIVE when one migration both drops and adds a column |
+| 2026-08-05 | Tools | `server/test/*.it.test.ts`, running `pnpm test` | `pnpm test` is red here for an environmental reason: 8 files start 8 Postgres containers at once |
+| 2026-08-05 | Tools | `server/src/modules/**/routes.ts`, uploads | A base64 upload route needs its OWN `bodyLimit` |
+| 2026-08-03 | Tools | `server/src/modules/**/repository.ts`, transactions | A Drizzle transaction handle is NOT a `Db` — compose with `DbOrTx` |
+| 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | `octokit` and `p-queue` are UNRESOLVABLE to dependency-cruiser |
+| 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | The depcruise config must be `.cjs`, and `--init` writes the wrong extension |
+| 2026-08-11 | Errors | `server/src/modules/repo-intel/**`, blast contracts | `DownstreamImpact.symbol` is not unique across `blast.downstream` |
+| 2026-08-09 | Errors | `server/src/modules/reviews/**`, `agent_runs` | Deleting an `agent_runs` row does NOT stop the run — it keeps spending |
+| 2026-08-08 | Errors | `server/test/reviews.it.test.ts`, traces | The `prompt_assembly` flake is a run-vs-trace ordering race |
+| 2026-08-05 | Errors | `server/test/reviews.it.test.ts` | It fails on `prompt_assembly` for reasons that have nothing to do with your change |
+| 2026-08-03 | Errors | `*/src/vendor/shared/contracts/**`, DTOs | The jsonb `.nullish()` trap, second instance — and the fix is NOT to loosen the DTO |
+| 2026-08-02 | Errors | `server/src/modules/reviews/**` | `completeAgentRun`'s parameter type is declared TWICE |
+| 2026-08-08 | Open | `server/src/modules/settings/**`, §12 debt | Two slices import `settings/feature-models.ts`, and the §12 fix would break both |
+| 2026-08-05 | Open | metrics, `server/src/modules/**` | `pull_rate` counts pre-provenance runs as "not pulled" |
+
+Section keys as in root `INSIGHTS.md` §Index.
+
+---
+
 ## What Works
 
 ### 2026-08-09 — A value that is returned but rendered NOWHERE has no UI that can notice it breaking — assert it at the boundary that returns it

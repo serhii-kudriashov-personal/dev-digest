@@ -9,6 +9,85 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ---
 
+## Index
+
+This file is ~28k tokens. **Read this table first, then open only the entries
+whose `Scope` intersects the files you are about to change.** Reading the whole
+file "just in case" spends most of a session's orientation budget on traps
+belonging to code the change never reaches — and surplus context is not only a
+token cost, it is a suggestion (2026-08-02, "Stacking convention blocks").
+
+The index is navigation, not content: a row is never a substitute for the entry,
+and a row can never be edited to change what an entry says. **Appending an entry
+means appending its row here in the same edit** — an entry with no row is an
+entry nobody is told to open.
+
+| Date | Section | Scope | Entry |
+|---|---|---|---|
+| 2026-08-11 | Works | `.claude/agents/**`, subagent orchestration | Parallel `researcher` on DISJOINT scopes, then one planner told to "verify and correct" a supplied inventory |
+| 2026-08-09 | Works | `specs/**`, acceptance criteria, test fixtures | Phrase an acceptance criterion over FIELDS, never over serialized bytes |
+| 2026-08-09 | Works | git plumbing, `demo/*` branches, demo fixtures | Build a demo PR fixture with a temporary `GIT_INDEX_FILE` |
+| 2026-08-08 | Works | `.claude/agents/plan-verifier.md`, any spec-vs-code checker | A conformance checker extracts the obligations FIRST, and is never asked to "suggest a fix" |
+| 2026-08-05 | Works | `*/src/vendor/shared/contracts/**`, `reviewer-core/src/review/**` | `.describe()` the shared contract to make the model report a new field — then validate server-side |
+| 2026-08-05 | Works | any new feature; planning, inventory | A lesson feature is mostly already scaffolded: inventory Part 0 before writing a line |
+| 2026-08-03 | Works | debugging a test failure, `client/src/app/**` | To blame a refactor, rebuild the state just BEFORE it — `HEAD` is the wrong baseline |
+| 2026-08-03 | Works | `client/eslint.config.mjs`, introducing a linter | Grep the linter's own disable directives FIRST |
+| 2026-08-11 | Doesn't | subagent prompts, `rg`/`grep` sweeps | Asserting a negative from a truncated `grep -il \| head` — a subagent cannot reject the premise |
+| 2026-08-09 | Doesn't | `mcp/tsconfig.json`, any package that EMITS JS | Aliasing tsconfig `paths` at another package's `.ts` sources |
+| 2026-08-08 | Doesn't | subagent orchestration | Racing `researcher` against the planner, and patching a running agent by `SendMessage` |
+| 2026-08-06 | Doesn't | `scripts/pr-self-review.sh`, git worktrees | `pr-self-review` cannot gate a PR built in a secondary worktree |
+| 2026-08-04 | Doesn't | `scripts/pr-self-review.sh`, `.devdigest/` | A freshness gate cannot hash a tree that contains its own verdict file |
+| 2026-08-04 | Doesn't | `.claude/settings.json` hooks, `scripts/pr-self-review.sh` | A command gate matching substrings denies `echo "gh pr create"` |
+| 2026-08-03 | Doesn't | shell sweeps, `client/src/app/**` bracket routes | A `grep -l \| perl -pi` sweep fails silently: `grep` is ugrep, routes carry `[brackets]` |
+| 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
+| 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
+| 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
+| 2026-08-16 | Patterns | `.claude/skills/impl/**`, `plans/**`, any agent-to-agent remediation loop | An agent with a stay-in-scope contract cannot consume another agent's findings — materialise them into the artifact type it is licensed to execute |
+| 2026-08-14 | Patterns | `.claude/agents/**`, any cross-agent report or plan template | Two agents handing a document between them must agree on the literal HEADING, and nothing checks that they do |
+| 2026-08-14 | Patterns | `.claude/agents/**` preload decisions | Denying `Edit` makes the write one-shot, which overrides the "preload only what is unconditional" criterion |
+| 2026-08-14 | Patterns | `.claude/agents/**` tool and path scoping | An agent that must WRITE cannot be scoped by frontmatter — the allowlist is a body contract |
+| 2026-08-11 | Patterns | `*/src/vendor/shared/contracts/**`, jsonb columns | A REQUIRED new field on a jsonb-persisted contract goes on a sibling response schema |
+| 2026-08-09 | Patterns | `mcp/vitest.config.ts`, `mcp/**` imports | The missing `resolve.alias` IS the enforcement — do not "fix" it |
+| 2026-08-09 | Patterns | `mcp/src/types.ts`, cross-package imports, skills | A skill an agent LOADED is not a skill an agent APPLIED |
+| 2026-08-09 | Patterns | `reviewer-core/src/**` vs `server/src/modules/**/helpers.ts` | Purity is not an address — a pure function does not belong in `reviewer-core` just for having no I/O |
+| 2026-08-08 | Patterns | `reviewer-core/src/prompt.ts`, trace token counts | A new prompt slot is TWO edits: `promptTokenCounts` is a hand-written list |
+| 2026-08-08 | Patterns | `.claude/agents/**` | Check a body constraint's stated REASON against the frontmatter, not just its conclusion |
+| 2026-08-08 | Patterns | `.claude/agents/**`, `pr-self-review` | The verdict is written by the MODEL, so `Write` is the gate and denying `Skill` protects nothing |
+| 2026-08-08 | Patterns | `.claude/agents/README.md`, `.claude/skills/README.md` | Registering a new agent has a FOURTH surface: a prose sentence it silently falsifies |
+| 2026-08-08 | Patterns | `*/docs/**`, `*/specs/**`, `e2e/specs/**` | Package-level `docs/` and `specs/` already exist and are empty; `e2e/specs/` is not a spec directory |
+| 2026-08-08 | Patterns | `.claude/skills/pr-self-review/routing.md` | "Which skill governs this file" is read from `routing.md`, never from memory |
+| 2026-08-05 | Patterns | `server/src/modules/**` skills, `skills.enabled` | "Created disabled until vetted" is about WHO wrote the body, not `source !== 'manual'` |
+| 2026-08-05 | Patterns | `reviewer-core/src/prompt.ts`, untrusted input | A skill body must NOT be `wrapUntrusted`-wrapped |
+| 2026-08-02 | Patterns | `*CLAUDE.md`, `AGENTS.md` | `CLAUDE.md` is a symlink; the real instruction file is `AGENTS.md` |
+| 2026-08-02 | Patterns | `server/src/db/schema/runs.ts`, `reviews` | An `agent_runs` row and its `reviews` row can each outlive the other |
+| 2026-08-02 | Patterns | `agents.system_prompt`, `docs/agent-prompts/**` | A rule added to an agent prompt must state its own severity |
+| 2026-08-02 | Patterns | `reviewer-core/src/prompt.ts` | `## Skills / rules`, `## Relevant memory`, `## Project context` are wired to nothing |
+| 2026-08-02 | Patterns | `*/src/vendor/shared/contracts/**`, jsonb columns | A field added to a persisted-jsonb contract must be `.nullish()` |
+| 2026-08-02 | Patterns | cost display, `client/src/**`, `server/**` | Unknown cost is `null`, never `0` |
+| 2026-08-01 | Patterns | `server/src/modules/reviews/**`, cost pipeline | `costUsd` reaches the server and dies there |
+| 2026-08-14 | Tools | `scripts/pr-self-review.sh`, `.claude/agents/implementer.md` | `gates` selects by path PREFIX, so touching `server/INSIGHTS.md` runs `pnpm typecheck` and `pnpm arch` |
+| 2026-08-14 | Tools | `.claude/agents/**` frontmatter | A subagent `description:` may not contain a colon-space |
+| 2026-08-09 | Tools | dependency evaluation, lockfiles | `pnpm add --lockfile-only` in a scratch copy gives a real lockfile diff with no install |
+| 2026-08-08 | Tools | `zod`, structured output, `reviewer-core/src/llm/**` | A `.nullish()` `z.enum` DOES survive `toJsonSchema` |
+| 2026-08-08 | Tools | `reviewer-core/src/llm/**`, providers | OpenRouter structured-output support is per-ENDPOINT, not per-model |
+| 2026-08-08 | Tools | `.claude/agents/**` frontmatter | `skills:` and `permissionMode:` exist; `permissionMode: plan` needs a body rule because `ExitPlanMode` is stripped |
+| 2026-08-08 | Tools | `.claude/agents/**` | A subagent has no `AskUserQuestion`, and its tool list resolves differently in background |
+| 2026-08-04 | Tools | shell, `sed` / `read` on this machine | Two shell traps that both exit 0 with no output |
+| 2026-08-04 | Tools | `.claude/skills/**`, `skills-lock.json` | The lock covers only 8 of the 13 skills — four vendored-looking ones are ours |
+| 2026-08-02 | Tools | `.claude/skills/react-best-practices/**`, routing severity | A vendored skill is upstream opinion, not house policy |
+| 2026-08-02 | Tools | `findings`, any confidence display or gate | `findings.confidence` is not calibrated — never gate on it |
+| 2026-08-14 | Errors | `.claude/agents/README.md` | The counted prose was ALREADY wrong before the eighth agent |
+| 2026-08-09 | Errors | `server/src/vendor/shared/**`, build residue | Untracked `.js` inside the vendored contracts that no gate can see |
+| 2026-08-01 | Errors | `*/src/vendor/shared/**` | `@devdigest/shared` drifts silently between server and client |
+| 2026-08-11 | Open | `specs/**`, lesson numbering | Which lesson number is Blast Radius — three sources disagree |
+| 2026-08-02 | Open | `.github/workflows/**`, `server/package.json` `arch` | The `pnpm arch` boundary gate is not wired into CI |
+
+Section keys: Works = What Works · Doesn't = What Doesn't Work · Patterns =
+Codebase Patterns · Tools = Tool & Library Notes · Errors = Recurring Errors &
+Fixes · Open = Open Questions.
+
+---
+
 ## What Works
 
 ### 2026-08-11 — Parallel `researcher` runs on DISJOINT scopes, then one `planner` told to "verify and correct" a supplied inventory — the corrections are the deliverable
@@ -750,6 +829,161 @@ historical drift is its own task.
 
 ## Codebase Patterns
 
+### 2026-08-16 — An agent with a stay-in-scope contract cannot consume another agent's findings — materialise them into the artifact type it IS licensed to execute
+
+**Rule:** when you want agent B to act on agent A's report, check what B's
+contract lets it act *on*. If B is bound to an artifact type, do not hand it the
+report — **transcribe the accepted findings into that artifact type** and hand it
+that. The transcription is mechanical: one finding per unit, every field copied
+from the report, nothing invented.
+
+**Why:** the remediation loop after an architecture review looks like it should
+be "give `implementer` the findings and let it fix them". It cannot be.
+`implementer`'s hard constraint is *"Do not expand the plan. Extra refactors,
+drive-by cleanups and 'while I was in there' changes are out of scope even when
+they are improvements."* A review finding is not a plan item, so every fix it
+made would be a contract violation — and the agent that noticed this would be
+right to refuse, which is the worst possible time to discover the design is
+wrong.
+
+The resolution is not to weaken the constraint. It is that `implementer` may not
+*expand* a plan but may *execute* one, so the findings become
+`plans/<slug>-fix-N.md`. That keeps the constraint load-bearing, keeps the loop
+auditable (`plan-verifier` can check a fix plan like any other), and gives
+declined findings a home — `## Out of scope` is what stops round N+1
+re-proposing a MEDIUM the human already deferred.
+
+Three guards the derived plan needs, and the third is the one that bites:
+
+- it carries **no requirements** — `## Requirements source` reads "None", naming
+  its parent — or it is an authored plan wearing the name, and
+  `implementation-planner` owns those;
+- one step per finding, `Skill:` copied from the section the finding itself
+  cited, so the executor is held to the same rule the reviewer invoked;
+- **no step may widen a glob in `server/.dependency-cruiser.cjs` or add a
+  `pathNot`.** That is the cheapest possible way to make `pnpm arch` stop firing,
+  it looks like a fix, and `backend-onion-architecture` §10 says the debt list may
+  only shrink. Any loop that closes on "the gate is green" has to name this
+  explicitly, because the loop itself creates the incentive.
+
+Bound the loop or it becomes a negotiation: two rounds, re-review scoped to the
+fix plan's files only, and a finding that survives its own fix is a disagreement
+for a human rather than a third attempt — the third attempt is where an agent
+starts reaching for the gate config.
+
+**Where:** the loop is `.claude/skills/impl/SKILL.md` §Phase 3 (triage table,
+`### 3c. Write the fix plan`, the bounds in `### 3e`); the constraint it works
+around is `.claude/agents/implementer.md` §Hard constraints ("Do not expand the
+plan"); the carve-out that keeps `plans/` coherent is `plans/README.md`
+§"Derived fix plans"; the gate-editing ban is
+`.claude/agents/architecture-reviewer.md` §Method 2 and
+`backend-onion-architecture` §10.
+
+### 2026-08-14 — Two agents that hand a document between them must agree on the literal HEADING, and nothing in this repo checks that they do
+
+**Rule:** when one agent's output template and another's parsing rule name the
+same section, they are a **contract with no test**. Quote the producer's heading
+verbatim in the consumer, and have the consumer *report which heading it found*
+rather than silently assuming. Where a legacy name exists, name both and forbid
+the conclusion "the section is absent" from a heading mismatch.
+
+**Why:** `implementation-planner`'s plan template emits `## Acceptance-facing
+checks`. `plan-verifier` §Method 1 instructed it to extract "one item per line
+under `## Acceptance`". Those never matched, and the failure is invisible from
+either file alone — each reads perfectly. What it breaks is precisely the
+mechanism the verifier is built on: `N` items in, `N` rows out, `## Counts`
+summing to `N`. A receipt whose input set is silently short still balances, so
+the run looks clean (root `INSIGHTS.md` 2026-08-03: a per-item receipt is the
+only cheap way to tell "nothing matched" from "the run broke" — but only if the
+item list was complete).
+
+The same pair got the *other* half right and that is what makes the gap
+instructive: the verifier already wrote "`## Verification` (or `## Verification
+plan`)", because someone hit that mismatch once. The lesson generalises past
+headings to every cross-agent artefact: the `## Execution` row a plan writes and
+the `Files owned` cell an implementer reads, the `AC-N` a spec numbers and a plan
+cites. Registering a new agent already has four surfaces (2026-08-08); a new
+*section* has as many surfaces as there are agents that parse it.
+
+Cheap check when editing any report or plan template:
+`rg -n '## <NewHeading>' .claude/agents/` — every hit is an agent that must move
+with you.
+
+**Where:** the mismatch was `.claude/agents/plan-verifier.md` §Method 1 against
+`.claude/agents/implementation-planner.md` §Plan format; the fix names both
+headings and adds an `Acceptance section found as:` line to `## Plan verified`.
+The second instance found in the same pass: the planner's `## Execution` table
+handed `test-writer` "the same plan + §Verification", a table of **commands**,
+while `test-writer` §Step 0 hard-stops on any input that names no behaviour — so
+that hop would have returned `## Clarification needed` every time.
+
+### 2026-08-14 — Denying `Edit` makes the write one-shot, and that overrides the "preload only what is unconditional" criterion
+
+**Rule:** when an agent holds `Write` but not `Edit`, everything it produces is
+written once and cannot be repaired — so the preload decision stops being about
+frequency and becomes about **recoverability**. `.claude/agents/README.md`
+§"What each agent preloads, and why" states the criterion as *unconditionality*
+("every row in `routing.md` is gated by a path glob except these two"), and by
+that criterion `mermaid-diagram` should be on-demand for `spec-writer`: plenty
+of specs carry no diagram at all. It is preloaded anyway, because a diagram with
+broken syntax in a file you cannot `Edit` costs a full rewrite of the document,
+while the skill costs ~1.8k tokens — the cheapest in the repo.
+
+The same logic ran the other way for everything else that agent might have
+loaded: `zod`, the two architecture skills and the ORM/framework skills are
+denied by body rule, because a one-shot writer with a schema skill in context
+writes schemas. So the pair of questions for any new writing agent is: *what
+does one shot depend on being correct* (preload it), and *what would this agent
+be tempted to write if it had that in context* (deny it by name, not by
+omission).
+
+For the same reason its verification pass runs against the **draft**, before
+`Write`, not against the file afterwards — which is the opposite of how
+`implementer` and `doc-writer` work, both of which hold `Edit` and verify after.
+
+**Where:** `.claude/agents/spec-writer.md` §"What is already in your context"
+and §"Final self-check"; the criterion it makes an exception to is
+`.claude/agents/README.md` §"What each agent preloads, and why", whose table row
+for `spec-writer` now records the exception and its reason.
+
+### 2026-08-14 — An agent that must WRITE cannot be scoped by frontmatter, and that is exactly the agent for which `disallowedTools: Write` was doing the security work
+
+**Rule:** when a new subagent's whole job is to produce a file, you cannot
+express "only under `specs/`" anywhere in `.claude/agents/*.md` —
+`tools`/`disallowedTools` take **tool names and `mcp__server` patterns, never
+paths**. So the scope is a body contract, and it must be written as one: an
+allowlist table of directories, the one directory that looks like it belongs and
+does not (`e2e/specs/**`, which holds `*.flow.json`), and an explicit "report the
+need, do not satisfy it" for everything else.
+
+The consequence that is easy to miss: the 2026-08-08 entry "the `pr-self-review`
+verdict is written by the MODEL — so `Write` is the gate" concluded that
+`disallowedTools: Write, Edit, NotebookEdit` **structurally** blocks a subagent
+from forging `.devdigest/pr-self-review.json`. That conclusion is load-bearing
+for `architecture-reviewer` and `plan-verifier`, and it silently **does not
+transfer** to any agent that holds `Write`. `implementer` was the only such agent
+and has always been protected by contract alone; `spec-writer` is the second.
+For those two the "never run `pr-self-review`" rule is not belt-and-braces, it is
+the only thing there — so state it in the body with its real reason, and do not
+reason "the reviewers are safe, therefore the set is safe".
+
+Same shape for `Bash`: it re-opens every path restriction (`echo … > file`) and
+cannot be scoped by command pattern in frontmatter either. The honest sentence,
+and the one now written into both READMEs, is "blocked by mechanism through the
+obvious path, by contract through the shell" — never "blocked".
+
+**Why:** the reflex when adding a writing agent is to reach for the frontmatter,
+find nothing that takes a glob, and settle for a vague body sentence like "write
+only specs". A vague sentence is what fails: the agent hits a caller asking for
+"just also update the AGENTS.md row" and has no rule that says no. The allowlist
+table plus the named near-miss directory is what makes it refusable.
+
+**Where:** the new agent is `.claude/agents/spec-writer.md` (§"Where a spec may
+be written", §"Hard constraints"); the structural-block claim it does not inherit
+is `.claude/agents/README.md` §"What each agent preloads, and why"; the upstream
+field list is `https://code.claude.com/docs/en/sub-agents` §"Supported
+frontmatter fields".
+
 ### 2026-08-11 — A REQUIRED new field on a contract that is embedded in a jsonb-persisted parent goes on a sibling response schema — `.nullish()` is only the answer when the field may be absent
 
 **Rule:** before adding a field to anything in `vendor/shared/contracts/`, check
@@ -1334,6 +1568,108 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 
 ## Tool & Library Notes
 
+### 2026-08-14 — `pr-self-review.sh gates` selects by path PREFIX, so touching `server/INSIGHTS.md` runs `pnpm typecheck` and `pnpm arch`
+
+**Quirk:** `cmd_gates` decides which gates to run with a bare prefix match —
+`case "$f" in server/*) server=1 ;; client/*) client=1 ;; reviewer-core/*)
+core=1 ;; esac` — over every non-skipped changed file. It does **not** ask
+whether the file is source. A documentation-only change to `server/INSIGHTS.md`,
+`server/AGENTS.md` or `server/README.md` therefore fires `server:typecheck` and
+`server:arch`; the same edit under `client/` fires `client:typecheck` and
+`client:lint`. Measured on a markdown-only tree: all eight gates ran and all
+eight passed.
+
+**Workaround:** none, and do not add one. The over-trigger is cheap (typecheck
+and depcruise, no test suite — `gates.md` deliberately lists no test gate), and
+the alternative is a source/doc classifier that would have to be right about
+every future path. What matters is not being *surprised* by it:
+
+- A green `gates` run on a docs-only diff is **not** evidence that the gates were
+  selected narrowly — it is evidence they all ran anyway. Do not read the pass
+  list as a description of what your change touched.
+- Conversely, `pnpm arch` running on a docs commit is free insurance rather than
+  a bug: root `INSIGHTS.md` (2026-08-02) records that gate as **not** wired into
+  CI, so every extra run of it is the only place the ring rules execute at all.
+
+The output shape is the reason to prefer this command over running the gates by
+hand: one TSV row per gate, `<status>\t<name>\t<detail>`, with the full log
+written under `.devdigest/pr-self-review-logs/` and read only for a `fail`. That
+is tens of tokens where the equivalent `pnpm` calls are thousands, which is why
+`implementer` §Method 4a now calls it instead of carrying its own copy of the
+gate table.
+
+**Where:** selection logic at `scripts/pr-self-review.sh` (`cmd_gates`, the two
+`case` blocks); the gate definitions and the reason each is CRITICAL are
+`.claude/skills/pr-self-review/gates.md`; the read-only subcommands are
+allowlisted in `.claude/settings.json` (`state`, `files`, `gates`). The consumer
+is `.claude/agents/implementer.md` §Method 4a, whose §Hard constraints now
+distinguishes the read-only script from the `pr-self-review` **skill** — only the
+latter makes the model write the verdict that gates `gh pr create`.
+
+### 2026-08-14 — A subagent `description:` may not contain a colon-space — it is a plain YAML scalar, nothing validates it, and all seven existing agents avoid it by accident
+
+**Quirk:** `.claude/agents/*.md` frontmatter is YAML, and `description:` is an
+unquoted **plain scalar**. A `: ` (colon followed by a space) anywhere inside it
+is a hard parse error, not a warning. Verified against the `yaml` package the
+server already depends on:
+
+| Frontmatter value | Result |
+|---|---|
+| `description: … into a Plan: an inventory of things.` | **fails** — `Nested mappings are not allowed in compact mappings at line 1, column 14` |
+| `description: … into a Plan — an inventory of things.` | parses |
+| `description: See https://example.com/x for details.` | parses — a colon with **no** space is fine |
+| `description: whenever "how should we build X" needs an answer.` | parses — quotes mid-scalar are fine |
+
+So the rule is narrower than "avoid colons": it is specifically `: `, and it is
+the punctuation an English sentence reaches for exactly when a description is
+about to enumerate something — "returns an Implementation Plan: an inventory,
+ordered steps, …". Which is the sentence you write while *improving* a
+description.
+
+What makes it expensive is that nothing catches it. There is no schema check for
+agent frontmatter in this repo, no gate in `.claude/skills/pr-self-review/gates.md`
+covers `.claude/agents/**`, and the agent simply does not appear in the Agent
+tool's type list — there is no error naming the file or the line. The symptom is
+"my new agent isn't there", which reads as a registration problem (root
+`INSIGHTS.md` 2026-08-08 catalogues three registration surfaces plus a fourth,
+and none of them is this), so the search starts in the wrong place.
+
+The convention was real and completely invisible: **all seven pre-existing agents
+avoid `: ` in their descriptions**, every one of them by using em-dashes for the
+same enumerating clause. Seven for seven looks like a house style being followed;
+it was nobody's decision and nothing enforced it. It held until the first
+description rewrite, which broke it on the first try.
+
+**Workaround:** use an em-dash, or `covering`/`namely`, where the sentence wants
+a colon. The cheap check before calling any agent edit done — it is one line and
+it covers the whole directory:
+
+```sh
+for f in .claude/agents/*.md; do
+  d=$(grep -m1 '^description:' "$f")
+  printf '%s' "${d#description:}" | grep -q ': ' && echo "RISK $f"
+done
+```
+
+Quoting the whole value would also work and is what a schema would demand, but it
+breaks the file's convention for seven agents to fix one, and a 900-character
+quoted scalar needs its own internal-quote escaping — the em-dash is the cheaper
+fix. To prove a frontmatter block whole rather than just colon-free, parse it:
+`awk '/^---$/{n++; next} n==1' <file>` piped through
+`server/node_modules/yaml`, then read back `tools`, `disallowedTools` and
+`skills` — that also catches a `skills:` list that silently became a string.
+
+Same family as the two 2026-08-08 entries about agent definitions — a body
+constraint whose reason contradicts its own frontmatter, and a registration
+surface that is prose rather than a table. All three are agent-definition
+properties that **no tooling validates and that fail silently**; this one is the
+only one that stops the agent existing at all.
+
+**Where:** the near-miss was `.claude/agents/implementation-planner.md:3` while
+renaming it from `planner.md`; the seven that hold the unwritten convention are
+the rest of `.claude/agents/*.md`. Parser used for the table:
+`server/node_modules/yaml` (the `yaml` package, via `YAML.parse`).
+
 ### 2026-08-09 — `pnpm add --lockfile-only` in a scratch copy gives a genuine 400-line lockfile diff in two seconds, with no install
 
 **Quirk:** a demo PR that needs a realistic `pnpm-lock.yaml` diff seems to force
@@ -1648,6 +1984,34 @@ diff, never that the claim about them is true.
 **Where:** `findings.confidence`; `agent_runs.grounding`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-14 — The counted prose in `.claude/agents/README.md` was ALREADY wrong before the eighth agent — increment the number and you preserve the error
+
+**Symptom:** registering `spec-writer` meant updating "Five of the seven can
+reach **all 14** skills" and "Six of the seven hold `Skill`". Reading them to
+edit showed the first sentence was self-contradicting *as written*: it said
+**five** and then listed **four** agents, while six actually held `Skill` at the
+time (the two read-only reviewers keep it, per the 2026-08-08 entry that restored
+it to them). The naive edit — five→six, six→seven — would have carried a wrong
+count forward under a fresh date, which reads as freshly verified.
+
+**Cause:** the 2026-08-08 entry "Registering a new agent has a FOURTH surface"
+prescribes grepping for prose claims about the set, and that is what surfaced
+these lines. What it does not say is that a found claim must be **recomputed**,
+not adjusted: the numbers rot at the edit that *removed* a constraint (giving
+`Skill` back to the reviewers) far more quietly than at the edit that adds an
+agent, because nobody greps for counts when they are loosening something.
+
+**Takeaway:** when a registration grep lands on a sentence with a number in it,
+derive the number from the table underneath it before touching it —
+`rg -n '^\| \[`' .claude/agents/README.md` for the set, and check `Denied`
+against `Skill` per row. Both sentences are now phrased as "everyone but
+`researcher`", which cannot go stale on the next agent. Prefer that shape: a
+predicate over the set beats a count of it.
+
+**Where:** `.claude/agents/README.md` §"What each agent preloads, and why" (the
+two sentences), §The set (the table they must agree with), and the entry that
+sends you there, 2026-08-08 "Registering a new agent has a FOURTH surface".
 
 ### 2026-08-09 — Untracked `.js` inside `server/src/vendor/shared`: build residue that no gate in this repo can see
 

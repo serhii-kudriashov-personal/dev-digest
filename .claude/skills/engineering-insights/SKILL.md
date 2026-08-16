@@ -24,12 +24,43 @@ nothing.
 | `client/**` | `client/INSIGHTS.md` |
 | `server/**` | `server/INSIGHTS.md` |
 | `reviewer-core/**` | `reviewer-core/INSIGHTS.md` |
+| `mcp/**` | `mcp/INSIGHTS.md` |
 | `e2e/**` | `e2e/INSIGHTS.md` |
 | two or more packages, or `scripts/`, CI, `docs/`, vendored contracts | root `INSIGHTS.md` |
 
 **Append-only.** Never rewrite or delete an existing entry. A finding that turned
 out wrong gets a new dated entry, plus a `**Superseded by:** YYYY-MM-DD` line
 appended to the old one.
+
+**Who writes.** The session that did the work — the main one. A subagent returns
+its findings under `## Insight candidates` and appends nothing: three agents in
+one task would otherwise write three overlapping entries into a file that is
+append-only and therefore cannot be tidied afterwards. Collect the candidates
+from every agent's report, merge the duplicates, and write once.
+
+## The index
+
+Three files carry a `## Index` table at the top — root `INSIGHTS.md` (~28k
+tokens), `server/INSIGHTS.md` (~17k) and `client/INSIGHTS.md` (~14k). It exists
+so a reader can decide which entries touch their change without reading the file:
+`AGENTS.md` §Session protocol says read the index, then open only the rows whose
+`Scope` intersects the files being changed.
+
+**An entry appended to one of those three ships its index row in the same edit.**
+An entry with no row is an entry nobody is ever told to open, which is the same
+failure as not writing it. The row is:
+
+| Column | What goes in it |
+|---|---|
+| `Date` | the entry's own `YYYY-MM-DD` |
+| `Section` | `Works` · `Doesn't` · `Patterns` · `Tools` · `Errors` · `Open` |
+| `Scope` | the path globs or topics the entry binds — what a reader matches their changed files against. `server/src/modules/repo-intel/**`, `.claude/agents/**`, `client/src/**/*.test.tsx`. Never a summary |
+| `Entry` | the entry's title, trimmed to one line |
+
+Place the row to mirror the entry: newest first, within its section's block. The
+index is navigation, not content — a row is never edited to change what an entry
+says, and the three small files (`reviewer-core/`, `mcp/`, `e2e/`) carry no index
+because they are read whole.
 
 ## How to write
 
@@ -64,5 +95,9 @@ without re-investigating.
 ## Wrap-up pass
 
 Before reporting a non-trivial task done, walk the session once against the seven
-sections, append what survives the test above, then say which files you appended
+sections — including every `## Insight candidates` line the subagents returned,
+merged — append what survives the test above, then say which files you appended
 to and what you added.
+
+Each append to root, `server/` or `client/` `INSIGHTS.md` lands **two** edits:
+the entry and its `## Index` row. Report both.

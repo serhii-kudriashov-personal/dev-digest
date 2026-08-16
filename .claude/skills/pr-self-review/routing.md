@@ -67,8 +67,10 @@ specific row wins for *which sections* to read; the general row still applies.
 | `**/*.md` | — | repo rule: **all Markdown is written in English**, whatever language the request came in |
 | `*CLAUDE.md`, `*AGENTS.md` | — | edit `AGENTS.md`; `CLAUDE.md` must stay a symlink (mode `120000`). The `symlinks` gate checks it. |
 | `*.ts`, `*.tsx` anywhere | `typescript-expert` | lowest priority, and only for a type-level change |
-| `scripts/**`, `docs/**`, `specs/**` | — | repo rules only |
+| `scripts/**`, `docs/**`, `plans/**` | — | repo rules only. English only. `specs/` is requirements, `plans/` is how they get built — an implementation plan must not carry requirements of its own (`plans/README.md`) |
+| `specs/**`, `*/specs/*.md` (never `e2e/specs/**`) | `mermaid-diagram` (only if the spec carries a diagram), `security` (only if it has a non-trivial `## Untrusted inputs`) | English only. Skeleton and EARS rules in `specs/README.md`: `shall`, one response per criterion, `AC-N` never renumbered once shipped, named `<YYYY-MM-DD>-<feature>.md`. A spec is behaviour — diagrams chart what the user or a *system* does, contracts are promises. **No `zod`, no architecture skill**: those are opinions about code, which a spec has no authority over (`.claude/agents/spec-writer.md` §"What is already in your context"). `e2e/specs/**` is not a spec directory — it holds `*.flow.json` |
 | `.claude/agents/**` | — | subagent definitions; **not** in `skills-lock.json`, so these are ours. English only, and a new agent is registered in three places: `.claude/agents/README.md`, `.claude/skills/README.md` §Agents, `AGENTS.md` §Read when |
+| `.claude/skills/**/SKILL.md` | — | check `skills-lock.json` first (`jq -r '.skills\|keys[]'`): a locked skill is vendored and edits are lost on sync. An **authored** skill is ours, and a new one is registered in two places — `.claude/skills/README.md` §Catalog and `AGENTS.md` §Read when — plus a row in this table if any diff path should load it. A skill with no row is a skill no agent is ever told to open (root `INSIGHTS.md` 2026-08-08). `user-invocable: true` is what makes it a `/slash` command |
 
 ## No row matched
 

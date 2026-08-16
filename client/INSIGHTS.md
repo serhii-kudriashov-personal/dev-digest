@@ -9,6 +9,50 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ---
 
+## Index
+
+This file is ~14k tokens. **Read this table first, then open only the entries
+whose `Scope` intersects the files you are about to change.** Rules and rationale
+for the index are in root `INSIGHTS.md` §Index; **appending an entry means
+appending its row here in the same edit.**
+
+| Date | Section | Scope | Entry |
+|---|---|---|---|
+| 2026-08-05 | Works | `client/src/lib/hooks/**`, reorderable lists | A drag-reorderable server list needs an OPTIMISTIC mutation, not local order state |
+| 2026-08-03 | Works | `client/src/app/**/page.tsx`, `'use client'` | A `'use client'` page becomes a server wrapper with NO Suspense — every `useSearchParams` route here is dynamic |
+| 2026-08-05 | Doesn't | `client/src/app/**/_components/**`, imports | Reaching a route-root `_components/` with `../../../`: `typecheck` passes, only `lint` catches it |
+| 2026-08-10 | Patterns | `client/src/**` component props | An OPTIONAL callback prop no caller passes is a dead feature no gate can see |
+| 2026-08-10 | Patterns | `client/src/app/**`, query params | "Open it in a new tab" decides state-vs-query-param for you |
+| 2026-08-09 | Patterns | `client/src/lib/hooks/**`, query keys | Two panels of one screen reading two query keys go stale ASYMMETRICALLY |
+| 2026-08-05 | Patterns | `client/src/components/**`, promotion rule | Promoting a component must move its CONSTANTS too, and the linter will not tell you |
+| 2026-08-03 | Patterns | `client/src/app/**/_components/**` | Extracting a page into a View does NOT move the route's shared `constants.ts` / `styles.ts` / `helpers.ts` |
+| 2026-08-02 | Patterns | `client/src/**` naming | Casing encodes WHAT a folder is: kebab = module, Pascal = component |
+| 2026-08-02 | Patterns | `client/src/components/**` | A component shared by a fetching and a non-fetching caller takes DATA, not an id |
+| 2026-08-02 | Patterns | `client/src/components/**` vs `_components/` | Cross-route components go in `src/components/` |
+| 2026-08-02 | Patterns | `client/src/app/**`, filters and facets | A facet counter is computed between the filters, never around them |
+| 2026-08-02 | Patterns | `client/src/app/**`, filters and facets | Page-wide selection + per-component counts: don't disable the zero option |
+| 2026-08-10 | Tools | `client/src/**/*.test.tsx`, jsdom | jsdom 25 implements no `window.CSS` at all, so `CSS.escape` throws |
+| 2026-08-10 | Tools | `client/src/**` effects | An Effect keeping a memoized list in its deps needs an `id:nonce` ref guard |
+| 2026-08-11 | Tools | `client/src/**/styles.ts`, CSS custom properties | A CSS custom property that does not exist fails SILENTLY — read `styles.css`, never a neighbouring `styles.ts` |
+| 2026-08-09 | Tools | `client/src/**/*.test.tsx` | `userEvent` unmounts a HOVER-gated control before your click lands |
+| 2026-08-09 | Tools | `client/src/**/*.test.tsx` | `mock.contexts[0]` is how you assert WHICH element a stubbed DOM method was called on |
+| 2026-08-09 | Tools | `client/src/**/*.test.tsx` | jsdom implements NO `Element.prototype.scrollIntoView` |
+| 2026-08-05 | Tools | `client/src/vendor/ui/**`, icons | `IconName` is the vendored REGISTRY's key set, not lucide's export list |
+| 2026-08-05 | Tools | `client/src/vendor/ui/**`, charts | `@devdigest/ui`'s `Donut` is a MONEY chart, and a mock inherited its `$` |
+| 2026-08-03 | Tools | `client/eslint.config.mjs` | `pnpm lint` UNDER-reports deep relative imports: the rule is off in test files |
+| 2026-08-03 | Tools | `client/eslint.config.mjs` | `import/no-cycle` makes `eslint .` unusable here (>5 min → 25s without it) |
+| 2026-08-02 | Tools | `client/src/components/**`, severity chips | `SeverityBadge compact` renders NO label — icon and count only |
+| 2026-08-11 | Errors | `client/src/app/**`, blast radius | `entry.symbol` is not a unique React key |
+| 2026-08-09 | Errors | `client/src/lib/hooks/**` | A `retry: false` query for a resource that does not exist YET caches the 404 forever |
+| 2026-08-09 | Errors | `client/src/**/*.test.tsx`, diff viewer | `getByText` normalizes whitespace, so an INDENTED diff line can never be matched by its literal text |
+| 2026-08-08 | Errors | `client/package.json`, `client/src/**/*.test.tsx` | `@testing-library/user-event` is NOT installed here, so every interactive test uses `fireEvent` |
+| 2026-08-02 | Errors | `client/src/**/styles.ts` | Dropping `border` is NOT enough: `borderColor` and `borderWidth` are shorthands too |
+| 2026-08-02 | Errors | `client/messages/**`, i18n imports | Count the `../` for `messages/en/*.json` from the FILE, not from a sibling test |
+
+Section keys as in root `INSIGHTS.md` §Index.
+
+---
+
 ## What Works
 
 ### 2026-08-05 — A drag-reorderable server list needs an OPTIMISTIC mutation, not local order state
