@@ -18,6 +18,10 @@ appending its row here in the same edit.**
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-16 | Patterns | `client/src/components/**`, `client/src/app/**/_components/**`, cross-route reuse | The cross-route promotion rule fires on a COMPONENT, not only on a pure helper |
+| 2026-08-16 | Patterns | `client/src/components/document-preview/**`, shared components with nullable props | A shared preview component must not assume its caller's `repoId` is non-null, and an optional `onClose` changes every branch's shape, not just the happy one |
+| 2026-08-16 | Patterns | `client/src/app/**/_components/**`, `client/src/lib/*.ts`, duplicated helpers | A deliberately duplicated COMPONENT does not exempt the duplicated HELPER beside it — §2 protects a design choice, not a directory |
+| 2026-08-16 | Patterns | agent/skill editors, `client/src/lib/repo-context.tsx`, repo-scoped attachments | An agent and a skill have no repository binding, so any "attach a repo artefact" UI must borrow the shell's active repo |
 | 2026-08-05 | Works | `client/src/lib/hooks/**`, reorderable lists | A drag-reorderable server list needs an OPTIMISTIC mutation, not local order state |
 | 2026-08-03 | Works | `client/src/app/**/page.tsx`, `'use client'` | A `'use client'` page becomes a server wrapper with NO Suspense — every `useSearchParams` route here is dynamic |
 | 2026-08-05 | Doesn't | `client/src/app/**/_components/**`, imports | Reaching a route-root `_components/` with `../../../`: `typecheck` passes, only `lint` catches it |
@@ -42,6 +46,9 @@ appending its row here in the same edit.**
 | 2026-08-03 | Tools | `client/eslint.config.mjs` | `pnpm lint` UNDER-reports deep relative imports: the rule is off in test files |
 | 2026-08-03 | Tools | `client/eslint.config.mjs` | `import/no-cycle` makes `eslint .` unusable here (>5 min → 25s without it) |
 | 2026-08-02 | Tools | `client/src/components/**`, severity chips | `SeverityBadge compact` renders NO label — icon and count only |
+| 2026-08-16 | Errors | `client/messages/**`, `client/src/**` rendering engine output | A message reproducing engine output goes through `t.raw`, not `t()` — `<untrusted …>` throws INVALID_TAG |
+| 2026-08-16 | Errors | `client/src/app/**` `?tab=` allowlists, editor tab bars | A duplicated `VALID_TABS` swallows every new tab: the URL changes, the pane does not |
+| 2026-08-16 | Errors | `client/src/vendor/ui/nav.ts`, `client/src/components/app-shell/**`, new screens | A new screen does not appear in the left panel until it has a row in the vendored `NAV` array |
 | 2026-08-11 | Errors | `client/src/app/**`, blast radius | `entry.symbol` is not a unique React key |
 | 2026-08-09 | Errors | `client/src/lib/hooks/**` | A `retry: false` query for a resource that does not exist YET caches the 404 forever |
 | 2026-08-09 | Errors | `client/src/**/*.test.tsx`, diff viewer | `getByText` normalizes whitespace, so an INDENTED diff line can never be matched by its literal text |
@@ -167,6 +174,119 @@ lines were in
 shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
+
+### 2026-08-16 — The cross-route promotion rule fires on a COMPONENT, not only on a pure helper
+
+**Rule:** `client/src/components/**` vs `_components/**` (2026-08-02, "Cross-route
+components go in `src/components/`") is not limited to pure functions. When a
+route-local component under some route's `_components/` gains a second consumer
+on a *different* route, move the whole folder — component, `styles.ts`,
+`index.ts` — to `client/src/components/<kebab-name>/` in that same commit, same
+as the promotion rule already requires for a duplicated helper
+(2026-08-05, "Promoting a component must move its CONSTANTS too"). Casing stays
+the existing convention: kebab folder, PascalCase file
+(`client/src/components/agent-card/AgentCard.tsx`,
+`client/src/components/repo-not-found/RepoNotFound.tsx`).
+
+**Why:** `DocumentPreview` was built for the standalone Project Context page
+(`client/src/app/repos/[repoId]/context/_components/DocumentPreview/`, SPEC-01
+AC-12) and stayed route-local because it had exactly one caller. Adding the
+"Preview" control to the agent and skill editors' Context tabs in one change
+gave it a second and a third caller on two unrelated routes in the same commit —
+past the promotion trigger before the component had even shipped once with a
+single consumer. Leaving it under `context/_components/` would have meant
+`../../../../repos/[repoId]/context/_components/DocumentPreview` reaching across
+route boundaries, exactly the smell `client/eslint.config.mjs`'s deep-relative-import
+rule exists to catch (2026-08-05, "`pnpm lint` UNDER-reports deep relative
+imports... rule is off in test files" — production imports are still caught).
+
+**Where:** `client/src/components/document-preview/{DocumentPreview.tsx,styles.ts,index.ts}`,
+imported by `client/src/app/repos/[repoId]/context/_components/ContextView/ContextView.tsx:24`,
+`client/src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx:23`
+and `client/src/app/skills/[id]/_components/ContextTab/ContextTab.tsx:23`.
+
+### 2026-08-16 — A shared preview component must not assume its caller's `repoId` is non-null, and an optional `onClose` changes every branch's shape, not just the happy one
+
+**Rule:** when promoting a component whose prop originated from one page's
+guaranteed-non-null value (`ContextView`'s `repoId` comes from `useParams()`,
+always a `string`), widen the prop type to match the *weakest* caller
+(`useActiveRepo()` returns `repoId: string | null`), not the strongest. And when
+adding an optional callback like `onClose` so a component can render as either a
+dismissible panel or a permanently-docked pane, give every early-return branch
+(loading, error, empty) somewhere for that control to live — not only the
+success branch — or the panel becomes uncloseable for as long as the fetch is
+slow or fails.
+
+**Why:** `DocumentPreview`'s loading and error branches originally returned a
+bare `<Skeleton>` / `<ErrorState>` with no head row at all, because the one
+caller that existed (`ContextView`) never needed to close it — the pane was
+permanently docked beside the document list. The two new callers
+(agent/skill `ContextTab`) open it as a dismissible panel from a "Preview"
+button, so a slow or failing fetch without a close affordance would trap the
+user until the request settled. Restructuring those two branches to share the
+same head-row shape as the success branch was not scope creep on top of adding
+`onClose` — it was the minimum to make `onClose` actually work in every state,
+and it left `ContextView`'s rendering unchanged in substance (still a path row
+above the body, just present a beat earlier).
+
+**Where:** `client/src/components/document-preview/DocumentPreview.tsx` — the
+`repoId` prop is typed `string | null | undefined`; the `onClose` prop is
+optional and rendered as a close button in the loading, error and success
+returns alike.
+
+### 2026-08-16 — A deliberately duplicated COMPONENT does not exempt the duplicated HELPER beside it — §2 protects a design choice, not a directory
+
+**Rule:** when a plan pre-authorises duplication under `frontend-ui-architecture`
+§2 ("two copies are correct, the third is when to extract"), that authorisation
+covers only the files that genuinely diverge. A pure-helper module copied
+byte-for-byte alongside them is still a §1 placement violation
+(`SKILL.md:38` — "Pure helper used by 2+ → shared `lib/<name>.ts`") and §2 itself
+requires the move "in the same commit that adds the second use"
+(`SKILL.md:58`).
+
+**Why:** §2 exists to stop you guessing at an abstraction before you have seen
+enough consumers to know its shape. A file with **zero** divergence between
+copies has no shape left to guess at, so the rule it is usually cited to defend
+does not apply to it. The two `ContextTab.tsx` components here really do differ —
+different props (`agentId` vs `skillId`), different prose, different mutation
+hooks — and keeping them separate is right. Their `helpers.ts` neighbours were
+identical, confirmed by `md5 -q` returning the same digest for both. The trap is
+that the authorisation is written per *feature* while the rule applies per
+*file*, so a reviewer who accepts "this duplication is deliberate" once tends to
+wave through the whole folder — and no gate catches it, because `pnpm arch`
+cruises `server/` and `reviewer-core/` only and has no visibility into `client/`
+duplication at all.
+
+**Where:** `client/src/lib/context-docs.ts` (the promoted module, holding
+`orderedPaths`, `reorder`, `filterByPath`, `missingPaths`), imported by
+`client/src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx:30`
+and `client/src/app/skills/[id]/_components/ContextTab/ContextTab.tsx:29`. Cheap
+check when two sibling features ship together:
+`md5 -q <a>/helpers.ts <b>/helpers.ts` — identical digests mean promote now, not
+at the third consumer.
+
+### 2026-08-16 — An agent and a skill have no repository binding, so any "attach a repo artefact" UI must borrow the shell's active repo
+
+**Rule:** a UI that attaches a repository-scoped artefact to an `Agent` or a
+`Skill` has no repository of its own to work from, and must read the shell's
+currently selected repo via `useActiveRepo()`
+(`client/src/lib/repo-context.tsx:58`) and name it on screen so the user knows
+which mirror they are browsing. What gets persisted is the bare repo-relative
+path; it is matched against the pull request's own repository at run time.
+
+**Why:** `Agent` is workspace-scoped and carries no `repo_id`
+(`client/src/vendor/shared/contracts/knowledge.ts:327`), while a context document
+is identified by a path inside one repository's mirror. Nothing in the data model
+closes that gap, so every such screen has to close it in the UI — and the choice
+is invisible in the contracts, which is why it is worth writing down rather than
+rediscovering. The consequence to keep in mind: the same attachment can resolve
+in one repository and come back `missing` in another, which is a correct outcome
+and not a bug.
+
+**Where:** both Context tabs —
+`client/src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx:39`
+and `client/src/app/skills/[id]/_components/ContextTab/ContextTab.tsx`; the
+active-repo source at `client/src/lib/repo-context.tsx:58`.
 
 ### 2026-08-10 — An OPTIONAL callback prop that no caller passes is a dead feature no gate can see — grep the call sites, not the type
 
@@ -850,6 +970,103 @@ s.label}`); consumers are `src/components/findings-hover-card/SeverityBadges.tsx
 and the card's own per-finding rows.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-16 — A message that reproduces engine output goes through `t.raw`, not `t()` — next-intl reads `<untrusted source="spec-N">` as a rich-text tag and throws
+
+**Symptom:** the agent and skill Context tabs crashed the moment they rendered:
+`INVALID_MESSAGE: INVALID_TAG (<untrusted source="spec-N">)` at
+`ContextTab.tsx` `{t("serialization.wrapper")}`.
+
+**Cause:** next-intl parses every message for ICU rich-text tags. The key is
+`"<untrusted source=\"spec-N\">"` — an unpaired `<untrusted>` with no handler
+passed to `t()`, so it throws rather than rendering. The copy is *correct*: it
+mirrors `wrapUntrusted` (`reviewer-core/src/prompt.ts:33`) verbatim, which
+AC-28 of SPEC-01 requires. The bug is the renderer, not the string.
+
+**Takeaway:** `t.raw(key)` returns the message unparsed and is the right call
+for any string that reproduces engine output — a wrapper, a heading, a prompt
+fragment. The engine's syntax is not ICU's, and the overlap (`<`, `{`, `#`) is
+not going away. Do not "fix" this by ICU-escaping the JSON: the value would stop
+matching what the engine emits, which is the whole point of the panel, and a
+translator would have no way to know why the quotes are there. The three
+existing bracketed messages in `messages/` (`conformance.json`
+`report.comparing`, `settings.json` `autoReviews.pollingNote` and
+`plugins.intro`) are the opposite case — paired tags meant for `t.rich` — so
+the presence of `<` alone does not decide it; ask whether the string is copy or
+a reproduction.
+
+**Where:** `src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx:217,220`,
+`src/app/skills/[id]/_components/ContextTab/ContextTab.tsx:204,207`,
+`messages/en/context.json` `serialization.wrapper`,
+`../reviewer-core/src/prompt.ts:33`.
+
+### 2026-08-16 — A duplicated `VALID_TABS` allowlist silently swallows every new tab: the URL changes, the pane does not
+
+**Symptom:** clicking the agent editor's Context tab did nothing. No error, no
+crash — `?tab=context` appeared in the address bar and the Config pane stayed.
+
+**Cause:** `AgentEditorView` derives its tab from `?tab=` through an allowlist,
+`VALID_TABS = ["config", "skills"]`, hand-written as a second copy of the tab
+list that `AgentEditor/constants.ts` `TABS` already holds. `setTab("context")`
+wrote the URL, the next render rejected `"context"` as unknown and fell back to
+`DEFAULT_TAB`. The `tab === "context"` branch in `AgentEditor.tsx` was correct
+throughout and simply unreachable. `SkillEditorView` had the same shape but
+derived it — `VALID_TABS = TABS.map((t) => t.key)` — so the skill editor's
+Context tab worked while the agent editor's did not, from identical-looking code.
+
+**Takeaway:** a `?tab=` allowlist is derived from the tab bar's own list, never
+retyped. Where the list lives in a child component, export it from that
+component's barrel and import it — precedent is
+`SeverityFilterBar/index.ts`, which exports `FILTER_SEVERITIES` and
+`SEVERITY_PARAM` for exactly this reason. Failure mode to recognise: a control
+that updates the URL and nothing else is a rejected value falling back, not a
+dead handler — check the allowlist before the component.
+
+**Where:** `src/app/agents/[id]/_components/AgentEditorView/constants.ts:4`,
+`src/app/agents/[id]/_components/AgentEditorView/AgentEditorView.tsx:27`,
+`src/app/agents/[id]/_components/AgentEditor/index.ts`,
+`src/app/skills/[id]/_components/SkillEditorView/constants.ts:26`.
+
+### 2026-08-16 — A new screen does not appear in the left panel until it has a row in the vendored `NAV` array — the label and the `activeKeyFor` branch are not the nav entry
+
+**Symptom:** Project Context (SPEC-01) shipped complete — route
+`src/app/repos/[repoId]/context/page.tsx` served 200, its API answered, the
+agent and skill Context tabs rendered — and the sidebar showed nothing. Nothing
+failed: no error, no 404, no type error. `pnpm typecheck` was clean throughout.
+
+**Cause:** the sidebar is data-driven from one hardcoded array,
+`NAV` in `src/vendor/ui/nav.ts`, which `Sidebar.tsx:45` maps over directly.
+There is no injection point — `AppShell` passes only a context object to
+`AppFrame`, never nav items. The screen had all three of its *satellite*
+artefacts already in the repo: the `nav.context` label
+(`messages/en/shell.json`), the `activeKeyFor` branch
+(`src/components/app-shell/helpers.ts:30`) and the route. Its
+implementation plan read those first two as evidence and recorded
+"Sidebar nav entry `nav.context` — **reuse as-is**" and "no shell change is
+needed" (`plans/2026-08-16-project-context.md:73,417`). Both artefacts are
+*consumers* of a `NAV` row keyed `context`; neither creates one. A label with no
+row is dead JSON and an `activeKeyFor` branch with no row highlights an item
+that is never rendered, so both sit in the tree looking like a wired navigation
+entry.
+
+**Takeaway:** the nav entry is the row in `NAV`, and nothing else. When adding a
+screen, grep `src/vendor/ui/nav.ts` for the key before concluding the shell is
+wired — an inventory pass that finds `nav.<key>` in `shell.json` plus a branch
+in `activeKeyFor` has found zero of the one thing required. Adding the row is
+config, not a refactor of vendored code: `src/vendor/ui/README.md` classes
+`nav.ts` as "route/shortcut config", and the repo rule bans refactoring
+`src/vendor/**`, not adding a route to its route table. A row carrying a `gKey`
+needs a matching `SHORTCUTS` entry in the same file or the shortcut works while
+the `?` help omits it. Two consumers come free from the one row: `Sidebar`
+renders `item.label` (the English literal in `nav.ts`), while
+`useShellCommands.ts:24` builds the command-palette entry from
+`t(\`nav.${it.key}\`)` — so the key must match the `shell.json` label key or the
+palette renders a raw message key.
+
+**Where:** `src/vendor/ui/nav.ts:33-34,64-65`,
+`src/vendor/ui/shell/Sidebar.tsx:45,59`,
+`src/components/app-shell/hooks/useShellCommands.ts:21-29`,
+`src/components/app-shell/helpers.ts:30`, `messages/en/shell.json` `nav.context`.
 
 ### 2026-08-11 — Blast Radius: `entry.symbol` is not a unique React key — two changed symbols can share a bare name from different files
 

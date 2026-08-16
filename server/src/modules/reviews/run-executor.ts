@@ -257,6 +257,26 @@ export class ReviewRunExecutor {
           `Skills: ${injectedSkills.length} of ${linkedSkills.length} linked skill(s) enabled`,
         );
       }
+      // Project context (SPEC-01) — the agent's attached Markdown, plus what it
+      // inherits from its enabled skills, read from the mirror right now. The
+      // facade NEVER throws, so this needs no guard: a repository with no
+      // mirror, a deleted file or a blown read budget all come back as `skipped`
+      // entries and the review proceeds without them (NFR-3).
+      //
+      // Cross-slice access goes through the container, never an import — a
+      // `modules/context/*` import from here would fire `no-cross-slice-import`.
+      const projectContext = await this.container.projectContext.resolveForRun(
+        agent.id,
+        pull.repoId,
+      );
+      if (projectContext.read.length > 0 || projectContext.skipped.length > 0) {
+        // Counts only. A document's TEXT never reaches a log line (AC-41).
+        runLog.info(
+          `Project context: ${projectContext.read.length} document(s) read, ` +
+            `${projectContext.skipped.length} skipped`,
+        );
+      }
+
       // Written before the LLM call so a run that fails mid-review still records
       // what it was given — that is the input to the review, not its outcome.
       await this.repo.saveRunSkills(
@@ -287,6 +307,12 @@ export class ReviewRunExecutor {
         // Same omit-when-empty contract as callers/repoMap above: with no
         // enabled skills the assembled prompt is byte-identical to a pre-L02 run.
         ...(skillBodies.length > 0 ? { skills: skillBodies } : {}),
+        // SPEC-01 — project-context documents, on the SAME omit-when-empty
+        // contract. This one spread is the entire injection change: the engine
+        // already routes `specs` into `## Project context` and already wraps
+        // each document `wrapUntrusted('spec-N', …)`, so with zero documents
+        // the assembled prompt is identical to a pre-SPEC-01 run (AC-31).
+        ...(projectContext.texts.length > 0 ? { specs: projectContext.texts } : {}),
         // L03 — the derived intent, on the same contract: no intent means the
         // section is omitted AND the engine's scope gate is a no-op, so the run
         // is byte-identical to a pre-L03 one.
@@ -408,7 +434,14 @@ export class ReviewRunExecutor {
         })),
         raw_output: outcome.raw,
         memory_pulled: [],
-        specs_read: [],
+        // Both fields are written HERE, from one variable, and neither is ever
+        // written without the other: `specs_read` is the legacy required mirror
+        // and `project_context` is the field AC-38 actually reads. Written on
+        // EVERY successful run, including one that read nothing — that is what
+        // keeps "recorded nothing" (`{ read: [], skipped: [] }`) distinct from
+        // "never recorded" (the key absent, on every trace predating SPEC-01).
+        specs_read: projectContext.read,
+        project_context: { read: projectContext.read, skipped: projectContext.skipped },
         // Persisted log = the run's FULL event buffer (incl. shared pre-work:
         // diff load + intent), not just events recorded inside this method.
         log: runLog.logFor(runId),
@@ -567,6 +600,10 @@ export class ReviewRunExecutor {
       raw_output: '',
       memory_pulled: [],
       specs_read: [],
+      // `project_context` is deliberately ABSENT on the failed/cancelled path: a
+      // run that never reached resolution genuinely has no record, and the
+      // drawer's "not recorded" rendering is then correct by construction rather
+      // than by a placeholder that claims the run read nothing (AC-38).
       log: this.container.runBus.buffer(runId).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg })),
     };
   }

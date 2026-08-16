@@ -24,6 +24,8 @@ entry nobody is told to open.
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-16 | Errors | `INSIGHTS.md` index rows, superseding an entry, `.claude/agents/**` | A superseded entry whose INDEX ROW still states the stale claim keeps propagating it — the index is the part agents actually read |
+| 2026-08-16 | Doesn't | `plans/**`, `Done when` checks, `.claude/agents/implementation-planner.md` | A literal-string `Done when` grep goes unsatisfiable when another resolved open question in the same plan introduces the matching token |
 | 2026-08-11 | Works | `.claude/agents/**`, subagent orchestration | Parallel `researcher` on DISJOINT scopes, then one planner told to "verify and correct" a supplied inventory |
 | 2026-08-09 | Works | `specs/**`, acceptance criteria, test fixtures | Phrase an acceptance criterion over FIELDS, never over serialized bytes |
 | 2026-08-09 | Works | git plumbing, `demo/*` branches, demo fixtures | Build a demo PR fixture with a temporary `GIT_INDEX_FILE` |
@@ -42,6 +44,9 @@ entry nobody is told to open.
 | 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
 | 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
 | 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
+| 2026-08-16 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, jsonb columns, run traces, unwired scaffolding | A REQUIRED array on a jsonb contract cannot be retrofitted with "not recorded" — the scaffolding already wrote `[]` into every row |
+| 2026-08-16 | Patterns | `client/messages/**`, `client/src/lib/hooks/**`, unwired scaffolding, spec intake | Shipped-but-unwired scaffolding also ships a stale product decision — its copy is a claim, not a requirement |
+| 2026-08-16 | Patterns | `server/src/adapters/git/**`, any feature that writes into the clone | The clone is a mirror that hard-resets on sync — writing into it is silent data loss after the UI says "Saved" |
 | 2026-08-16 | Patterns | `.claude/skills/impl/**`, `plans/**`, any agent-to-agent remediation loop | An agent with a stay-in-scope contract cannot consume another agent's findings — materialise them into the artifact type it is licensed to execute |
 | 2026-08-14 | Patterns | `.claude/agents/**`, any cross-agent report or plan template | Two agents handing a document between them must agree on the literal HEADING, and nothing checks that they do |
 | 2026-08-14 | Patterns | `.claude/agents/**` preload decisions | Denying `Edit` makes the write one-shot, which overrides the "preload only what is unconditional" criterion |
@@ -430,6 +435,33 @@ and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65
 (both removed).
 
 ## What Doesn't Work
+
+### 2026-08-16 — A literal-string `Done when` grep goes unsatisfiable when another resolved open question in the same plan introduces the matching token
+
+**Tried:** `plans/2026-08-16-project-context.md` Step 12 phrased "the preview is
+read-only, no write control exists" as a machine check:
+`rg -n "edit|upload|new-folder|add-file"` over
+`client/src/app/repos/[repoId]/context/`, expected to return nothing. It is a
+good instinct — a greppable `Done when` beats a prose one.
+
+**Failed:** the same plan resolves spec Open question 5 as "the search roots are
+shown, and **editable**, on the Project Context page". So the finished feature
+ships a `RootsEditor/` directory and a `roots.edit` message key, and the grep can
+never be empty no matter how correct the code is. Both the implementer and
+`plan-verifier` hit it independently; the verifier had to grade the step
+`partial` while grading the criterion it stands for (AC-13) `met`, which is the
+signature of a broken check rather than broken code.
+
+**Instead:** phrase the check over *what the subtree can do*, not over vocabulary
+it may contain. Here that is the set of mutations it can fire —
+`rg -n "useSet|useMutation" client/src/app/repos/\[repoId\]/context/` — which is
+exact, stays true as copy changes, and does not collide with a legitimately
+in-scope editor for something else. Before writing any literal-string `Done
+when`, re-read the plan's own resolved open questions and answers table: a token
+banned in one step is often introduced by another. This is the same class as
+2026-08-09 "phrase an acceptance criterion over FIELDS, never over serialized
+bytes" — the failure is binding a check to a *spelling* rather than to a
+*behaviour*.
 
 ### 2026-08-11 — Asserting a negative to a subagent from a truncated `grep -il | head`: it cannot reject the premise, so it investigates a phantom
 
@@ -828,6 +860,123 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-16 — A REQUIRED array on a jsonb contract cannot be retrofitted with "not recorded" semantics — the scaffolding already wrote `[]` into every row
+
+**Rule:** before promising that a reader can tell "this run never recorded X"
+from "this run recorded an empty X", check what the **already-shipped write
+site** puts in that field. If the field is required and its writer ships a
+literal `[]`, that distinction is gone from the stored data and no schema change
+recovers it — loosening the field to `.nullish()` later does nothing, because
+the rows are not missing the key, they hold an empty array. The honest fix is a
+**new** `.nullish()` sibling field that genuinely never existed, with the old one
+demoted to a mirror written from the same variable.
+
+**Why:** this is the third case in a family whose first two entries do not cover
+it, and the tempting move is to reach for one of them anyway:
+
+| Field is | Rule | Entry |
+|---|---|---|
+| new and optional | `.nullish()` in place | 2026-08-02 |
+| new and required | sibling response schema | 2026-08-11 |
+| **existing, required, already written as `[]`** | **new `.nullish()` sibling; old one becomes a mirror** | this entry |
+
+`RunTrace.specs_read` is `z.array(z.string())` — required
+(`server/src/vendor/shared/contracts/trace.ts:106`) — and both write sites in
+the run executor ship `specs_read: []` (`run-executor.ts:411`, `:569`), because
+the `specs` slot was scaffolded and never wired (2026-08-02, "`## Skills /
+rules`, `## Relevant memory`, `## Project context` are wired to nothing"). So
+every trace on disk already asserts "read nothing", and the drawer renders it as
+`none` (`TraceBody.tsx:44`). A criterion asking for "not recorded" — SPEC-01's
+AC-38 — is unsatisfiable through that field no matter what the schema says.
+
+The generalisation worth carrying past this feature: **unwired scaffolding is
+not neutral.** A slot nobody feeds still runs its writer on every row, and the
+placeholder it writes is indistinguishable from a real value. That is the same
+failure surface as 2026-08-16 ("Shipped-but-unwired scaffolding also ships a
+stale product decision"), one layer down — there the stale artefact is copy a
+human reads, here it is a literal the database keeps.
+
+Two consequences for the fix. The new field must be written on **every** new
+run, including one that read nothing (`{ read: [], skipped: [] }`), or "not
+recorded" and "recorded nothing" collapse again in the other direction. And the
+mirror and the new field are written from one variable in one place, because two
+fields that must never diverge and are set separately will.
+
+**Where:** the required field is
+`server/src/vendor/shared/contracts/trace.ts:106` (copy at
+`client/src/vendor/shared/contracts/trace.ts:105`); the two placeholder writes
+are `server/src/modules/reviews/run-executor.ts:411` and `:569`; the render that
+turns `[]` into `none` is
+`client/src/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer/_components/TraceBody/TraceBody.tsx:44`.
+The criterion that exposed it is AC-38 of
+`specs/2026-08-16-project-context.md`; the resolution is Step 1 and Step 9 of
+`plans/2026-08-16-project-context.md`.
+
+### 2026-08-16 — Shipped-but-unwired scaffolding also ships a stale product decision — read its copy as a claim, not as a requirement
+
+**Rule:** when the Part 0 inventory (2026-08-05) finds a feature already
+scaffolded, do not carry its `messages/*.json`, its contract field names or its
+empty-state copy into the spec as settled requirements. **Re-derive them from the
+current request, then diff.** Every string in an unwired file was written against
+a product decision nobody has re-checked since, and no test, type or lint rule
+fails when that decision goes stale.
+
+**Why:** Project Context arrives with almost everything except the two routes —
+`SpecFile`/`IndexStatus` contracts, a `useContextFiles` hook whose comment reads
+*"safe to call once API exposes it"*, a full `context.json`, the sidebar label and
+an `activeKeyFor` branch, the `specs` prompt slot, its `promptTokenCounts` row and
+both trace render sites. There is no `server/src/modules/context/` and no
+`client/src/app/**/context/`, so none of it has ever run. Three of those artefacts
+assert things the feature no longer does:
+
+| Shipped artefact | Asserts | Actually |
+|---|---|---|
+| `context.json` `empty.body` | documents live under `.devdigest/specs/` | configurable roots, default `**/{specs,docs,insights}/**/*.md` |
+| `context.json` `chunks`, `indexStatus`, `kb` | there is a chunk/index pipeline | `walk.ts` indexes `.ts/.tsx/.js/.jsx/.mjs/.cjs` only — Markdown is never chunked or embedded |
+| `context.json` `mode.edit`, `editor.save` | documents are editable in place | view-only; see the read-only-mirror entry below for why |
+
+The failure mode is specific and quiet: the copy *looks* like a requirements
+document, it is in the repo, it is in English, and it is wrong. A spec that
+inherits it ships a screen promising a directory the scanner never looks in.
+
+**Where:** `client/src/lib/hooks/core.ts:122-137`,
+`client/src/components/app-shell/helpers.ts:30`,
+`client/messages/en/context.json`,
+`client/src/vendor/shared/contracts/platform.ts:254-269`,
+`reviewer-core/src/prompt.ts:47,104-106,133`,
+`server/src/modules/reviews/helpers.ts:111`,
+`server/src/modules/repo-intel/pipeline/walk.ts:1-35`. The reconciliation is
+recorded as an open question in `specs/2026-08-16-project-context.md`. Generalises
+2026-08-05 ("A lesson feature is mostly already scaffolded") with the second axis:
+inventory tells you what exists, not whether it is still true.
+
+### 2026-08-16 — The clone is a mirror that hard-resets on sync — a feature that writes into it is proposing silent data loss
+
+**Rule:** the local clone under `~/.devdigest/workspace/<owner>/<repo>` is a
+**read-only mirror**, not a workspace. Any feature that proposes editing repo
+files through the UI must budget for commit + branch + push + a write-scoped
+credential + conflict handling + a PR surface — or be specced view-only. There is
+no cheap middle where the write lands on disk and stays there.
+
+**Why:** `sync()` fetches and then runs `git reset --hard origin/<branch>`, with
+the code comment *"safe here because we never commit to or run code from the
+clone"* — so an uncommitted edit in the worktree is destroyed by the next resync,
+which is a routine background operation, not a user action. `clone()` additionally
+`rm -rf`s the destination when it finds no `.git` there. The user-visible sequence
+is the worst possible one: the UI says **"Saved"**, the file is on disk, and some
+minutes later it is gone with no error anywhere. Nothing in the write path would
+have flagged this — the write itself succeeds.
+
+This is not hypothetical: it removed the edit half of Project Context at spec
+time. The feature was requested with an Edit mode whose changes "land as a diff";
+the mirror's semantics turned that from a UI task into a credentials-and-PR
+subsystem, and the spec shipped view-only.
+
+**Where:** `server/src/adapters/git/simple-git.ts:77-88` (`sync` →
+`reset --hard`), `:54-70` (`clone` → `rm` on a `.git`-less dest). The consequence
+and what a future editing feature must solve are recorded in
+`specs/2026-08-16-project-context.md` §Non-goals.
 
 ### 2026-08-16 — An agent with a stay-in-scope contract cannot consume another agent's findings — materialise them into the artifact type it IS licensed to execute
 
@@ -1984,6 +2133,35 @@ diff, never that the claim about them is true.
 **Where:** `findings.confidence`; `agent_runs.grounding`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-16 — A superseded entry whose INDEX ROW still states the stale claim keeps propagating it — the index is the part agents actually read
+
+**Symptom:** `plans/2026-08-16-project-context.md` §Context read, its Step 15 and
+its AC-22 row all instructed the executor that
+"`@testing-library/user-event` is NOT installed here, so every interactive test
+uses `fireEvent`", and cited `client/INSIGHTS.md` 2026-08-08 for it. I repeated
+the same claim in my brief to the client implementer, framed as a house rule that
+overrides the vendored `react-testing-library` skill. It is false:
+`client/package.json:31` carries `"@testing-library/user-event": "^14.6.3"` and
+`node_modules/@testing-library/user-event` is present.
+
+**Cause:** the entry was superseded and *its own body already says so* —
+`client/INSIGHTS.md:978` records that the package was later installed. But the
+`## Index` row at `client/INSIGHTS.md:48` was never updated and still reads
+"`@testing-library/user-event` is NOT installed here, so every interactive test
+uses `fireEvent`" as a live rule. `AGENTS.md` §Session protocol tells every
+reader — human or agent — to read the index and open only the rows whose `Scope`
+intersects their files. A planner that follows that protocol correctly sees the
+stale row, matches the scope, and never reaches line 978.
+
+**Takeaway:** superseding an entry is **two** edits, exactly like appending one.
+The `**Superseded by:**` line goes on the old entry *and* its index row is
+rewritten to say so — an index row is the only part of a long entry that is
+guaranteed to be read. The failure is silent and compounding: this claim survived
+a spec, a plan, an intake review and an orchestrator brief without anyone running
+`grep user-event client/package.json`. When an insight asserts that a dependency
+is absent, verify it against the manifest before restating it — that check costs
+one command and the entry's age is not evidence.
 
 ### 2026-08-14 — The counted prose in `.claude/agents/README.md` was ALREADY wrong before the eighth agent — increment the number and you preserve the error
 

@@ -26,6 +26,9 @@ appending its row here in the same edit.**
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
 | 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
 | 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-16 | Patterns | `server/src/db/schema/**` link tables, composite PKs, reverse lookups | The composite PK that excuses a link table from an FK index leaves its SECOND column unindexed |
+| 2026-08-16 | Patterns | `server/src/modules/**` reading cloned/untrusted files, `node:fs` | `readFile` is the wrong primitive for attacker-supplied content you only need a bounded prefix of |
+| 2026-08-16 | Patterns | `server/src/modules/repo-intel/pipeline/walk.ts`, any `**/{dir}/**` file discovery | A depth-agnostic discovery glob makes `EXCLUDED_DIRS` load-bearing — and `walk.ts` will not apply it for you |
 | 2026-08-10 | Patterns | prompts under `server/src/modules/**`, intent | A prompt that summarises user text must state its OUTPUT LANGUAGE |
 | 2026-08-11 | Patterns | `server/src/modules/repo-intel/**`, blast radius | `repo_index_state.status='partial'` does NOT mean "a working index" |
 | 2026-08-11 | Patterns | `server/src/modules/repo-intel/service.ts` | A cap named `MAX_..._PER_SYMBOL` was applied to the FLATTENED list |
@@ -365,6 +368,86 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-16 — The composite PK that excuses a link table from an FK index leaves its SECOND column unindexed — and that is the column the reverse lookup filters on
+
+**Rule:** a link table keyed `primaryKey({ columns: [ownerId, path] })` needs no
+separate index for `WHERE owner_id = ?` — the PK's B-tree serves it as a
+leftmost-prefix equality, which is why `postgresql-table-design` §Indexing lets
+you decline the usual "FK columns are not auto-indexed, add them" rule. That
+reasoning is correct and it is **half** the story. A link table almost always has
+a second access path — the reverse lookup, `WHERE path IN (…)` — and the same
+index cannot serve it, because `path` is the trailing column.
+
+**Why:** "composite PK ⇒ no index owed" is true for exactly one of the two
+directions, and the direction it covers is the one you thought of while writing
+the schema. `agent_context_docs` and `skill_context_docs` were both reviewed
+against the rule, both correctly declined the FK index, and both left
+`agentReachCounts`'s `WHERE path IN (…)` on a sequential scan. Both tables are
+empty today, so nothing is measurably slow and nothing will warn you; the
+per-request query fans out over the whole document listing, so it degrades with
+attachment count rather than with traffic.
+
+**Where:** `server/src/modules/context/repository.ts:181` (`agentReachCounts`)
+and `:156` (`attachedPaths`); the tables at
+`server/src/db/schema/project-context.ts`. The fix, when a profile calls for it,
+is an index on `skill_context_docs(path)` / `agent_context_docs(path)` in its own
+additive migration — `plans/2026-08-16-project-context.md` §Risks pre-authorises
+exactly that and set the default to "measure first".
+
+### 2026-08-16 — `readFile` is the wrong primitive for attacker-supplied content you only need a bounded prefix of
+
+**Rule:** when the bytes come from a third-party source of unbounded size — a
+cloned repository's Markdown, an upload, anything mirrored from outside — and the
+consumer caps the text anyway, do not `readFile` then truncate. Open the file and
+issue one bounded `read` into a buffer sized to the cap
+(`MAX_DOCUMENT_CHARS * 4 + 1` for UTF-8), and derive `truncated` from
+`bytesRead >= limit`.
+
+**Why:** `readFile` followed by `truncateForInjection` allocates the entire file
+before discarding almost all of it, so a 500 MB `.md` committed to a mirrored
+repository is 500 MB of heap in the review path — a resource exhaustion reachable
+by anyone who can open a pull request against a watched repo. The bounded read
+also gives the `truncated` flag for free instead of computing it after the fact.
+The cost is one edge case worth knowing: a multi-byte character cut at the buffer
+boundary decodes to a single U+FFFD, at the very end of text that is already
+being presented as truncated.
+
+**Where:** `server/src/modules/context/service.ts:336-350` (`readBounded`), whose
+cap is `MAX_DOCUMENT_CHARS` at `server/src/modules/context/constants.ts:32`.
+
+### 2026-08-16 — A depth-agnostic `**/{dir}/**` discovery glob makes `EXCLUDED_DIRS` load-bearing — and `walk.ts` will not apply it for you
+
+**Rule:** the moment file discovery moves from a fixed prefix (`.devdigest/specs/`)
+to a glob that matches at any depth (`**/{specs,docs,insights}/**/*.md`), the
+exclusion list stops being tidiness and becomes correctness. Carry
+`EXCLUDED_DIRS` explicitly into any new walker, and state it as an acceptance
+criterion, not as an implementation nicety.
+
+**Why:** `**/docs/**` matches `node_modules/<pkg>/docs/*.md`, `.next/**`,
+`dist/**` and `out/**` — all of which are full of Markdown. Dropping the
+exclusion list does not produce a slow scan; it produces **the model reading a
+dependency's documentation as if it were this project's specification**, which is
+both a grounding failure and a prompt-injection surface (a transitive dependency's
+README is third-party text).
+
+The trap is that the obvious reuse does not work. `walk.ts` already implements
+exactly this filtering, but its `SUPPORTED_EXT` is `.ts .tsx .js .jsx .mjs .cjs`
+— Markdown is not in it, and Markdown is never chunked or embedded anywhere in
+repo-intel. So a Markdown discovery pass cannot call `walk.ts`; it re-implements
+the walk, and re-implementing it is precisely where the exclusion list gets left
+behind. And `.gitignore` is **not** honoured, so `EXCLUDED_DIRS` is the whole
+defence — a repo that gitignores a generated `docs/` directory is protected by
+nothing. Do not take that from the constant's own comment, which is wrong:
+`constants.ts:15` says *"`.gitignore` is layered on top in T2 walk"*, while the
+T2 walk itself lists `.gitignore` filtering under **`NOT YET HANDLED`** with a
+`TODO(T3)`. The walker is the truth; the constant's docblock describes a plan.
+
+**Where:** `server/src/modules/repo-intel/pipeline/walk.ts:1-35` (the docblock
+naming the exclusion list and the missing `.gitignore` handling),
+`server/src/modules/repo-intel/constants.ts:16-25` (`EXCLUDED_DIRS`) and `:14`
+(`SUPPORTED_EXT`, JS/TS only). The criterion this produced is AC-3 of
+`specs/2026-08-16-project-context.md`.
 
 ### 2026-08-10 — A prompt that summarises user-authored text must state its OUTPUT LANGUAGE, because the model mirrors its input and nothing downstream translates
 
