@@ -18,6 +18,7 @@ appending its row here in the same edit.**
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-17 | Patterns | `client/src/app/**/_components/OverviewTab/**`, records carrying their own `stale` field | A record's own `stale` field is a snapshot from its last fetch — recompute client-side and fold it back in, don't trust it or add a new prop |
 | 2026-08-16 | Patterns | `client/src/components/**`, `client/src/app/**/_components/**`, cross-route reuse | The cross-route promotion rule fires on a COMPONENT, not only on a pure helper |
 | 2026-08-16 | Patterns | `client/src/components/document-preview/**`, shared components with nullable props | A shared preview component must not assume its caller's `repoId` is non-null, and an optional `onClose` changes every branch's shape, not just the happy one |
 | 2026-08-16 | Patterns | `client/src/app/**/_components/**`, `client/src/lib/*.ts`, duplicated helpers | A deliberately duplicated COMPONENT does not exempt the duplicated HELPER beside it — §2 protects a design choice, not a directory |
@@ -35,6 +36,7 @@ appending its row here in the same edit.**
 | 2026-08-02 | Patterns | `client/src/components/**` vs `_components/` | Cross-route components go in `src/components/` |
 | 2026-08-02 | Patterns | `client/src/app/**`, filters and facets | A facet counter is computed between the filters, never around them |
 | 2026-08-02 | Patterns | `client/src/app/**`, filters and facets | Page-wide selection + per-component counts: don't disable the zero option |
+| 2026-08-17 | Tools | `client/src/components/diff-viewer/**`, `*.test.tsx` asserting focus | Unlike `scrollIntoView`, jsdom DOES implement `focus()` — no stub needed |
 | 2026-08-10 | Tools | `client/src/**/*.test.tsx`, jsdom | jsdom 25 implements no `window.CSS` at all, so `CSS.escape` throws |
 | 2026-08-10 | Tools | `client/src/**` effects | An Effect keeping a memoized list in its deps needs an `id:nonce` ref guard |
 | 2026-08-11 | Tools | `client/src/**/styles.ts`, CSS custom properties | A CSS custom property that does not exist fails SILENTLY — read `styles.css`, never a neighbouring `styles.ts` |
@@ -174,6 +176,31 @@ lines were in
 shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
+
+### 2026-08-17 — A record's own `stale` field is a snapshot from its LAST fetch — a sibling query key changing since then needs a client-side recompute too, folded into the record rather than a new prop
+
+**Rule:** when a stored record already carries its own `stale: boolean` (as
+`PrRiskBriefRecord` does, computed server-side from the PR's head commit and
+the latest review at READ time), do not treat that field as sufficient once it
+sits in the query cache. It is correct only until something else in the
+cache — the PR's `headSha`, a completed review — changes without a refetch of
+THIS record's own query key. That is exactly the 2026-08-09 asymmetric-staleness
+trap below, one layer up: `PrIntentRecord` has the identical shape and
+`OverviewTab.tsx` already recomputes its `stale` prop from `intent.head_sha`
+vs. the PR's current `headSha` rather than trusting `intent.stale` — the brief
+needed the same treatment, but the card's prop list
+(`plans/2026-08-16-pr-why-risk-brief.md` Step 11: `brief`, `loading`,
+`generating`, `result`, `onGenerate`, `onOpenFocus`) has no separate `stale`
+prop the way `IntentCard` does. The fix is to fold the recomputed value INTO
+the record before passing it down — `{ ...brief, stale: brief.stale ||
+(headSha mismatch) }` — rather than adding a prop the plan's signature didn't
+call for.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/OverviewTab.tsx`
+(`briefStale`/`briefWithStale`, alongside the pre-existing `stale` for intent);
+`client/src/app/repos/[repoId]/pulls/[number]/_components/BriefCard/BriefCard.tsx`
+(reads `brief.stale` only, never re-derives it itself — the recompute is the
+screen's job, per the rule below).
 
 ### 2026-08-16 — The cross-route promotion rule fires on a COMPONENT, not only on a pure helper
 
@@ -613,6 +640,22 @@ the address moved: the page is now an 8-line wrapper and the selection owner is
 (`severities` / `onToggleSeverity`).
 
 ## Tool & Library Notes
+
+### 2026-08-17 — Unlike `scrollIntoView`, jsdom DOES implement `HTMLElement.prototype.focus()` — no stub needed to assert focus landed
+
+**Quirk:** `components/diff-viewer/useDiffLineTarget.ts`'s post-navigation
+Effect calls both `scrollIntoView` and `focus({ preventScroll: true })` on two
+different elements. `scrollIntoView` does not exist in jsdom and must be
+stubbed with `vi.fn()` in every test that exercises the Effect (see the
+`scrollIntoView` entry below) — but `focus()` is real DOM behaviour jsdom
+already implements, including moving `document.activeElement`. A test can
+assert `document.activeElement?.id === fileHeadingId(path)` directly, with no
+stub, no `mock.contexts[0]` indirection. Reaching for a focus stub by analogy
+with the `scrollIntoView` gap is wasted effort.
+
+**Where:** `client/src/components/diff-viewer/useDiffLineTarget.ts:46-55`;
+`DiffTab.test.tsx` and `SmartDiffViewer.test.tsx`'s focus assertions
+(`plans/2026-08-16-pr-why-risk-brief.md` Step 10).
 
 ### 2026-08-10 — jsdom 25 implements no `window.CSS` at all, so `CSS.escape` throws — do not reach for it when building a selector
 

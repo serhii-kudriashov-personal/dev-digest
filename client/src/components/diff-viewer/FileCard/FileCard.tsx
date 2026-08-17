@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { Icon } from "@devdigest/ui";
 import type { PrFile } from "@/lib/types";
 import { AUTO_EXPAND_MAX_LINES } from "../constants";
-import { parsePatch, type Line } from "../helpers";
+import { fileHeadingId, parsePatch, type Line } from "../helpers";
 import {
   buildThreads,
   keysForLine,
@@ -87,7 +87,15 @@ export function FileCard({
 
   return (
     <div style={s.fileCard}>
-      <div onClick={toggle} style={s.fileHeader}>
+      {/* `tabIndex={-1}` + this id: `useDiffLineTarget` focuses this heading
+          after a programmatic scroll, without adding it to the tab order
+          (`plans/2026-08-16-pr-why-risk-brief.md` Step 10). */}
+      <div
+        id={fileHeadingId(file.path)}
+        tabIndex={-1}
+        onClick={toggle}
+        style={s.fileHeader}
+      >
         <Icon.ChevronRight size={13} style={chevronFor(open)} />
         <Icon.FileText size={14} style={s.fileIcon} />
         <span className="mono" style={s.filePath}>

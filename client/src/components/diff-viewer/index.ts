@@ -7,6 +7,6 @@ export { DiffViewer } from "./DiffViewer";
 export { FileCard } from "./FileCard";
 export type { DiffCommentApi } from "./comments";
 export type { DiffFindingsApi } from "./findings";
-export { lineAnchorId } from "./helpers";
+export { fileHeadingId, lineAnchorId } from "./helpers";
 export { useDiffLineTarget } from "./useDiffLineTarget";
 export type { DiffLineTargetApi } from "./useDiffLineTarget";

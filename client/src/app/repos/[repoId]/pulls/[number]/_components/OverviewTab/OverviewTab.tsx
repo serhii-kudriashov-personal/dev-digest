@@ -5,8 +5,10 @@ import { SectionLabel } from "@devdigest/ui";
 import type { PrFile } from "@devdigest/shared";
 import { usePrIntent, useDeriveIntent } from "@/lib/hooks/intent";
 import { useBlastRadius } from "@/lib/hooks/blast";
+import { usePrBrief, useGenerateBrief } from "@/lib/hooks/brief";
 import { IntentCard } from "../IntentCard";
 import { BlastRadiusCard } from "../BlastRadiusCard";
+import { BriefCard } from "../BriefCard";
 import { s } from "./styles";
 
 interface OverviewTabProps {
@@ -34,12 +36,23 @@ export function OverviewTab({
   const { data: intent, isLoading } = usePrIntent(prId);
   const derive = useDeriveIntent(prId);
   const { data: blast, isLoading: blastLoading } = useBlastRadius(prId);
+  const { data: brief, isLoading: briefLoading } = usePrBrief(prId);
+  const generateBrief = useGenerateBrief(prId);
 
   // Derived during render, never stored and never synced by an Effect: it is a
   // pure function of two values already in hand. The server also reports its
   // own `stale`, but recomputing here keeps the badge correct the moment the
   // PR's head sha changes in the cache.
   const stale = !!intent?.head_sha && !!headSha && intent.head_sha !== headSha;
+
+  // Same belt-and-braces recompute for the brief: the server's own `stale`
+  // reflects the LAST time this document was fetched, and two panels of one
+  // screen reading two query keys go stale asymmetrically otherwise
+  // (`client/INSIGHTS.md` 2026-08-09). Folded into the record rather than a
+  // separate prop, so `BriefCard` still takes exactly one `brief`.
+  const briefStale =
+    !!brief && (brief.stale || (!!brief.head_sha && !!headSha && brief.head_sha !== headSha));
+  const briefWithStale = brief ? { ...brief, stale: briefStale } : brief;
 
   const changedPaths = React.useMemo(() => new Set(files.map((f) => f.path)), [files]);
 
@@ -60,6 +73,15 @@ export function OverviewTab({
         repoFullName={repoFullName}
         headSha={headSha ?? null}
         onOpenCaller={onOpenCaller}
+      />
+
+      <BriefCard
+        brief={briefWithStale ?? null}
+        loading={briefLoading}
+        generating={generateBrief.isPending}
+        result={generateBrief.data}
+        onGenerate={() => generateBrief.mutate({ force: true })}
+        onOpenFocus={onOpenCaller}
       />
 
       {prBody && (

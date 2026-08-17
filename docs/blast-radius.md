@@ -238,8 +238,9 @@ files that *directly* call a changed symbol, which is the semantics
 index no query uses. That is a documented state, not an oversight to fix by
 inventing a consumer.
 
-**Prior PRs touching these files.** `PrHistory` stays unused, and `pr_brief` stays
-empty — both are reserved for a later lesson.
+**Prior PRs touching these files.** `PrHistory` stays unused, reserved for a
+later lesson. `pr_brief` no longer stays empty — it is written by the PR Risk
+Brief (`docs/pr-risk-brief.md`).
 
 ## Where things are
 

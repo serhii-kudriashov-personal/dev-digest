@@ -21,6 +21,8 @@ appending its row here in the same edit.**
 | 2026-08-09 | Works | `server/test/**`, response assertions | A value returned but rendered NOWHERE has no UI that can notice it breaking — assert it at the boundary |
 | 2026-08-08 | Works | `server/src/modules/**/service.ts`, facade tests | A never-throw facade is untestable through a caller with its own `.catch` — test the guarantee at the service |
 | 2026-08-03 | Works | `server/test/*.it.test.ts`, vitest config | `--no-file-parallelism` makes the integration suite deterministic AND faster; re-running is the wrong fix |
+| 2026-08-17 | Doesn't | `server/test/*.it.test.ts`, `dockerAvailable()`, multi-turn verification | "Docker was unavailable" from an earlier turn is not a property of the environment — it re-checks on every invocation |
+| 2026-08-17 | Doesn't | `plans/**`, `Done when` file references | A plan's `Done when` naming a specific test file as proof does not mean that file actually asserts the thing |
 | 2026-08-08 | Doesn't | `server/test/reviews.it.test.ts`, `run-executor.ts`, provider mocks | A pre-work step made the suite spend REAL money — `.env` holds live keys and the file mocks only ONE provider |
 | 2026-08-05 | Doesn't | `server/src/modules/**`, ports from upstream | Porting `upstream/reference/full-build`'s conventions module fails three of this repo's gates |
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
@@ -32,6 +34,9 @@ appending its row here in the same edit.**
 | 2026-08-10 | Patterns | prompts under `server/src/modules/**`, intent | A prompt that summarises user text must state its OUTPUT LANGUAGE |
 | 2026-08-11 | Patterns | `server/src/modules/repo-intel/**`, blast radius | `repo_index_state.status='partial'` does NOT mean "a working index" |
 | 2026-08-11 | Patterns | `server/src/modules/repo-intel/service.ts` | A cap named `MAX_..._PER_SYMBOL` was applied to the FLATTENED list |
+| 2026-08-17 | Patterns | `server/src/modules/brief/service.ts`, `server/test/*.it.test.ts` concurrency cases | `BriefService`'s single-flight `Map` is module-scoped, so it is shared across every instance in the process |
+| 2026-08-17 | Patterns | `server/src/modules/brief/constants.ts`, `pipeline.ts#fitBudget` | `BRIEF_DROP_ORDER`'s array reads top-to-bottom but drops bottom-to-top |
+| 2026-08-17 | Patterns | `server/.dependency-cruiser.cjs`, any slice needing another slice's pure helper | A slice's `constants.ts` export is a sanctioned cross-slice import; a slice's pure helper function is not — promote it to `modules/_shared/<name>.ts` |
 | 2026-08-09 | Patterns | `server/src/modules/smart-diff/**`, diff paths | `normalizePath` strips `a/` and `b/`, so a real top-level directory with either name breaks |
 | 2026-08-08 | Patterns | `server/.dependency-cruiser.cjs`, `server/src/platform/**` | `no-cross-slice-import` scopes its `from` to `^src/modules/` — which is why the container may import a slice's service |
 | 2026-08-05 | Patterns | `reviewer-core/src/prompt.ts` callers, `server/src/modules/**` | A non-review caller of `assemblePrompt` must use the `diff` slot, and will be mislabelled |
@@ -190,6 +195,48 @@ to probe.
 ("Commands") without the flag — add it there if you touch that table.
 
 ## What Doesn't Work
+
+### 2026-08-17 — "Docker was unavailable" from an earlier turn is not a property of the environment — a `dockerAvailable()`-gated `*.it.test.ts` file re-checks on every invocation
+
+**Tried:** trusting a prior session's report that `server/test/brief.it.test.ts`
+could not run because `docker info` had failed, and carrying that as fixed
+context into a later verification pass in the same task.
+
+**Failed:** it was stale. A later `plan-verifier` run in the same session
+found the Docker daemon reachable and ran the exact same file for real —
+11/11 passed, 0 skipped — where the earlier pass had recorded 11 skipped.
+Nothing in the repo changed between the two checks; only the daemon's
+up/down state did. `dockerAvailable()` (`server/test/helpers/pg.ts`) is
+evaluated fresh at the top of the file on every `vitest run`, so "Docker is
+down" is a fact about *this invocation*, never a fact about the machine or
+the session.
+
+**Instead:** re-run `docker info` (or just re-run the `.it.test.ts` file)
+before reporting a DB-backed suite as unverified, rather than relaying an
+earlier turn's skip count. A `0 run / N skipped` result from one invocation
+is not evidence the next invocation will skip too.
+
+**Where:** `server/test/brief.it.test.ts:21-27` (`dockerAvailable()` gate);
+`server/test/helpers/pg.ts`.
+
+### 2026-08-17 — A plan's `Done when` naming a specific test file as proof does not mean that file actually asserts the thing
+
+**Tried:** trusting `plans/2026-08-16-pr-why-risk-brief.md` Step 8's `Done
+when` — "`routes-smoke.test.ts` passes with both new routes registered" — as
+evidence the new `/pulls/:id/brief` routes were exercised by that file.
+
+**Failed:** `routes-smoke.test.ts` has no assertion touching `/pulls/:id/brief`
+at all. Route registration was actually proven by `brief.it.test.ts`'s
+`app.inject()` calls against the live routes, a different file than the one
+the plan's own verification step names.
+
+**Instead:** when a `Done when` line names a specific file, `rg` that file for
+the claimed behaviour before accepting the check as satisfied — a plan step
+can pass its literal command (the file exists and is green) while the
+specific claim attached to it is false.
+
+**Where:** `plans/2026-08-16-pr-why-risk-brief.md` Step 8; `server/test/routes-smoke.test.ts`;
+the actual proof is `server/test/brief.it.test.ts`.
 
 ### 2026-08-08 — Adding a pre-work step to the review executor made `reviews.it.test.ts` spend REAL money, because `.env` holds live keys and that file mocks only ONE provider
 
@@ -368,6 +415,94 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-17 — `BriefService`'s single-flight `Map` is module-scoped, so it is shared across every instance in the process — a test that doesn't await `generate()` can leak a promise into the next case
+
+**Rule:** `brief/service.ts`'s `inFlight` de-duplication map is declared at
+module scope (`const inFlight = new Map<string, Promise<BriefGenerationResult>>()`),
+not as an instance field, because `BriefService` is constructed fresh per
+request (`new BriefService(app.container)` in `routes.ts`) and an instance
+field would never survive across the concurrent requests it exists to
+collapse. The consequence: every `BriefService` built anywhere in the same
+process — including a different `buildApp()` in a different `it()` block of
+the same test file — shares one map keyed by `prId`. Sequential `await`s
+across test cases are safe today because each `generate()` call is awaited to
+completion (and removes its own entry in `finally`) before the next test
+starts. The trap is a *future* test that fires `generate()` without awaiting
+it and moves on to assert something else: that leaves a live promise sitting
+in the shared map under the same `prId`, and the next test case for that PR id
+joins the stale in-flight call instead of starting its own.
+
+**Why:** discovered writing `server/test/brief.it.test.ts`'s AC-4/NFR-7
+concurrency assertion (two concurrent `POST` requests → one model call) for
+`plans/2026-08-16-pr-why-risk-brief.md` Step 9 — reasoning through the map's
+scope was required to know whether two `it()` blocks reusing the same seeded
+`prId` could interfere with each other.
+
+**Where:** `server/src/modules/brief/service.ts:24` (`inFlight` declaration);
+`server/test/brief.it.test.ts` (the AC-4/NFR-7 case that depends on this
+scoping being understood correctly).
+
+### 2026-08-17 — `BRIEF_DROP_ORDER`'s array reads top-to-bottom but drops bottom-to-top: the loop walks it from the LAST entry, not the first
+
+**Rule:** `constants.ts`'s `BRIEF_DROP_ORDER` array is
+`['linked_spec', 'linked_issue', 'findings', 'blast_radius', 'derived_intent']`
+and its docstring says blocks are "popped from the TAIL" — but "the tail"
+means the tail of the iteration, not a literal `.pop()` off this array. Read
+`pipeline.ts#fitBudget`'s loop before assuming the array's reading order is
+the drop order: it iterates `for (let i = BRIEF_DROP_ORDER.length - 1; i >= 0; i--)`,
+so the actual sequence when several blocks must go over budget is
+`derived_intent → blast_radius → findings → linked_issue → linked_spec` — the
+exact REVERSE of how the array reads top-to-bottom. The code is correct once
+the loop is traced; a reader who only skims the array will guess backwards.
+
+**Why:** surfaced writing `server/test/brief-helpers.test.ts`'s AC-13 case
+(whole blocks dropped from the tail, never mid-content) for
+`plans/2026-08-16-pr-why-risk-brief.md` Step 9 — the first draft asserted the
+array's literal order and failed against the real drop sequence.
+
+**Where:** `server/src/modules/brief/constants.ts` (`BRIEF_DROP_ORDER`
+declaration and docstring); `server/src/modules/brief/pipeline.ts`
+(`fitBudget`'s reverse-indexed loop); `server/test/brief-helpers.test.ts` (the
+AC-13 assertion this saves the next reader from re-deriving).
+
+### 2026-08-17 — A slice's `constants.ts` export is a sanctioned cross-slice import; a slice's pure helper function is not — promote it to `modules/_shared/<name>.ts`
+
+**Rule:** when a second slice needs a *value* another slice already exports
+from its `constants.ts` (a regex, an enum, a cap), import it directly —
+`constants.ts` is not in `SLICE_PRIVATE`, so the gate stays green and the rule
+stays single-sourced. But when what's needed is a *pure function* —
+`normalizePath`, `hunkHeaders`, a link-parser — do not reach into the owning
+slice's `helpers.ts`; `SLICE_PRIVATE` blocks it and `pnpm arch` fails. Either
+duplicate the function locally with a docblock naming the original and the
+reason, or, once a third consumer wants the same function, promote it to
+`modules/_shared/<name>.ts` — any filename other than `helpers.ts`,
+`service.ts`, `repository.ts`, `routes.ts` or `run-executor.ts` falls outside
+`SLICE_PRIVATE` and is importable by every slice.
+
+**Why:** building the PR Risk Brief slice (`modules/brief/**`) needed
+`smart-diff`'s exact-match path normalization (AC-17) and `intent`'s
+hunk-range/link-parsing helpers. `smart-diff/helpers.ts#normalizePath` and
+`intent/helpers.ts#hunkHeaders` are both `SLICE_PRIVATE` and fail
+`no-cross-slice-import` if imported from another slice. But
+`smart-diff/constants.ts#PATH_PREFIX_PATTERN` is not — importing the pattern
+and re-deriving the one-line `.replace()` locally is gate-clean, and it keeps
+the normalization *rule* (including its documented `a/`/`b/` sharp edge, see
+2026-08-09 above) single-sourced even though the call site is duplicated.
+There is no equivalent constant for the hunk/link helpers, so those are plain
+duplicated functions for now, with `modules/_shared/pr-text.ts` recorded as the
+promotion target if a third slice ever needs them. `_shared` is already the
+cross-slice home in this repo — `intent/routes.ts:4-5` imports
+`_shared/context.js` and `_shared/schemas.js` today, so this is an existing
+pattern, not a new one.
+
+**Where:** `server/src/modules/smart-diff/constants.ts:94`
+(`PATH_PREFIX_PATTERN`, importable); `server/src/modules/smart-diff/helpers.ts:45`
+(`normalizePath`, not importable); `server/src/modules/intent/helpers.ts`
+(`hunkHeaders` etc., not importable); `server/src/modules/intent/routes.ts:4-5`
+(the `_shared/` precedent); `server/.dependency-cruiser.cjs:65`
+(`SLICE_PRIVATE`); the decision is recorded in
+`plans/2026-08-16-pr-why-risk-brief.md` Step 4 and Risk R1.
 
 ### 2026-08-16 — The composite PK that excuses a link table from an FK index leaves its SECOND column unindexed — and that is the column the reverse lookup filters on
 

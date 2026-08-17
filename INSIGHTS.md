@@ -24,6 +24,7 @@ entry nobody is told to open.
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-17 | Works | `specs/**`, `server/src/db/schema/**`, `docs/**`, implementation planning | A spec's claim that "no such record exists" needs verifying against the table, not just against the contract's declared type |
 | 2026-08-16 | Works | `specs/**`, design review, `.claude/agents/spec-writer.md` | Check every string a design mock draws against the feature's own specified input list, not against plausibility |
 | 2026-08-16 | Errors | `INSIGHTS.md` index rows, superseding an entry, `.claude/agents/**` | A superseded entry whose INDEX ROW still states the stale claim keeps propagating it — the index is the part agents actually read |
 | 2026-08-16 | Doesn't | `plans/**`, `Done when` checks, `.claude/agents/implementation-planner.md` | A literal-string `Done when` grep goes unsatisfiable when another resolved open question in the same plan introduces the matching token |
@@ -95,6 +96,36 @@ Fixes · Open = Open Questions.
 ---
 
 ## What Works
+
+### 2026-08-17 — A spec's claim that "no such record exists" needs verifying against the table, not just against the contract's declared type
+
+**Pattern:** When a spec (or any prior document) asserts "no persisted record
+exists for X" or "this table stays empty", check that against the actual
+schema and migrations before planning around it — not against a `rg` for the
+contract type's name. A spec can be exactly right about the *document shape*
+while being wrong about *storage*, and the two are easy to conflate because
+they are usually true together.
+
+**Why:** `specs/2026-08-16-pr-why-risk-brief.md` §Contract promises stated
+"**Records that already exist.** None do… the only references to it in the
+server source are its own declaration and the barrel that re-exports it." That
+is true for the `PrBrief` Zod schema — nothing ever constructed one — but false
+for storage: the `pr_brief` **table** (`pr_id` PK, `json` jsonb `notNull`) has
+existed since the initial migration and is referenced from `db/schema.ts`. The
+distinction changes the plan two ways: writing to `pr_brief.json` needs no
+migration (the column is already there), and it falsifies two other documents
+that copied the same "stays empty" claim — `docs/blast-radius.md:241-242` and
+`server/src/modules/blast/service.ts:31` — both of which now need a correction
+in the same change that starts writing the column. Trusting the spec's prose
+without checking the schema would have produced a plan with a needless
+migration step, or one that missed correcting the two prose claims that go
+stale the moment it lands.
+
+**Where:** `server/src/db/schema/reviews.ts:122-127`; DDL
+`server/src/db/migrations/0000_init.sql:211-214`; contradicted prose at
+`docs/blast-radius.md:241-242` and `server/src/modules/blast/service.ts:31`;
+the corrected plan is `plans/2026-08-16-pr-why-risk-brief.md` Step 5 and
+Step 12.
 
 ### 2026-08-16 — Check every string a design mock draws against the feature's own specified input list, not against plausibility
 

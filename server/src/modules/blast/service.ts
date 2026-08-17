@@ -27,9 +27,10 @@ import {
  *    import graph.** That is what the index-state gate below is for — see the
  *    comment on step 9.
  *
- * Nothing is persisted or cached: the result is recomputed per request from
- * indexed reads. `pr_brief` is NOT written — it stays reserved for a later
- * lesson.
+ * Nothing here is persisted or cached: the result is recomputed per request
+ * from indexed reads. `pr_brief` IS written, elsewhere — by `modules/brief/`
+ * (see `docs/pr-risk-brief.md`), which reads this service's own output through
+ * `container.blast` rather than writing to the table itself.
  */
 export class BlastService {
   constructor(private container: Container) {}
