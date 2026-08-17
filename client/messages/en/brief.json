@@ -69,8 +69,6 @@
     "generating": "Generating…",
     "retry": "Retry",
     "staleHint": "New activity since this brief was generated — regenerate for a current read.",
-    "whatTitle": "What",
-    "whyTitle": "Why",
     "empty": {
       "title": "No brief yet",
       "body": "Generate a why-and-risk summary for this pull request."
@@ -96,6 +94,7 @@
     "focusTitle": "Review Focus — Read this first",
     "noFocus": "No specific lines to start with.",
     "openFocus": "Open {path} line {line} in the diff",
+    "openFile": "Open {path} in the diff",
     "missingLabel": "Missing inputs",
     "inputs": {
       "pr_identity": "PR identity",
@@ -107,6 +106,9 @@
     },
     "generatedLabel": "Model-generated",
     "costLabel": "Cost",
-    "costUnknown": "unknown"
+    "costUnknown": "unknown",
+    "barTitle": "Risk brief",
+    "includedLabel": "Inputs used",
+    "droppedLabel": "{count} reference(s) dropped as unresolvable"
   }
 }

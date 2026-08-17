@@ -24,7 +24,13 @@ interface IntentCardProps {
   onDerive: () => void;
 }
 
-export function IntentCard({ intent, loading, stale, deriving, onDerive }: IntentCardProps) {
+export function IntentCard({
+  intent,
+  loading,
+  stale,
+  deriving,
+  onDerive,
+}: IntentCardProps) {
   const t = useTranslations("brief");
 
   if (loading) return null;

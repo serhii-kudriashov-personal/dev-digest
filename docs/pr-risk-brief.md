@@ -25,7 +25,7 @@ prompt states so explicitly (AC-25) — the same reasoning that keeps
 
 ```mermaid
 flowchart TD
-  UI["BriefCard<br/>(Overview tab)"] -->|"GET /pulls/:id/brief"| RTG["brief/routes.ts<br/>404 if never generated"]
+  UI["BriefBar + IntentCard risks<br/>+ ReviewFocusSection<br/>(Overview tab, one fetch)"] -->|"GET /pulls/:id/brief"| RTG["brief/routes.ts<br/>404 if never generated"]
   UI -->|"POST /pulls/:id/brief<br/>{ force? }"| RTP["brief/routes.ts<br/>rate-limited: 3 / minute, keyed on PR id"]
 
   RTG --> SVG["BriefService.get(workspaceId, prId)"]
@@ -167,8 +167,9 @@ facts (AC-34, AC-35), in `BriefService.isStale`:
 The client repeats this recompute rather than trusting the server's `stale`
 bit once it sits in the query cache — the identical belt-and-braces
 `OverviewTab.tsx` already applies to `PrIntentRecord`, folded into the record
-it passes to `BriefCard` rather than a separate prop
-(`client/INSIGHTS.md` 2026-08-09, 2026-08-17).
+it passes to all three surfaces (`BriefBar`, `IntentCard`, `ReviewFocusSection`)
+rather than a separate prop, which is why the recompute stays in `OverviewTab`
+and not in any one of them (`client/INSIGHTS.md` 2026-08-09, 2026-08-17).
 
 **Single-flight de-duplication** (AC-4, NFR-7) is a module-level
 `Map<prId, Promise<BriefGenerationResult>>` in `service.ts`, not an instance
@@ -212,15 +213,46 @@ the smooth, centred scroll.
 
 ## Copy, and what is rendered as data
 
-Every fixed label on the card comes from `messages/en/brief.json`'s
-`riskBrief` namespace (AC-45). The `what`, `why`, each risk's `title` and
+Every fixed label comes from `messages/en/brief.json`'s `riskBrief` namespace
+(AC-45), on all three surfaces the layout revision below splits it across.
+`risk_level` and the cost line are the bar's (`BriefBar`); the zero-risk
+sentence is the Intent card's. The `what`, `why`, each risk's `title` and
 `explanation`, and each focus entry's `reason` are model-authored text and are
 rendered as plain data — a `{value}` in JSX — never looked up as a message
 key, the same rule `blast.summary` and `intent.intent` already follow.
 `risk_level` is shown as a text label beside its colour, never colour alone
 (AC-28); an unattributable `cost_usd` reads "unknown", never "$0.00" (AC-40,
 root `INSIGHTS.md` 2026-08-02); a zero-risk answer states so explicitly rather
-than rendering an empty area (AC-43).
+than rendering an empty area (AC-43). Two more labels, both on the bar, close
+SPEC-02 AC-20: `riskBrief.includedLabel` names the inputs the brief did use,
+and `riskBrief.droppedLabel` — an ICU `{count}` message — is the visible form
+of the dropped-reference count, rendered only when it is non-zero. The bar's
+index-incomplete badge is the one label on it that is **not** from the
+`riskBrief` namespace: it reads `blast.reason.*`, because that reason text
+belongs to L06 and must not be duplicated (`BriefBar.tsx`).
+
+## The Overview tab layout revision (SPEC-03)
+
+SPEC-03 supersedes SPEC-02 for **placement only** — every acceptance criterion
+above still holds, observed on a different surface than the one it was written
+against. The shipped single `BriefCard` was split into three:
+
+1. **`BriefBar`** — the header row: status ladder, risk level, what/why,
+   regenerate, and the input accounting. Renders first.
+2. **`IntentCard` + `BlastRadiusCard`**, side by side in a CSS grid row. The
+   Intent card now renders the brief's risks beneath its in-scope/out-of-scope
+   bullets — it computes, fetches, validates and caps none of them, the same
+   relationship it already has with `intent.intent`. A PR with no derived
+   intent shows the Intent card's own empty state and no risks at all (Q3-B):
+   a brief's risks are shown only alongside a rendered intent, never in a
+   second, unrelated card.
+3. **`ReviewFocusSection`** — the "read this first" list, standalone, between
+   the card row and the Description. It owns no state ladder of its own: a
+   never-briefed PR renders nothing here, not an error or an empty box —
+   `BriefBar` alone carries that state.
+
+All three still take **resolved data plus flags** from one `usePrBrief` call
+in `OverviewTab`, never a `prId` they fetch from themselves.
 
 ## Where things are
 
@@ -236,6 +268,9 @@ than rendering an empty area (AC-43).
 | `container.blast` / `container.intent` — the sanctioned cross-slice channel | `server/src/platform/container.ts` |
 | Proofs | `server/test/brief-helpers.test.ts`, `server/test/brief.it.test.ts` |
 | Query hook + cache write | `client/src/lib/hooks/brief.ts` |
-| The card | `client/src/app/repos/[repoId]/pulls/[number]/_components/BriefCard/` |
+| The header row (status, risk level, what/why, regenerate, input accounting) | `client/src/app/repos/[repoId]/pulls/[number]/_components/BriefBar/` |
+| The risks list, rendered inside the Intent card | `client/src/app/repos/[repoId]/pulls/[number]/_components/IntentCard/` |
+| The standalone "read this first" section | `client/src/app/repos/[repoId]/pulls/[number]/_components/ReviewFocusSection/` |
+| The shared risk-level colour ramp (`RISK_COLOR`) | `client/src/app/repos/[repoId]/pulls/[number]/constants.ts` |
 | Focus after navigation (shared with L04/L06) | `client/src/components/diff-viewer/useDiffLineTarget.ts`, `helpers.ts#fileHeadingId`, `FileCard/` |
 | Copy | `client/messages/en/brief.json` (`riskBrief` namespace) |

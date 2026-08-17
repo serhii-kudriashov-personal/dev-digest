@@ -2,39 +2,56 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Badge, Button, EmptyState, SectionLabel } from "@devdigest/ui";
+import { Badge, EmptyState, SectionLabel } from "@devdigest/ui";
 import type { BriefGenerationResult, PrRiskBriefRecord } from "@devdigest/shared";
 import { formatCost } from "@/lib/format";
 import { s } from "./styles";
-import { RISK_COLOR } from "./constants";
+import { RISK_COLOR } from "../../constants";
 
 /**
- * The PR Risk Brief (SPEC-02): a why + risk summary and up to five
- * "read this first" entries that jump into the reviewer-ordered diff.
+ * The PR Risk Brief's header row: status, risk level, the risks list, and the
+ * input accounting (included/missing/dropped). The `what`/`why` text, the
+ * regenerate control, and the review-focus list live elsewhere —
+ * `PrBriefSection` (the Overview tab's top section, which pairs `what`+`why`
+ * with the latest review's verdict/score once one exists, and owns
+ * regenerate since it's the surface that shows the generated text) and
+ * `ReviewFocusSection`.
+ *
+ * Still owns the FIRST-generation ladder (empty / generating / failed /
+ * not_configured / too_large): `PrBriefSection` renders nothing at all until
+ * a brief exists, so those states — and their own CTA to generate or retry —
+ * have nowhere else to live.
  *
  * Takes RESOLVED DATA plus flags, never a `prId` it fetches from — same
  * contract as `IntentCard`/`BlastRadiusCard`. `brief` is the last STORED
  * document (from the query cache); `result` is the last `generate()` OUTCOME
  * (from the mutation), which is how a `too_large` / `failed` / `not_configured`
- * answer reaches the card even though none of those states persists anything.
+ * answer reaches the bar even though none of those states persists anything.
  */
-interface BriefCardProps {
+interface BriefBarProps {
   brief: PrRiskBriefRecord | null | undefined;
   loading: boolean;
   generating: boolean;
   result: BriefGenerationResult | null | undefined;
   onGenerate: () => void;
-  onOpenFocus: (path: string, line: number) => void;
+  /**
+   * Opens a risk's `file_refs` entry in the Diff tab — same callback
+   * `BlastRadiusCard`'s caller rows use. A risk carries no line number, so
+   * every ref opens at line 1: enough to land on the right file's card, and
+   * harmless when no rendered diff line matches (`useDiffLineTarget.goTo`
+   * just opens the card without a scroll in that case).
+   */
+  onOpenCaller: (path: string, line: number) => void;
 }
 
-export function BriefCard({
+export function BriefBar({
   brief,
   loading,
   generating,
   result,
   onGenerate,
-  onOpenFocus,
-}: BriefCardProps) {
+  onOpenCaller,
+}: BriefBarProps) {
   const t = useTranslations("brief");
   const tBlast = useTranslations("blast");
 
@@ -47,36 +64,36 @@ export function BriefCard({
   if (!brief) {
     if (generating) {
       return (
-        <BriefSection>
+        <BriefBarSection>
           <EmptyState icon="Shield" title={t("riskBrief.generating")} />
-        </BriefSection>
+        </BriefBarSection>
       );
     }
     if (outcome?.state === "not_configured") {
       return (
-        <BriefSection>
+        <BriefBarSection>
           <EmptyState
             icon="Settings"
             title={t("riskBrief.notConfigured.title")}
             body={t("riskBrief.notConfigured.body")}
           />
-        </BriefSection>
+        </BriefBarSection>
       );
     }
     if (outcome?.state === "too_large") {
       return (
-        <BriefSection>
+        <BriefBarSection>
           <EmptyState
             icon="Shield"
             title={t("riskBrief.tooLarge.title")}
             body={t("riskBrief.tooLarge.body")}
           />
-        </BriefSection>
+        </BriefBarSection>
       );
     }
     if (outcome?.state === "failed") {
       return (
-        <BriefSection>
+        <BriefBarSection>
           <EmptyState
             icon="Shield"
             title={t("riskBrief.failed.title")}
@@ -84,11 +101,11 @@ export function BriefCard({
             cta={t("riskBrief.retry")}
             onCta={onGenerate}
           />
-        </BriefSection>
+        </BriefBarSection>
       );
     }
     return (
-      <BriefSection>
+      <BriefBarSection>
         <EmptyState
           icon="Shield"
           title={t("riskBrief.empty.title")}
@@ -96,7 +113,7 @@ export function BriefCard({
           cta={t("riskBrief.generate")}
           onCta={onGenerate}
         />
-      </BriefSection>
+      </BriefBarSection>
     );
   }
 
@@ -109,7 +126,7 @@ export function BriefCard({
     brief.cost_usd == null ? t("riskBrief.costUnknown") : formatCost(brief.cost_usd);
 
   return (
-    <BriefSection>
+    <BriefBarSection>
       <div style={s.header}>
         <div style={s.headerLeft}>
           <Badge color={risk.c} bg={risk.bg} icon={risk.icon}>
@@ -126,54 +143,9 @@ export function BriefCard({
             </Badge>
           )}
         </div>
-        <Button
-          size="sm"
-          kind="tertiary"
-          icon="RefreshCw"
-          onClick={onGenerate}
-          loading={generating}
-          disabled={generating}
-        >
-          {generating ? t("riskBrief.generating") : t("riskBrief.regenerate")}
-        </Button>
       </div>
 
       {brief.stale && <div style={s.note}>{t("riskBrief.staleHint")}</div>}
-
-      <div style={s.whyBlock}>
-        <div>
-          <div style={s.sectionTitle}>{t("riskBrief.whatTitle")}</div>
-          <div style={s.why}>{brief.what}</div>
-        </div>
-        <div>
-          <div style={s.sectionTitle}>{t("riskBrief.whyTitle")}</div>
-          <div style={s.why}>{brief.why}</div>
-        </div>
-      </div>
-
-      <div style={s.sectionTitle}>{t("riskBrief.focusTitle")}</div>
-      {brief.review_focus.length === 0 ? (
-        <div style={s.note}>{t("riskBrief.noFocus")}</div>
-      ) : (
-        <div style={s.focusList}>
-          {brief.review_focus.map((entry, i) => (
-            <button
-              key={`${entry.path}:${entry.line}:${i}`}
-              type="button"
-              style={s.focusRow}
-              aria-label={t("riskBrief.openFocus", { path: entry.path, line: entry.line })}
-              onClick={() => onOpenFocus(entry.path, entry.line)}
-            >
-              <span style={s.focusPath} title={entry.path}>
-                {entry.path}:{entry.line}
-              </span>
-              <span style={s.focusReason} title={entry.reason}>
-                {entry.reason}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
 
       <div style={s.sectionTitle}>{t("block.risks")}</div>
       {brief.risks.length === 0 ? (
@@ -191,9 +163,33 @@ export function BriefCard({
                   <span style={s.riskTitle}>{r.title}</span>
                 </div>
                 <div style={s.riskExplanation}>{r.explanation}</div>
+                {r.file_refs.length > 0 && (
+                  <div style={s.riskRefs}>
+                    {r.file_refs.map((path) => (
+                      <button
+                        key={path}
+                        type="button"
+                        style={s.riskRefButton}
+                        aria-label={t("riskBrief.openFile", { path })}
+                        onClick={() => onOpenCaller(path, 1)}
+                      >
+                        {path}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {brief.included_inputs.length > 0 && (
+        <div style={s.meta}>
+          <span>{t("riskBrief.includedLabel")}:</span>
+          {brief.included_inputs.map((label) => (
+            <Badge key={label}>{t(`riskBrief.inputs.${label}`)}</Badge>
+          ))}
         </div>
       )}
 
@@ -206,21 +202,27 @@ export function BriefCard({
         </div>
       )}
 
+      {brief.dropped_refs > 0 && (
+        <div style={s.meta}>
+          <span>{t("riskBrief.droppedLabel", { count: brief.dropped_refs })}</span>
+        </div>
+      )}
+
       <div style={s.meta}>
         <Badge icon="Sparkles">{t("riskBrief.generatedLabel")}</Badge>
         <span>
           {t("riskBrief.costLabel")}: {costText}
         </span>
       </div>
-    </BriefSection>
+    </BriefBarSection>
   );
 }
 
-function BriefSection({ children }: { children: React.ReactNode }) {
+function BriefBarSection({ children }: { children: React.ReactNode }) {
   const t = useTranslations("brief");
   return (
     <section>
-      <SectionLabel icon="Shield">{t("block.risks")}</SectionLabel>
+      <SectionLabel icon="Shield">{t("riskBrief.barTitle")}</SectionLabel>
       <div style={s.card}>{children}</div>
     </section>
   );

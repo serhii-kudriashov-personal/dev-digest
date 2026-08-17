@@ -124,6 +124,14 @@ export function PrDetailView() {
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
+  // The Overview tab's PR Brief section reads the newest run only — cost and
+  // tokens live on the `agent_runs` row, not the review, so they are joined by
+  // `run_id` here the same way `FindingsTab` already joins cost onto a review.
+  const latestReview = runs[0] ?? null;
+  const latestRun =
+    latestReview?.run_id != null
+      ? (prRuns ?? []).find((r) => r.run_id === latestReview.run_id) ?? null
+      : null;
   // Memo on `reviews`, not on `runs`: `runs` is a fresh array every render, so
   // depending on it would defeat the memo — and listing `reviews` while reading
   // `runs` is the same thing written in a way the linter cannot verify.
@@ -199,6 +207,10 @@ export function PrDetailView() {
             prBody={pr.body}
             repoFullName={repoFullName}
             files={pr.files}
+            latestReview={latestReview}
+            latestReviewCostUsd={latestRun?.cost_usd ?? null}
+            latestReviewTokensIn={latestRun?.tokens_in ?? null}
+            onOpenLatestRun={() => setTab("findings")}
             // One `router.replace`, not two: `tab` and `goto` have to land in the
             // same navigation or the second call would rebuild from the same
             // `search` snapshot and drop the first.

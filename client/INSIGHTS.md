@@ -18,6 +18,10 @@ appending its row here in the same edit.**
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-17 | Patterns | `client/.../VerdictBanner/**`, `client/.../PrBriefSection/**`, `client/.../ReviewRunAccordion/**` | `VerdictBanner` gained three opt-in props only `PrBriefSection` ever passes — next one-caller prop should split the components instead |
+| 2026-08-17 | Patterns | `client/.../PrBriefSection/**`, `client/.../ReviewRunAccordion/**`, `review.summary` vs `brief.what`/`why` | `PrBriefSection`'s text is `brief.what + brief.why`, NEVER `review.summary` — two summary-shaped strings answer different questions |
+| 2026-08-17 | Patterns | `client/.../BriefBar/**`, `client/src/vendor/shared/contracts/review-api.ts`, `BriefRisk` | `BriefRisk.file_refs` was on the wire since SPEC-02 shipped and was never rendered anywhere — a contract field existing is not evidence a UI reads it |
+| 2026-08-17 | Patterns | `specs/**`, `plans/**`, `client/.../BriefBar/**`, `client/.../IntentCard/**` | A shipped placement decision from a `specs/*.md`/`plans/*.md` can be reversed before the doc is ever updated — the markdown is not proof of the current UI |
 | 2026-08-17 | Patterns | `client/src/app/**/_components/OverviewTab/**`, records carrying their own `stale` field | A record's own `stale` field is a snapshot from its last fetch — recompute client-side and fold it back in, don't trust it or add a new prop |
 | 2026-08-16 | Patterns | `client/src/components/**`, `client/src/app/**/_components/**`, cross-route reuse | The cross-route promotion rule fires on a COMPONENT, not only on a pure helper |
 | 2026-08-16 | Patterns | `client/src/components/document-preview/**`, shared components with nullable props | A shared preview component must not assume its caller's `repoId` is non-null, and an optional `onClose` changes every branch's shape, not just the happy one |
@@ -176,6 +180,119 @@ lines were in
 shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
+
+### 2026-08-17 — `VerdictBanner` gained THREE opt-in props (`costUsd`/`tokensIn`, `onOpenRun`, and effectively regenerate lives beside it) that only `PrBriefSection` ever passes — a shared component is quietly becoming one caller's private layout
+
+**Rule:** `VerdictBanner.tsx` is used by exactly two callers —
+`ReviewRunAccordion` (Agent Runs tab, one banner per expanded run) and
+`PrBriefSection` (Overview tab's top section). Across this session,
+`PrBriefSection` needed three things `ReviewRunAccordion` never wants: a
+cost/tokens line under the score gauge, a "View run details" button beside
+the agent-name badge, and (in a sibling change) its own regenerate control.
+Each was added as an OPTIONAL prop, gated on the prop being explicitly passed
+(`costUsd !== undefined`, `onOpenRun &&`) rather than always rendering — so
+`ReviewRunAccordion`'s call site is untouched and all of its tests still pass
+unmodified. This is the right call for NOW (each addition is cheap, additive,
+and independently gated), but if a FOURTH `PrBriefSection`-only prop shows up,
+that is the signal to stop: at that point `VerdictBanner` is no longer "a
+verdict banner two screens share," it is "`PrBriefSection`'s layout, with an
+escape hatch for `ReviewRunAccordion`'s simpler needs" — and the fix is to
+split them, not add a fourth optional prop.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/VerdictBanner/VerdictBanner.tsx`
+(`costUsd`, `tokensIn`, `onOpenRun` — all optional, all undefined for
+`ReviewRunAccordion.tsx:191-198`, all passed by
+`client/.../PrBriefSection/PrBriefSection.tsx`). The regenerate control itself
+is NOT a `VerdictBanner` prop — it lives in `PrBriefSection`'s own
+`SectionLabel`'s `right` slot instead, specifically so a FOURTH one-caller
+prop didn't have to go on `VerdictBanner` — worth remembering as the
+alternative to reach for before adding prop number four there.
+
+### 2026-08-17 — `PrBriefSection`'s narrative text is `brief.what + brief.why`, NEVER `review.summary` — two "summary-shaped" strings on this screen answer different questions
+
+**Rule:** The Overview tab's top section (`PrBriefSection.tsx`) shows one
+paragraph of prose beside the latest review's verdict/score/findings. There
+are TWO candidate sources for that paragraph, and picking the wrong one is an
+easy mistake because both are free-text and both plausibly "summarize the
+PR": `review.summary` (`server/src/vendor/shared/contracts/findings.ts:125`,
+what one agent's run says about ITS OWN findings — the system prompts
+literally instruct "use `summary` to say what you checked",
+`docs/agent-prompts/security-reviewer.md:84` and three siblings) vs.
+`brief.what` + `brief.why` (`PrRiskBriefRecord`, "what this PR changes" /
+"why", generated once by the separate `pr_brief` pipeline, independent of any
+review ever running). The correct answer here is the LATTER — the feature
+owner's explicit call — precisely because it decouples the text from any one
+agent's run: the same sentence renders whether zero or five reviews have run,
+and the review-derived chrome (verdict badge, findings/blockers count, agent
+name, score) is ADDITIVE on top of it, never replacing it. Get this backwards
+and the paragraph would silently reword itself every time a different agent
+re-runs, and would disappear entirely on a never-reviewed PR — the opposite
+of "the text is always there, the review info is what's conditional."
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/PrBriefSection/PrBriefSection.tsx`
+(`const text = \`${brief.what} ${brief.why}\`;`, passed as `VerdictBanner`'s
+`summary` prop — `review.summary` is read nowhere in this file);
+`client/src/app/repos/[repoId]/pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:191-198`
+(the OTHER `VerdictBanner` caller, on the Agent Runs tab, which correctly
+still passes `review.summary` — that card IS about one specific run, so the
+same field that would be wrong on Overview is right there). `brief.what`/`why`
+moved out of `BriefBar` (`_components/BriefBar/BriefBar.tsx`) in the same
+change — rendering them in two places at once was never the intent.
+
+### 2026-08-17 — `BriefRisk.file_refs` was on the wire since SPEC-02 shipped and was never rendered anywhere — a contract field existing is not evidence a UI reads it
+
+**Rule:** `BriefRisk` (`client/src/vendor/shared/contracts/review-api.ts:169-175`)
+has carried `file_refs: string[]` and `endpoint_refs: string[]` since SPEC-02
+shipped (`d47b0a2`) — every risk the model returns already names the files it's
+about. Neither the original `BriefCard` nor its SPEC-03 successor `BriefBar`
+ever rendered `file_refs`: both only ever destructured `r.title`,
+`r.explanation` and `r.severity` per risk (compare the shipped renders at
+`BriefBar.tsx` before this entry's fix, and the deleted `BriefCard.tsx:183-196`
+per `plans/2026-08-17-pr-risk-brief-layout.md`'s own inventory table — neither
+mentions `file_refs`). A field can ship on a Zod contract, survive two rounds
+of client refactors, and still never reach a user, because nothing type-checks
+"this field is unread." **Takeaway:** when asked to wire up navigation for a
+list that already resembles `BlastRadiusCard`'s callers or `ReviewFocusSection`'s
+focus entries, grep the CONTRACT for fields the rendering component doesn't
+destructure — `rg -n "file_refs|endpoint_refs" client/src` before this fix
+returned only the contract, the vendored copy, and test fixtures, never a
+`.tsx` render.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/BriefBar/BriefBar.tsx`
+(now renders each risk's `file_refs` as buttons calling `onOpenCaller(path, 1)`);
+`client/src/vendor/shared/contracts/review-api.ts:169-175` (`BriefRisk`, the
+source of the two unread arrays); `client/src/components/diff-viewer/useDiffLineTarget.ts`
+(`goTo(path, line)` — confirmed safe with a line that has no matching rendered
+anchor: it opens the file's card and silently no-ops the scroll, so a
+guessed `line: 1` for a ref with no real line number is a legitimate, harmless
+fallback, not a hack). `endpoint_refs` is NOT wired to anything — it names an
+API endpoint string, not a file, and there is no navigation target for it in
+this repo today.
+
+### 2026-08-17 — A shipped placement decision from a `specs/*.md`/`plans/*.md` can be reversed before the doc is ever updated — the markdown is not proof of the current UI
+
+**Rule:** `specs/2026-08-17-pr-risk-brief-layout.md` (SPEC-03, AC-47) and its
+plan both state, as a deliberate decision (Q3-B), that the PR Risk Brief's
+risks list renders inside `IntentCard`, not `BriefBar` — accepting that a PR
+with no derived intent shows no risks at all. The feature owner reversed this
+in the very next session: risks now render inside `BriefBar` instead, which
+also undoes Q3-B's information-loss tradeoff since `BriefBar` has no
+"intentless" branch that could hide them. Neither the spec nor the plan file
+was updated in that pass (an inline code-only fix was explicitly requested) —
+so both documents describe a layout the shipped UI no longer has, with no
+"superseded" marker anywhere in them, because neither is the append-only
+`INSIGHTS.md` convention. **Takeaway:** when a `specs/**`/`plans/**` file
+states an AC about component placement, verify it against the actual
+component tree (`rg` the prop, don't trust the doc) before treating the
+markdown as ground truth — it can go stale the moment a feature owner changes
+their mind, with nothing else in the repo forced to follow.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/BriefBar/BriefBar.tsx`
+(now reads `brief.risks` directly, no new prop — it already receives the full
+`PrRiskBriefRecord`); `.../IntentCard/IntentCard.tsx` (the `risks` prop and its
+rendering block were removed entirely); `specs/2026-08-17-pr-risk-brief-layout.md`
+AC-47 and `plans/2026-08-17-pr-risk-brief-layout.md` Steps 2 & 4 (describe the
+now-superseded placement, unedited).
 
 ### 2026-08-17 — A record's own `stale` field is a snapshot from its LAST fetch — a sibling query key changing since then needs a client-side recompute too, folded into the record rather than a new prop
 

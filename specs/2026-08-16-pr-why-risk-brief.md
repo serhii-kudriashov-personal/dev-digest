@@ -2,7 +2,7 @@
 
 Spec ID: SPEC-02
 Created: 2026-08-16
-Status: draft
+Status: implemented
 Supersedes: None
 
 ## Problem and user
