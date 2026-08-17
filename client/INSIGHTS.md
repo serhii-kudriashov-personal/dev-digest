@@ -9,6 +9,63 @@ cost real time. Sections are fixed; entry format and routing rules live in
 
 ---
 
+## Index
+
+This file is ~14k tokens. **Read this table first, then open only the entries
+whose `Scope` intersects the files you are about to change.** Rules and rationale
+for the index are in root `INSIGHTS.md` §Index; **appending an entry means
+appending its row here in the same edit.**
+
+| Date | Section | Scope | Entry |
+|---|---|---|---|
+| 2026-08-17 | Patterns | `client/.../VerdictBanner/**`, `client/.../PrBriefSection/**`, `client/.../ReviewRunAccordion/**` | `VerdictBanner` gained three opt-in props only `PrBriefSection` ever passes — next one-caller prop should split the components instead |
+| 2026-08-17 | Patterns | `client/.../PrBriefSection/**`, `client/.../ReviewRunAccordion/**`, `review.summary` vs `brief.what`/`why` | `PrBriefSection`'s text is `brief.what + brief.why`, NEVER `review.summary` — two summary-shaped strings answer different questions |
+| 2026-08-17 | Patterns | `client/.../BriefBar/**`, `client/src/vendor/shared/contracts/review-api.ts`, `BriefRisk` | `BriefRisk.file_refs` was on the wire since SPEC-02 shipped and was never rendered anywhere — a contract field existing is not evidence a UI reads it |
+| 2026-08-17 | Patterns | `specs/**`, `plans/**`, `client/.../BriefBar/**`, `client/.../IntentCard/**` | A shipped placement decision from a `specs/*.md`/`plans/*.md` can be reversed before the doc is ever updated — the markdown is not proof of the current UI |
+| 2026-08-17 | Patterns | `client/src/app/**/_components/OverviewTab/**`, records carrying their own `stale` field | A record's own `stale` field is a snapshot from its last fetch — recompute client-side and fold it back in, don't trust it or add a new prop |
+| 2026-08-16 | Patterns | `client/src/components/**`, `client/src/app/**/_components/**`, cross-route reuse | The cross-route promotion rule fires on a COMPONENT, not only on a pure helper |
+| 2026-08-16 | Patterns | `client/src/components/document-preview/**`, shared components with nullable props | A shared preview component must not assume its caller's `repoId` is non-null, and an optional `onClose` changes every branch's shape, not just the happy one |
+| 2026-08-16 | Patterns | `client/src/app/**/_components/**`, `client/src/lib/*.ts`, duplicated helpers | A deliberately duplicated COMPONENT does not exempt the duplicated HELPER beside it — §2 protects a design choice, not a directory |
+| 2026-08-16 | Patterns | agent/skill editors, `client/src/lib/repo-context.tsx`, repo-scoped attachments | An agent and a skill have no repository binding, so any "attach a repo artefact" UI must borrow the shell's active repo |
+| 2026-08-05 | Works | `client/src/lib/hooks/**`, reorderable lists | A drag-reorderable server list needs an OPTIMISTIC mutation, not local order state |
+| 2026-08-03 | Works | `client/src/app/**/page.tsx`, `'use client'` | A `'use client'` page becomes a server wrapper with NO Suspense — every `useSearchParams` route here is dynamic |
+| 2026-08-05 | Doesn't | `client/src/app/**/_components/**`, imports | Reaching a route-root `_components/` with `../../../`: `typecheck` passes, only `lint` catches it |
+| 2026-08-10 | Patterns | `client/src/**` component props | An OPTIONAL callback prop no caller passes is a dead feature no gate can see |
+| 2026-08-10 | Patterns | `client/src/app/**`, query params | "Open it in a new tab" decides state-vs-query-param for you |
+| 2026-08-09 | Patterns | `client/src/lib/hooks/**`, query keys | Two panels of one screen reading two query keys go stale ASYMMETRICALLY |
+| 2026-08-05 | Patterns | `client/src/components/**`, promotion rule | Promoting a component must move its CONSTANTS too, and the linter will not tell you |
+| 2026-08-03 | Patterns | `client/src/app/**/_components/**` | Extracting a page into a View does NOT move the route's shared `constants.ts` / `styles.ts` / `helpers.ts` |
+| 2026-08-02 | Patterns | `client/src/**` naming | Casing encodes WHAT a folder is: kebab = module, Pascal = component |
+| 2026-08-02 | Patterns | `client/src/components/**` | A component shared by a fetching and a non-fetching caller takes DATA, not an id |
+| 2026-08-02 | Patterns | `client/src/components/**` vs `_components/` | Cross-route components go in `src/components/` |
+| 2026-08-02 | Patterns | `client/src/app/**`, filters and facets | A facet counter is computed between the filters, never around them |
+| 2026-08-02 | Patterns | `client/src/app/**`, filters and facets | Page-wide selection + per-component counts: don't disable the zero option |
+| 2026-08-17 | Tools | `client/src/components/diff-viewer/**`, `*.test.tsx` asserting focus | Unlike `scrollIntoView`, jsdom DOES implement `focus()` — no stub needed |
+| 2026-08-10 | Tools | `client/src/**/*.test.tsx`, jsdom | jsdom 25 implements no `window.CSS` at all, so `CSS.escape` throws |
+| 2026-08-10 | Tools | `client/src/**` effects | An Effect keeping a memoized list in its deps needs an `id:nonce` ref guard |
+| 2026-08-11 | Tools | `client/src/**/styles.ts`, CSS custom properties | A CSS custom property that does not exist fails SILENTLY — read `styles.css`, never a neighbouring `styles.ts` |
+| 2026-08-09 | Tools | `client/src/**/*.test.tsx` | `userEvent` unmounts a HOVER-gated control before your click lands |
+| 2026-08-09 | Tools | `client/src/**/*.test.tsx` | `mock.contexts[0]` is how you assert WHICH element a stubbed DOM method was called on |
+| 2026-08-09 | Tools | `client/src/**/*.test.tsx` | jsdom implements NO `Element.prototype.scrollIntoView` |
+| 2026-08-05 | Tools | `client/src/vendor/ui/**`, icons | `IconName` is the vendored REGISTRY's key set, not lucide's export list |
+| 2026-08-05 | Tools | `client/src/vendor/ui/**`, charts | `@devdigest/ui`'s `Donut` is a MONEY chart, and a mock inherited its `$` |
+| 2026-08-03 | Tools | `client/eslint.config.mjs` | `pnpm lint` UNDER-reports deep relative imports: the rule is off in test files |
+| 2026-08-03 | Tools | `client/eslint.config.mjs` | `import/no-cycle` makes `eslint .` unusable here (>5 min → 25s without it) |
+| 2026-08-02 | Tools | `client/src/components/**`, severity chips | `SeverityBadge compact` renders NO label — icon and count only |
+| 2026-08-16 | Errors | `client/messages/**`, `client/src/**` rendering engine output | A message reproducing engine output goes through `t.raw`, not `t()` — `<untrusted …>` throws INVALID_TAG |
+| 2026-08-16 | Errors | `client/src/app/**` `?tab=` allowlists, editor tab bars | A duplicated `VALID_TABS` swallows every new tab: the URL changes, the pane does not |
+| 2026-08-16 | Errors | `client/src/vendor/ui/nav.ts`, `client/src/components/app-shell/**`, new screens | A new screen does not appear in the left panel until it has a row in the vendored `NAV` array |
+| 2026-08-11 | Errors | `client/src/app/**`, blast radius | `entry.symbol` is not a unique React key |
+| 2026-08-09 | Errors | `client/src/lib/hooks/**` | A `retry: false` query for a resource that does not exist YET caches the 404 forever |
+| 2026-08-09 | Errors | `client/src/**/*.test.tsx`, diff viewer | `getByText` normalizes whitespace, so an INDENTED diff line can never be matched by its literal text |
+| 2026-08-08 | Errors | `client/package.json`, `client/src/**/*.test.tsx` | `@testing-library/user-event` is NOT installed here, so every interactive test uses `fireEvent` |
+| 2026-08-02 | Errors | `client/src/**/styles.ts` | Dropping `border` is NOT enough: `borderColor` and `borderWidth` are shorthands too |
+| 2026-08-02 | Errors | `client/messages/**`, i18n imports | Count the `../` for `messages/en/*.json` from the FILE, not from a sibling test |
+
+Section keys as in root `INSIGHTS.md` §Index.
+
+---
+
 ## What Works
 
 ### 2026-08-05 — A drag-reorderable server list needs an OPTIMISTIC mutation, not local order state
@@ -123,6 +180,257 @@ lines were in
 shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
+
+### 2026-08-17 — `VerdictBanner` gained THREE opt-in props (`costUsd`/`tokensIn`, `onOpenRun`, and effectively regenerate lives beside it) that only `PrBriefSection` ever passes — a shared component is quietly becoming one caller's private layout
+
+**Rule:** `VerdictBanner.tsx` is used by exactly two callers —
+`ReviewRunAccordion` (Agent Runs tab, one banner per expanded run) and
+`PrBriefSection` (Overview tab's top section). Across this session,
+`PrBriefSection` needed three things `ReviewRunAccordion` never wants: a
+cost/tokens line under the score gauge, a "View run details" button beside
+the agent-name badge, and (in a sibling change) its own regenerate control.
+Each was added as an OPTIONAL prop, gated on the prop being explicitly passed
+(`costUsd !== undefined`, `onOpenRun &&`) rather than always rendering — so
+`ReviewRunAccordion`'s call site is untouched and all of its tests still pass
+unmodified. This is the right call for NOW (each addition is cheap, additive,
+and independently gated), but if a FOURTH `PrBriefSection`-only prop shows up,
+that is the signal to stop: at that point `VerdictBanner` is no longer "a
+verdict banner two screens share," it is "`PrBriefSection`'s layout, with an
+escape hatch for `ReviewRunAccordion`'s simpler needs" — and the fix is to
+split them, not add a fourth optional prop.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/VerdictBanner/VerdictBanner.tsx`
+(`costUsd`, `tokensIn`, `onOpenRun` — all optional, all undefined for
+`ReviewRunAccordion.tsx:191-198`, all passed by
+`client/.../PrBriefSection/PrBriefSection.tsx`). The regenerate control itself
+is NOT a `VerdictBanner` prop — it lives in `PrBriefSection`'s own
+`SectionLabel`'s `right` slot instead, specifically so a FOURTH one-caller
+prop didn't have to go on `VerdictBanner` — worth remembering as the
+alternative to reach for before adding prop number four there.
+
+### 2026-08-17 — `PrBriefSection`'s narrative text is `brief.what + brief.why`, NEVER `review.summary` — two "summary-shaped" strings on this screen answer different questions
+
+**Rule:** The Overview tab's top section (`PrBriefSection.tsx`) shows one
+paragraph of prose beside the latest review's verdict/score/findings. There
+are TWO candidate sources for that paragraph, and picking the wrong one is an
+easy mistake because both are free-text and both plausibly "summarize the
+PR": `review.summary` (`server/src/vendor/shared/contracts/findings.ts:125`,
+what one agent's run says about ITS OWN findings — the system prompts
+literally instruct "use `summary` to say what you checked",
+`docs/agent-prompts/security-reviewer.md:84` and three siblings) vs.
+`brief.what` + `brief.why` (`PrRiskBriefRecord`, "what this PR changes" /
+"why", generated once by the separate `pr_brief` pipeline, independent of any
+review ever running). The correct answer here is the LATTER — the feature
+owner's explicit call — precisely because it decouples the text from any one
+agent's run: the same sentence renders whether zero or five reviews have run,
+and the review-derived chrome (verdict badge, findings/blockers count, agent
+name, score) is ADDITIVE on top of it, never replacing it. Get this backwards
+and the paragraph would silently reword itself every time a different agent
+re-runs, and would disappear entirely on a never-reviewed PR — the opposite
+of "the text is always there, the review info is what's conditional."
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/PrBriefSection/PrBriefSection.tsx`
+(`const text = \`${brief.what} ${brief.why}\`;`, passed as `VerdictBanner`'s
+`summary` prop — `review.summary` is read nowhere in this file);
+`client/src/app/repos/[repoId]/pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:191-198`
+(the OTHER `VerdictBanner` caller, on the Agent Runs tab, which correctly
+still passes `review.summary` — that card IS about one specific run, so the
+same field that would be wrong on Overview is right there). `brief.what`/`why`
+moved out of `BriefBar` (`_components/BriefBar/BriefBar.tsx`) in the same
+change — rendering them in two places at once was never the intent.
+
+### 2026-08-17 — `BriefRisk.file_refs` was on the wire since SPEC-02 shipped and was never rendered anywhere — a contract field existing is not evidence a UI reads it
+
+**Rule:** `BriefRisk` (`client/src/vendor/shared/contracts/review-api.ts:169-175`)
+has carried `file_refs: string[]` and `endpoint_refs: string[]` since SPEC-02
+shipped (`d47b0a2`) — every risk the model returns already names the files it's
+about. Neither the original `BriefCard` nor its SPEC-03 successor `BriefBar`
+ever rendered `file_refs`: both only ever destructured `r.title`,
+`r.explanation` and `r.severity` per risk (compare the shipped renders at
+`BriefBar.tsx` before this entry's fix, and the deleted `BriefCard.tsx:183-196`
+per `plans/2026-08-17-pr-risk-brief-layout.md`'s own inventory table — neither
+mentions `file_refs`). A field can ship on a Zod contract, survive two rounds
+of client refactors, and still never reach a user, because nothing type-checks
+"this field is unread." **Takeaway:** when asked to wire up navigation for a
+list that already resembles `BlastRadiusCard`'s callers or `ReviewFocusSection`'s
+focus entries, grep the CONTRACT for fields the rendering component doesn't
+destructure — `rg -n "file_refs|endpoint_refs" client/src` before this fix
+returned only the contract, the vendored copy, and test fixtures, never a
+`.tsx` render.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/BriefBar/BriefBar.tsx`
+(now renders each risk's `file_refs` as buttons calling `onOpenCaller(path, 1)`);
+`client/src/vendor/shared/contracts/review-api.ts:169-175` (`BriefRisk`, the
+source of the two unread arrays); `client/src/components/diff-viewer/useDiffLineTarget.ts`
+(`goTo(path, line)` — confirmed safe with a line that has no matching rendered
+anchor: it opens the file's card and silently no-ops the scroll, so a
+guessed `line: 1` for a ref with no real line number is a legitimate, harmless
+fallback, not a hack). `endpoint_refs` is NOT wired to anything — it names an
+API endpoint string, not a file, and there is no navigation target for it in
+this repo today.
+
+### 2026-08-17 — A shipped placement decision from a `specs/*.md`/`plans/*.md` can be reversed before the doc is ever updated — the markdown is not proof of the current UI
+
+**Rule:** `specs/2026-08-17-pr-risk-brief-layout.md` (SPEC-03, AC-47) and its
+plan both state, as a deliberate decision (Q3-B), that the PR Risk Brief's
+risks list renders inside `IntentCard`, not `BriefBar` — accepting that a PR
+with no derived intent shows no risks at all. The feature owner reversed this
+in the very next session: risks now render inside `BriefBar` instead, which
+also undoes Q3-B's information-loss tradeoff since `BriefBar` has no
+"intentless" branch that could hide them. Neither the spec nor the plan file
+was updated in that pass (an inline code-only fix was explicitly requested) —
+so both documents describe a layout the shipped UI no longer has, with no
+"superseded" marker anywhere in them, because neither is the append-only
+`INSIGHTS.md` convention. **Takeaway:** when a `specs/**`/`plans/**` file
+states an AC about component placement, verify it against the actual
+component tree (`rg` the prop, don't trust the doc) before treating the
+markdown as ground truth — it can go stale the moment a feature owner changes
+their mind, with nothing else in the repo forced to follow.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/BriefBar/BriefBar.tsx`
+(now reads `brief.risks` directly, no new prop — it already receives the full
+`PrRiskBriefRecord`); `.../IntentCard/IntentCard.tsx` (the `risks` prop and its
+rendering block were removed entirely); `specs/2026-08-17-pr-risk-brief-layout.md`
+AC-47 and `plans/2026-08-17-pr-risk-brief-layout.md` Steps 2 & 4 (describe the
+now-superseded placement, unedited).
+
+### 2026-08-17 — A record's own `stale` field is a snapshot from its LAST fetch — a sibling query key changing since then needs a client-side recompute too, folded into the record rather than a new prop
+
+**Rule:** when a stored record already carries its own `stale: boolean` (as
+`PrRiskBriefRecord` does, computed server-side from the PR's head commit and
+the latest review at READ time), do not treat that field as sufficient once it
+sits in the query cache. It is correct only until something else in the
+cache — the PR's `headSha`, a completed review — changes without a refetch of
+THIS record's own query key. That is exactly the 2026-08-09 asymmetric-staleness
+trap below, one layer up: `PrIntentRecord` has the identical shape and
+`OverviewTab.tsx` already recomputes its `stale` prop from `intent.head_sha`
+vs. the PR's current `headSha` rather than trusting `intent.stale` — the brief
+needed the same treatment, but the card's prop list
+(`plans/2026-08-16-pr-why-risk-brief.md` Step 11: `brief`, `loading`,
+`generating`, `result`, `onGenerate`, `onOpenFocus`) has no separate `stale`
+prop the way `IntentCard` does. The fix is to fold the recomputed value INTO
+the record before passing it down — `{ ...brief, stale: brief.stale ||
+(headSha mismatch) }` — rather than adding a prop the plan's signature didn't
+call for.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/OverviewTab/OverviewTab.tsx`
+(`briefStale`/`briefWithStale`, alongside the pre-existing `stale` for intent);
+`client/src/app/repos/[repoId]/pulls/[number]/_components/BriefCard/BriefCard.tsx`
+(reads `brief.stale` only, never re-derives it itself — the recompute is the
+screen's job, per the rule below).
+
+### 2026-08-16 — The cross-route promotion rule fires on a COMPONENT, not only on a pure helper
+
+**Rule:** `client/src/components/**` vs `_components/**` (2026-08-02, "Cross-route
+components go in `src/components/`") is not limited to pure functions. When a
+route-local component under some route's `_components/` gains a second consumer
+on a *different* route, move the whole folder — component, `styles.ts`,
+`index.ts` — to `client/src/components/<kebab-name>/` in that same commit, same
+as the promotion rule already requires for a duplicated helper
+(2026-08-05, "Promoting a component must move its CONSTANTS too"). Casing stays
+the existing convention: kebab folder, PascalCase file
+(`client/src/components/agent-card/AgentCard.tsx`,
+`client/src/components/repo-not-found/RepoNotFound.tsx`).
+
+**Why:** `DocumentPreview` was built for the standalone Project Context page
+(`client/src/app/repos/[repoId]/context/_components/DocumentPreview/`, SPEC-01
+AC-12) and stayed route-local because it had exactly one caller. Adding the
+"Preview" control to the agent and skill editors' Context tabs in one change
+gave it a second and a third caller on two unrelated routes in the same commit —
+past the promotion trigger before the component had even shipped once with a
+single consumer. Leaving it under `context/_components/` would have meant
+`../../../../repos/[repoId]/context/_components/DocumentPreview` reaching across
+route boundaries, exactly the smell `client/eslint.config.mjs`'s deep-relative-import
+rule exists to catch (2026-08-05, "`pnpm lint` UNDER-reports deep relative
+imports... rule is off in test files" — production imports are still caught).
+
+**Where:** `client/src/components/document-preview/{DocumentPreview.tsx,styles.ts,index.ts}`,
+imported by `client/src/app/repos/[repoId]/context/_components/ContextView/ContextView.tsx:24`,
+`client/src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx:23`
+and `client/src/app/skills/[id]/_components/ContextTab/ContextTab.tsx:23`.
+
+### 2026-08-16 — A shared preview component must not assume its caller's `repoId` is non-null, and an optional `onClose` changes every branch's shape, not just the happy one
+
+**Rule:** when promoting a component whose prop originated from one page's
+guaranteed-non-null value (`ContextView`'s `repoId` comes from `useParams()`,
+always a `string`), widen the prop type to match the *weakest* caller
+(`useActiveRepo()` returns `repoId: string | null`), not the strongest. And when
+adding an optional callback like `onClose` so a component can render as either a
+dismissible panel or a permanently-docked pane, give every early-return branch
+(loading, error, empty) somewhere for that control to live — not only the
+success branch — or the panel becomes uncloseable for as long as the fetch is
+slow or fails.
+
+**Why:** `DocumentPreview`'s loading and error branches originally returned a
+bare `<Skeleton>` / `<ErrorState>` with no head row at all, because the one
+caller that existed (`ContextView`) never needed to close it — the pane was
+permanently docked beside the document list. The two new callers
+(agent/skill `ContextTab`) open it as a dismissible panel from a "Preview"
+button, so a slow or failing fetch without a close affordance would trap the
+user until the request settled. Restructuring those two branches to share the
+same head-row shape as the success branch was not scope creep on top of adding
+`onClose` — it was the minimum to make `onClose` actually work in every state,
+and it left `ContextView`'s rendering unchanged in substance (still a path row
+above the body, just present a beat earlier).
+
+**Where:** `client/src/components/document-preview/DocumentPreview.tsx` — the
+`repoId` prop is typed `string | null | undefined`; the `onClose` prop is
+optional and rendered as a close button in the loading, error and success
+returns alike.
+
+### 2026-08-16 — A deliberately duplicated COMPONENT does not exempt the duplicated HELPER beside it — §2 protects a design choice, not a directory
+
+**Rule:** when a plan pre-authorises duplication under `frontend-ui-architecture`
+§2 ("two copies are correct, the third is when to extract"), that authorisation
+covers only the files that genuinely diverge. A pure-helper module copied
+byte-for-byte alongside them is still a §1 placement violation
+(`SKILL.md:38` — "Pure helper used by 2+ → shared `lib/<name>.ts`") and §2 itself
+requires the move "in the same commit that adds the second use"
+(`SKILL.md:58`).
+
+**Why:** §2 exists to stop you guessing at an abstraction before you have seen
+enough consumers to know its shape. A file with **zero** divergence between
+copies has no shape left to guess at, so the rule it is usually cited to defend
+does not apply to it. The two `ContextTab.tsx` components here really do differ —
+different props (`agentId` vs `skillId`), different prose, different mutation
+hooks — and keeping them separate is right. Their `helpers.ts` neighbours were
+identical, confirmed by `md5 -q` returning the same digest for both. The trap is
+that the authorisation is written per *feature* while the rule applies per
+*file*, so a reviewer who accepts "this duplication is deliberate" once tends to
+wave through the whole folder — and no gate catches it, because `pnpm arch`
+cruises `server/` and `reviewer-core/` only and has no visibility into `client/`
+duplication at all.
+
+**Where:** `client/src/lib/context-docs.ts` (the promoted module, holding
+`orderedPaths`, `reorder`, `filterByPath`, `missingPaths`), imported by
+`client/src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx:30`
+and `client/src/app/skills/[id]/_components/ContextTab/ContextTab.tsx:29`. Cheap
+check when two sibling features ship together:
+`md5 -q <a>/helpers.ts <b>/helpers.ts` — identical digests mean promote now, not
+at the third consumer.
+
+### 2026-08-16 — An agent and a skill have no repository binding, so any "attach a repo artefact" UI must borrow the shell's active repo
+
+**Rule:** a UI that attaches a repository-scoped artefact to an `Agent` or a
+`Skill` has no repository of its own to work from, and must read the shell's
+currently selected repo via `useActiveRepo()`
+(`client/src/lib/repo-context.tsx:58`) and name it on screen so the user knows
+which mirror they are browsing. What gets persisted is the bare repo-relative
+path; it is matched against the pull request's own repository at run time.
+
+**Why:** `Agent` is workspace-scoped and carries no `repo_id`
+(`client/src/vendor/shared/contracts/knowledge.ts:327`), while a context document
+is identified by a path inside one repository's mirror. Nothing in the data model
+closes that gap, so every such screen has to close it in the UI — and the choice
+is invisible in the contracts, which is why it is worth writing down rather than
+rediscovering. The consequence to keep in mind: the same attachment can resolve
+in one repository and come back `missing` in another, which is a correct outcome
+and not a bug.
+
+**Where:** both Context tabs —
+`client/src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx:39`
+and `client/src/app/skills/[id]/_components/ContextTab/ContextTab.tsx`; the
+active-repo source at `client/src/lib/repo-context.tsx:58`.
 
 ### 2026-08-10 — An OPTIONAL callback prop that no caller passes is a dead feature no gate can see — grep the call sites, not the type
 
@@ -449,6 +757,22 @@ the address moved: the page is now an 8-line wrapper and the selection owner is
 (`severities` / `onToggleSeverity`).
 
 ## Tool & Library Notes
+
+### 2026-08-17 — Unlike `scrollIntoView`, jsdom DOES implement `HTMLElement.prototype.focus()` — no stub needed to assert focus landed
+
+**Quirk:** `components/diff-viewer/useDiffLineTarget.ts`'s post-navigation
+Effect calls both `scrollIntoView` and `focus({ preventScroll: true })` on two
+different elements. `scrollIntoView` does not exist in jsdom and must be
+stubbed with `vi.fn()` in every test that exercises the Effect (see the
+`scrollIntoView` entry below) — but `focus()` is real DOM behaviour jsdom
+already implements, including moving `document.activeElement`. A test can
+assert `document.activeElement?.id === fileHeadingId(path)` directly, with no
+stub, no `mock.contexts[0]` indirection. Reaching for a focus stub by analogy
+with the `scrollIntoView` gap is wasted effort.
+
+**Where:** `client/src/components/diff-viewer/useDiffLineTarget.ts:46-55`;
+`DiffTab.test.tsx` and `SmartDiffViewer.test.tsx`'s focus assertions
+(`plans/2026-08-16-pr-why-risk-brief.md` Step 10).
 
 ### 2026-08-10 — jsdom 25 implements no `window.CSS` at all, so `CSS.escape` throws — do not reach for it when building a selector
 
@@ -806,6 +1130,103 @@ s.label}`); consumers are `src/components/findings-hover-card/SeverityBadges.tsx
 and the card's own per-finding rows.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-16 — A message that reproduces engine output goes through `t.raw`, not `t()` — next-intl reads `<untrusted source="spec-N">` as a rich-text tag and throws
+
+**Symptom:** the agent and skill Context tabs crashed the moment they rendered:
+`INVALID_MESSAGE: INVALID_TAG (<untrusted source="spec-N">)` at
+`ContextTab.tsx` `{t("serialization.wrapper")}`.
+
+**Cause:** next-intl parses every message for ICU rich-text tags. The key is
+`"<untrusted source=\"spec-N\">"` — an unpaired `<untrusted>` with no handler
+passed to `t()`, so it throws rather than rendering. The copy is *correct*: it
+mirrors `wrapUntrusted` (`reviewer-core/src/prompt.ts:33`) verbatim, which
+AC-28 of SPEC-01 requires. The bug is the renderer, not the string.
+
+**Takeaway:** `t.raw(key)` returns the message unparsed and is the right call
+for any string that reproduces engine output — a wrapper, a heading, a prompt
+fragment. The engine's syntax is not ICU's, and the overlap (`<`, `{`, `#`) is
+not going away. Do not "fix" this by ICU-escaping the JSON: the value would stop
+matching what the engine emits, which is the whole point of the panel, and a
+translator would have no way to know why the quotes are there. The three
+existing bracketed messages in `messages/` (`conformance.json`
+`report.comparing`, `settings.json` `autoReviews.pollingNote` and
+`plugins.intro`) are the opposite case — paired tags meant for `t.rich` — so
+the presence of `<` alone does not decide it; ask whether the string is copy or
+a reproduction.
+
+**Where:** `src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx:217,220`,
+`src/app/skills/[id]/_components/ContextTab/ContextTab.tsx:204,207`,
+`messages/en/context.json` `serialization.wrapper`,
+`../reviewer-core/src/prompt.ts:33`.
+
+### 2026-08-16 — A duplicated `VALID_TABS` allowlist silently swallows every new tab: the URL changes, the pane does not
+
+**Symptom:** clicking the agent editor's Context tab did nothing. No error, no
+crash — `?tab=context` appeared in the address bar and the Config pane stayed.
+
+**Cause:** `AgentEditorView` derives its tab from `?tab=` through an allowlist,
+`VALID_TABS = ["config", "skills"]`, hand-written as a second copy of the tab
+list that `AgentEditor/constants.ts` `TABS` already holds. `setTab("context")`
+wrote the URL, the next render rejected `"context"` as unknown and fell back to
+`DEFAULT_TAB`. The `tab === "context"` branch in `AgentEditor.tsx` was correct
+throughout and simply unreachable. `SkillEditorView` had the same shape but
+derived it — `VALID_TABS = TABS.map((t) => t.key)` — so the skill editor's
+Context tab worked while the agent editor's did not, from identical-looking code.
+
+**Takeaway:** a `?tab=` allowlist is derived from the tab bar's own list, never
+retyped. Where the list lives in a child component, export it from that
+component's barrel and import it — precedent is
+`SeverityFilterBar/index.ts`, which exports `FILTER_SEVERITIES` and
+`SEVERITY_PARAM` for exactly this reason. Failure mode to recognise: a control
+that updates the URL and nothing else is a rejected value falling back, not a
+dead handler — check the allowlist before the component.
+
+**Where:** `src/app/agents/[id]/_components/AgentEditorView/constants.ts:4`,
+`src/app/agents/[id]/_components/AgentEditorView/AgentEditorView.tsx:27`,
+`src/app/agents/[id]/_components/AgentEditor/index.ts`,
+`src/app/skills/[id]/_components/SkillEditorView/constants.ts:26`.
+
+### 2026-08-16 — A new screen does not appear in the left panel until it has a row in the vendored `NAV` array — the label and the `activeKeyFor` branch are not the nav entry
+
+**Symptom:** Project Context (SPEC-01) shipped complete — route
+`src/app/repos/[repoId]/context/page.tsx` served 200, its API answered, the
+agent and skill Context tabs rendered — and the sidebar showed nothing. Nothing
+failed: no error, no 404, no type error. `pnpm typecheck` was clean throughout.
+
+**Cause:** the sidebar is data-driven from one hardcoded array,
+`NAV` in `src/vendor/ui/nav.ts`, which `Sidebar.tsx:45` maps over directly.
+There is no injection point — `AppShell` passes only a context object to
+`AppFrame`, never nav items. The screen had all three of its *satellite*
+artefacts already in the repo: the `nav.context` label
+(`messages/en/shell.json`), the `activeKeyFor` branch
+(`src/components/app-shell/helpers.ts:30`) and the route. Its
+implementation plan read those first two as evidence and recorded
+"Sidebar nav entry `nav.context` — **reuse as-is**" and "no shell change is
+needed" (`plans/2026-08-16-project-context.md:73,417`). Both artefacts are
+*consumers* of a `NAV` row keyed `context`; neither creates one. A label with no
+row is dead JSON and an `activeKeyFor` branch with no row highlights an item
+that is never rendered, so both sit in the tree looking like a wired navigation
+entry.
+
+**Takeaway:** the nav entry is the row in `NAV`, and nothing else. When adding a
+screen, grep `src/vendor/ui/nav.ts` for the key before concluding the shell is
+wired — an inventory pass that finds `nav.<key>` in `shell.json` plus a branch
+in `activeKeyFor` has found zero of the one thing required. Adding the row is
+config, not a refactor of vendored code: `src/vendor/ui/README.md` classes
+`nav.ts` as "route/shortcut config", and the repo rule bans refactoring
+`src/vendor/**`, not adding a route to its route table. A row carrying a `gKey`
+needs a matching `SHORTCUTS` entry in the same file or the shortcut works while
+the `?` help omits it. Two consumers come free from the one row: `Sidebar`
+renders `item.label` (the English literal in `nav.ts`), while
+`useShellCommands.ts:24` builds the command-palette entry from
+`t(\`nav.${it.key}\`)` — so the key must match the `shell.json` label key or the
+palette renders a raw message key.
+
+**Where:** `src/vendor/ui/nav.ts:33-34,64-65`,
+`src/vendor/ui/shell/Sidebar.tsx:45,59`,
+`src/components/app-shell/hooks/useShellCommands.ts:21-29`,
+`src/components/app-shell/helpers.ts:30`, `messages/en/shell.json` `nav.context`.
 
 ### 2026-08-11 — Blast Radius: `entry.symbol` is not a unique React key — two changed symbols can share a bare name from different files
 

@@ -14,7 +14,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { PrFile } from "@devdigest/shared";
-import { lineAnchorId } from "@/components/diff-viewer";
+import { fileHeadingId, lineAnchorId } from "@/components/diff-viewer";
 import messages from "../../../../../../../../messages/en/brief.json";
 import shellMessages from "../../../../../../../../messages/en/shell.json";
 
@@ -83,6 +83,12 @@ describe("DiffTab — the ?goto= handoff", () => {
     // exactly the bug this feature can have.
     expect(scrolledElement().id).toBe(lineAnchorId(PATH, 2));
     expect(onGotoConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves keyboard focus to the target file's heading — a URL-driven navigation must not strand focus in the document body", () => {
+    renderTab({ goto: `${PATH}:2` });
+
+    expect(document.activeElement?.id).toBe(fileHeadingId(PATH));
   });
 
   it("opens the file's card, so the target line is actually rendered", () => {

@@ -1,24 +1,77 @@
 {
   "title": "Project Context",
-  "chunks": "{count} chunks",
-  "reindex": "Re-index",
-  "indexing": "Indexing…",
+  "crumb": "Project Context",
+  "repoFallback": "repo",
+  "subtitle": "Markdown found in this repository's local mirror under {roots}.",
+  "loadError": "Couldn’t load documents",
   "resync": "Resync",
   "resyncing": "Resyncing…",
-  "indexStatus": "Index status: {status}",
-  "loadError": "Couldn’t load specs",
-  "kb": "{kb}kb",
-  "empty": {
-    "title": "No spec files yet",
-    "body": "Drop your PRDs, tech specs, and acceptance criteria under .devdigest/specs/. Every agent and the PR brief read them as grounding context."
+  "refresh": "Refresh",
+  "refreshing": "Refreshing…",
+  "summary": "{count, plural, one {# document} other {# documents}} · scanned {when}",
+  "age": {
+    "justNow": "just now",
+    "minutes": "{count}m ago",
+    "hours": "{count}h ago",
+    "days": "{count}d ago"
+  },
+  "truncated": "Showing the first {cap} of {total} documents.",
+  "editInRepo": "Documents are edited in the repository itself and picked up on the next sync.",
+  "tokenEstimate": "~{count, number} tok",
+  "docTruncated": "Truncated before injection",
+  "rootLabel": "{root}",
+  "missing": "Missing from the mirror",
+  "agentCount": "{count, plural, =0 {No agents} one {# agent} other {# agents}}",
+  "attach": "Attach",
+  "detach": "Detach",
+  "attachWarning": "Attaching sends this document's full text to the configured model provider on every run of the affected agents.",
+  "limitReached": "An agent can carry at most 8 documents. Detach one before attaching another.",
+  "saveFailed": "Couldn’t save the document list.",
+  "notSynced": {
+    "title": "This repository has no local mirror yet",
+    "body": "Documents are read from the clone on this machine. Once the repository finishes syncing, they appear here on their own — no reload needed."
+  },
+  "noMatch": {
+    "title": "No documents matched",
+    "body": "Nothing under {roots} matched in the current mirror.",
+    "action": "Change the search roots"
+  },
+  "roots": {
+    "label": "Search roots",
+    "edit": "Edit search roots",
+    "save": "Save roots",
+    "cancel": "Cancel",
+    "invalid": "Enter at least one search root, one per line, each 300 characters or fewer."
+  },
+  "list": {
+    "heading": "Documents"
   },
   "mode": {
-    "preview": "preview",
-    "edit": "edit"
+    "preview": "preview"
   },
-  "editor": {
-    "loadError": "Couldn’t load spec",
-    "save": "Save",
-    "saving": "Saving…"
+  "preview": {
+    "empty": "Select a document on the left to read it.",
+    "loadError": "Couldn’t load this document.",
+    "action": "Preview",
+    "close": "Close preview"
+  },
+  "serialization": {
+    "title": "How this reaches the model",
+    "heading": "## Project context",
+    "wrapper": "<untrusted source=\"spec-N\">",
+    "note": "Each attached document is inserted under that heading, wrapped as untrusted data. Repository Markdown is content, not instruction — the wrapper is what tells the model to read it and not obey it."
+  },
+  "reorder": {
+    "up": "Move up",
+    "down": "Move down",
+    "hint": "Drag a row, or focus its handle and use the arrow keys, to change injection order."
+  },
+  "tab": {
+    "attached": "Attached",
+    "available": "Available",
+    "empty": "No documents were found in this repository's mirror. Open Project Context to check the search roots.",
+    "filterPlaceholder": "Filter documents…",
+    "browsing": "browsing {repo}",
+    "count": "{count, plural, =0 {No documents} one {# document} other {# documents}} attached"
   }
 }

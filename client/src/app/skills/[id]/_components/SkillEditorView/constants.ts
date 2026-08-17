@@ -8,13 +8,15 @@ export interface SkillEditorTab {
 }
 
 /**
- * The five tabs from the design. `evals` renders but is deliberately empty:
+ * The five tabs from the design, plus `context` (SPEC-01). `evals` renders but
+ * is deliberately empty:
  * `eval_cases.owner_kind` already accepts `'skill'`, yet AGENTS.md reserves the
  * `eval_*` tables for a later lesson, so the tab says so rather than pretending.
  */
 export const TABS: readonly SkillEditorTab[] = [
   { key: "config", labelKey: "editor.tabs.config", icon: "Settings" },
   { key: "preview", labelKey: "editor.tabs.preview", icon: "FileText" },
+  { key: "context", labelKey: "editor.tabs.context", icon: "Folder" },
   { key: "evals", labelKey: "editor.tabs.evals", icon: "ListChecks" },
   { key: "stats", labelKey: "editor.tabs.stats", icon: "BarChart" },
   { key: "versions", labelKey: "editor.tabs.versions", icon: "Clock" },

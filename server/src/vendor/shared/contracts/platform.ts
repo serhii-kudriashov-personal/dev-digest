@@ -268,6 +268,91 @@ export const IndexStatus = z.object({
 });
 export type IndexStatus = z.infer<typeof IndexStatus>;
 
+// ---- Project Context (SPEC-01) ----
+// Markdown discovered in a repo's local mirror under configurable search roots,
+// attachable to agents and skills and injected into the `specs` prompt slot.
+// `SpecFile` / `IndexStatus` above are the earlier scaffolding and stay as they
+// are — `vendor/**` is extend-never-reorganise.
+
+/**
+ * One discovered Markdown document, as the list renders it.
+ *
+ * Every field the mirror may fail to answer for is `.nullish()` so the UI can
+ * render "unknown" rather than a fabricated zero: a document whose `stat()`
+ * failed has an unknown size, not a size of 0.
+ */
+export const ContextDocument = z.object({
+  /** Repo-relative posix path, e.g. `packages/api/docs/auth.md`. */
+  path: z.string(),
+  /** The directory part of `path` — rendered as the row's secondary line. */
+  dir: z.string(),
+  /** Label of the FIRST configured root that matched this path. */
+  root: z.string(),
+  size: z.number().int().nullish(),
+  updated_at: z.string().nullish(),
+  /** Local tiktoken estimate over the TRUNCATED text; never a model call. */
+  est_tokens: z.number().int().nullish(),
+  /** The document is longer than the per-document injection cap. */
+  truncated: z.boolean(),
+  /** Distinct agents that reach this document, directly or via a skill. */
+  agent_count: z.number().int(),
+  /** Attached somewhere but no longer present in the mirror. */
+  missing: z.boolean(),
+});
+export type ContextDocument = z.infer<typeof ContextDocument>;
+
+/**
+ * The listing, as a discriminated union on `state`. "Not synced" and "nothing
+ * matched" are STATES, not errors — the endpoint answers 200 for all three, and
+ * the UI renders a different remedy for each.
+ */
+export const ContextListing = z.discriminatedUnion('state', [
+  /** The repository has no local mirror yet. */
+  z.object({ state: z.literal('not_synced') }),
+  /** A mirror exists, but no document matched the configured roots. */
+  z.object({ state: z.literal('no_match'), roots: z.array(z.string()) }),
+  z.object({
+    state: z.literal('ok'),
+    roots: z.array(z.string()),
+    documents: z.array(ContextDocument),
+    /** Everything that matched, before the list cap. */
+    total: z.number().int(),
+    /** `documents` was cut at the list cap. */
+    truncated: z.boolean(),
+    scanned_at: z.string(),
+  }),
+]);
+export type ContextListing = z.infer<typeof ContextListing>;
+
+/** One document's text. Content NEVER rides the list — it is its own request. */
+export const ContextDocContent = z.object({
+  path: z.string(),
+  content: z.string(),
+  truncated: z.boolean(),
+});
+export type ContextDocContent = z.infer<typeof ContextDocContent>;
+
+/** A document attached to an agent or a skill, in injection order. */
+export const ContextAttachment = z.object({
+  path: z.string(),
+  order: z.number().int(),
+  /** Attached, but absent from the mirror at the last scan. */
+  missing: z.boolean(),
+});
+export type ContextAttachment = z.infer<typeof ContextAttachment>;
+
+/** Body of `PUT /repos/:id/context/roots` — the per-repository search roots. */
+export const ContextRootsUpdate = z.object({
+  roots: z.array(z.string().min(1).max(300)).min(1).max(20),
+});
+export type ContextRootsUpdate = z.infer<typeof ContextRootsUpdate>;
+
+/** Body of `PUT /agents/:id/context-docs` and `PUT /skills/:id/context-docs`. */
+export const ContextDocsUpdate = z.object({
+  paths: z.array(z.string().min(1)).max(64),
+});
+export type ContextDocsUpdate = z.infer<typeof ContextDocsUpdate>;
+
 // ---- Run request (review trigger; owned by A2, contract lives here) ----
 export const RunRequest = z.object({
   agentId: z.string().optional(),

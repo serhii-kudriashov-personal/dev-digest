@@ -21,7 +21,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
 import type { FindingRecord, PrFile, SmartDiffGroup } from "@devdigest/shared";
-import { useDiffLineTarget, type DiffCommentApi } from "@/components/diff-viewer";
+import { fileHeadingId, useDiffLineTarget, type DiffCommentApi } from "@/components/diff-viewer";
 import messages from "../../../../../../../../messages/en/brief.json";
 import shellMessages from "../../../../../../../../messages/en/shell.json";
 import { SmartDiffViewer } from "./SmartDiffViewer";
@@ -157,6 +157,22 @@ describe("SmartDiffViewer", () => {
     // sequence number behind the navigation target.
     await user.click(screen.getByRole("button", { name: /Go to the first of 1 findings/ }));
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
+  });
+
+  it("moves keyboard focus into the diff, onto the target file's heading, after a badge click", async () => {
+    // Before this feature, focus stayed on the badge button — a keyboard user
+    // tabbing on would continue from above the diff. Focus following the
+    // programmatic scroll is the accessible behaviour.
+    const user = userEvent.setup();
+    const path = "pnpm-lock.yaml";
+    renderViewer({
+      groups: groups({ [path]: [2] }),
+      findings: [finding({ file: path, start_line: 2 })],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Go to the first of 1 findings/ }));
+
+    expect(document.activeElement?.id).toBe(fileHeadingId(path));
   });
 
   it("counts one badge entry per distinct flagged line, and jumps to the first", async () => {

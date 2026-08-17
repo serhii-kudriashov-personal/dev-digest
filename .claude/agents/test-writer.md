@@ -97,16 +97,38 @@ owns it.
 If you would rather I proceed, my default is: <the narrowest reasonable reading>.
 ```
 
-Vague: "add tests", "improve coverage", "test this package", a bare path.
+Vague: "add tests", "improve coverage", "test this package", a bare path, a plan's
+`## Verification` table (that is a list of commands — it names nothing to assert).
+
 Testable: "assert `resolveSkillAttribution` discards a slug not in `run_skills`".
+
+**Also testable, and the normal input in a multi-agent run:** a plan path plus
+`AC-N` identifiers, and/or the `unverifiable` rows from a `plan-verifier`
+conformance table. An `AC-N` is written in EARS — a condition and exactly one
+observable response (`specs/README.md`) — which is a behaviour and a done-when
+already. Resolve each one to the module that owns it and proceed; do not
+hard-stop on a criterion merely because the caller named it by number. An
+`unverifiable` row is stronger still: it is `plan-verifier` saying that nothing
+in the tree currently makes that criterion observable, which is exactly the test
+that was missing. Cite the `AC-N` in your `Would catch` column so the criterion
+and the test can be traced to each other later.
 
 ## Method
 
 ### 1. Read the record first
 
-Root `INSIGHTS.md` plus the `INSIGHTS.md` of every package you will touch, plus
-`TESTING.md`. Name the relevant entries in your report — one line each.
+The **`## Index`** of root `INSIGHTS.md` and of every package you will touch —
+then open in full only the entries whose `Scope` intersects the files under test.
+Plus `TESTING.md`. Name the relevant entries in your report — one line each.
 `AGENTS.md` §Session protocol.
+
+Do not read those files end to end: root is ~28k tokens, `server/` ~17k,
+`client/` ~14k, and most of it belongs to code your tests never touch. Two
+`Scope` values are worth matching every run because they carry the traps that
+break tests specifically — `client/src/**/*.test.tsx` (jsdom gaps, `userEvent`,
+whitespace normalisation) and `server/test/*.it.test.ts` (the Docker skip, the
+concurrency race, the container count). `reviewer-core/`, `mcp/` and `e2e/`
+carry no index and are read whole.
 
 ### 2. Route before you write
 
@@ -164,10 +186,22 @@ column in your report. A row you cannot fill is a test that should not exist.
 
 | Package | Command |
 |---|---|
-| `server` unit | `cd server && pnpm exec vitest run --exclude '**/*.it.test.ts'` |
-| `server` integration | `cd server && pnpm exec vitest run .it.test` |
-| `client` | `cd client && pnpm test` |
-| `reviewer-core` | `cd reviewer-core && pnpm test` |
+| the file you just wrote, while iterating | `cd <pkg> && pnpm exec vitest run <path> --reporter=dot` |
+| `server` unit | `cd server && pnpm exec vitest run --exclude '**/*.it.test.ts' --reporter=dot` |
+| `server` integration | `cd server && pnpm exec vitest run .it.test --no-file-parallelism` |
+| `client` | `cd client && pnpm exec vitest run --reporter=dot` |
+| `reviewer-core` | `cd reviewer-core && pnpm exec vitest run --reporter=dot` |
+
+`--no-file-parallelism` on the integration lane is not a preference:
+`server/INSIGHTS.md` (2026-08-03) records it as both deterministic **and**
+faster, and (2026-08-05) that eight `*.it.test.ts` files otherwise start eight
+Postgres containers at once and the suite goes red for that reason alone.
+
+`--reporter=dot` is for the green path. When a run goes red, re-run **only the
+failing file** with the default reporter — never pull a whole red suite into
+context to find one assertion. `… > /tmp/dd-test.log 2>&1; tail -40
+/tmp/dd-test.log` keeps a large failure out of context until you choose to read
+it.
 
 **A skip is a skip.** `*.it.test.ts` files degrade to `describe.skip` when the
 Docker probe fails: `7 tests | 7 skipped`, exit code 0, no red, and nothing

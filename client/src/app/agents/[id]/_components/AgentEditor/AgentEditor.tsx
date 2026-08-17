@@ -8,6 +8,7 @@ import { useTranslations } from "next-intl";
 import { Tabs } from "@devdigest/ui";
 import type { Agent } from "@devdigest/shared";
 import { ConfigTab } from "./_components/ConfigTab";
+import { ContextTab } from "./_components/ContextTab";
 import { SkillsTab } from "./_components/SkillsTab";
 import { TABS } from "./constants";
 import { s } from "./styles";
@@ -29,6 +30,10 @@ export function AgentEditor({ agent, tab, onTab }: { agent: Agent; tab: string; 
           // straight from the query cache (its mutation updates that cache
           // optimistically), so switching agents cannot leave it stale.
           <SkillsTab agentId={agent.id} />
+        ) : tab === "context" ? (
+          // Same reason as SkillsTab: no local copy of the ordered list, so no
+          // `key` is needed to force a fresh instance.
+          <ContextTab agentId={agent.id} />
         ) : (
           <ConfigTab key={agent.id} agent={agent} />
         )}

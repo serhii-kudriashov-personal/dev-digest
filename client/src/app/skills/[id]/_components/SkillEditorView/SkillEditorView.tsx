@@ -14,6 +14,7 @@ import { useSkill } from "@/lib/hooks/skills";
 import { SkillsListView } from "@/app/skills/_components/SkillsListView";
 import { needsVetting, typeColor } from "@/app/skills/_components/SkillCard";
 import { ConfigTab } from "../ConfigTab";
+import { ContextTab } from "../ContextTab";
 import { EvalsTab } from "../EvalsTab";
 import { PreviewTab } from "../PreviewTab";
 import { StatsTab } from "../StatsTab";
@@ -67,6 +68,9 @@ export function SkillEditorView() {
                   give them a FRESH instance rather than an Effect that re-syncs. */}
               {tab === "config" && <ConfigTab key={skill.id} skill={skill} />}
               {tab === "preview" && <PreviewTab skill={skill} />}
+              {/* No `key`: ContextTab holds no copy of server state, rendering
+                  straight from the query cache. */}
+              {tab === "context" && <ContextTab skillId={skill.id} />}
               {tab === "evals" && <EvalsTab />}
               {tab === "stats" && <StatsTab skill={skill} />}
               {tab === "versions" && <VersionsTab skill={skill} />}

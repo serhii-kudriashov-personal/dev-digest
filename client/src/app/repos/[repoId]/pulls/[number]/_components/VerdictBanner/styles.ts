@@ -47,4 +47,16 @@ export const s = {
     color: "var(--text-muted)",
     letterSpacing: "0.04em",
   } satisfies CSSProperties,
+  scoreMeta: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 2,
+    marginTop: 6,
+    paddingTop: 8,
+    borderTop: "1px solid var(--border)",
+    width: "100%",
+    fontSize: 12,
+    color: "var(--text-tertiary)",
+  } satisfies CSSProperties,
 } as const;

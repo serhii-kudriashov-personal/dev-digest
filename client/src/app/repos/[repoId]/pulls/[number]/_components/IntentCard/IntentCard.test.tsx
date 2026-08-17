@@ -103,4 +103,11 @@ describe("IntentCard", () => {
     const { container } = renderCard({ intent: null, loading: true });
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("renders no Risks heading — that section lives in BriefBar now", () => {
+    renderCard();
+    expect(screen.getByText("Add rate limiting to the public API endpoints.")).toBeInTheDocument();
+    expect(screen.getByText("In scope")).toBeInTheDocument();
+    expect(screen.queryByText("Risks")).not.toBeInTheDocument();
+  });
 });

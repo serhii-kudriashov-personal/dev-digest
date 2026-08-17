@@ -62,5 +62,53 @@
     "blame": "blame",
     "noHistory": "No history available for this line.",
     "noCommits": "No commits found for this line."
+  },
+  "riskBrief": {
+    "generate": "Generate brief",
+    "regenerate": "Regenerate",
+    "generating": "Generating…",
+    "retry": "Retry",
+    "staleHint": "New activity since this brief was generated — regenerate for a current read.",
+    "empty": {
+      "title": "No brief yet",
+      "body": "Generate a why-and-risk summary for this pull request."
+    },
+    "tooLarge": {
+      "title": "Too large to brief",
+      "body": "This pull request is too big for a brief, even with every optional input dropped."
+    },
+    "failed": {
+      "title": "Brief generation failed",
+      "body": "The model call did not succeed. The last stored brief, if any, is unchanged."
+    },
+    "notConfigured": {
+      "title": "Risk brief is not configured",
+      "body": "Add a model key in Settings to enable this feature."
+    },
+    "riskLevel": "Risk",
+    "risk": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "focusTitle": "Review Focus — Read this first",
+    "noFocus": "No specific lines to start with.",
+    "openFocus": "Open {path} line {line} in the diff",
+    "openFile": "Open {path} in the diff",
+    "missingLabel": "Missing inputs",
+    "inputs": {
+      "pr_identity": "PR identity",
+      "derived_intent": "Derived intent",
+      "blast_radius": "Blast radius",
+      "findings": "Findings",
+      "linked_issue": "Linked issue",
+      "linked_spec": "Linked spec"
+    },
+    "generatedLabel": "Model-generated",
+    "costLabel": "Cost",
+    "costUnknown": "unknown",
+    "barTitle": "Risk brief",
+    "includedLabel": "Inputs used",
+    "droppedLabel": "{count} reference(s) dropped as unresolvable"
   }
 }

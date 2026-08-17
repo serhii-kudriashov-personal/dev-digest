@@ -5,7 +5,7 @@
 "use client";
 
 import React from "react";
-import { lineAnchorId } from "./helpers";
+import { fileHeadingId, lineAnchorId } from "./helpers";
 
 /**
  * The overlay-style API a viewer receives, mirroring `DiffCommentApi` /
@@ -27,10 +27,21 @@ interface ScrollTarget {
 }
 
 /**
- * Two consumers as of L06: the Smart Diff viewer's per-file findings badge, and
- * the Blast Radius card's caller rows arriving through `?goto=path:line`. It was
- * inlined in `SmartDiffViewer` until the second consumer appeared — promoted now,
- * not earlier (`frontend-ui-architecture` §2).
+ * Three consumers as of the PR Risk Brief (SPEC-02): the Smart Diff viewer's
+ * per-file findings badge and the Blast Radius card's caller rows (both since
+ * L06), joined by the brief's "read this first" entries. It was inlined in
+ * `SmartDiffViewer` until the second consumer appeared — promoted then, not
+ * earlier (`frontend-ui-architecture` §2).
+ *
+ * Since `plans/2026-08-16-pr-why-risk-brief.md` Step 10, a `goTo` also moves
+ * KEYBOARD FOCUS onto the target file's heading, after the scroll — for every
+ * consumer, not only the brief. Before: the viewport scrolled but focus stayed
+ * wherever the triggering click (or URL navigation) left it — the document
+ * body, in the `?goto=` case, or the badge button itself, in the findings
+ * case. That is a latent accessibility defect (focus following a
+ * programmatic scroll is the expected behaviour), so this is a deliberate,
+ * user-authorised behaviour change to L04/L06's shipped navigation, not a
+ * brief-only opt-in flag (see the plan's `## Scope decision`).
  */
 export function useDiffLineTarget(): DiffLineTargetApi {
   // A card is uncontrolled until something forces it open; from then on its state
@@ -48,6 +59,12 @@ export function useDiffLineTarget(): DiffLineTargetApi {
     document
       .getElementById(lineAnchorId(target.path, target.line))
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Scroll-THEN-focus, and `preventScroll` — `focus()` on an off-screen
+    // element scrolls it into view in several browsers, which fights the
+    // smooth centred scroll above.
+    document
+      .getElementById(fileHeadingId(target.path))
+      ?.focus({ preventScroll: true });
   }, [target]);
 
   const setOpen = React.useCallback((path: string, open: boolean) => {

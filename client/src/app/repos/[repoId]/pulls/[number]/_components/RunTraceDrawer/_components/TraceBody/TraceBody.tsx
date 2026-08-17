@@ -15,6 +15,7 @@ import { ToolCallRow } from "../ToolCallRow";
 import { PromptBlock } from "../PromptBlock";
 import { FindingsSection } from "../FindingsSection";
 import { Row, Stat } from "../atoms";
+import { s as local } from "./styles";
 
 export function TraceBody({ trace, findings }: { trace: RunTrace; findings: FindingRecord[] }) {
   const t = useTranslations("runs");
@@ -22,6 +23,11 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
   // Absent on every trace written before L02 — each PromptBlock simply omits its
   // count rather than showing a wrong 0.
   const tokenCounts = trace.prompt_assembly.token_counts;
+  // Absent (null OR the key missing) on every trace written before Project
+  // Context. `specs_read` cannot answer this: it was required from the start and
+  // every stored trace carries a literal `[]`, so an empty array there means
+  // "nobody ever wrote it", not "nothing was read".
+  const projectContext = trace.project_context;
   return (
     <>
       <TraceSection icon="Settings" title={t("trace.configuration")}>
@@ -41,17 +47,38 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
           </Row>
           <Row label={t("trace.config.specsRead")}>
             <div style={s.specsWrap}>
-              {trace.specs_read.length === 0 ? (
+              {/* THREE states, not two. A trace stored before this feature has no
+                  `project_context` key at all and genuinely does not know what was
+                  read — that is "not recorded". A run that resolved and read
+                  nothing is "none". Rendering the first as the second would claim
+                  a fact the trace does not hold. */}
+              {projectContext == null ? (
+                <span style={s.specsNone}>{t("trace.config.notRecorded")}</span>
+              ) : projectContext.read.length === 0 ? (
                 <span style={s.specsNone}>{t("trace.config.none")}</span>
               ) : (
-                trace.specs_read.map((sp, i) => (
-                  <span key={i} className="mono" style={s.spec}>
-                    {sp}
+                projectContext.read.map((path) => (
+                  <span key={path} className="mono" style={s.spec}>
+                    {path}
                   </span>
                 ))
               )}
             </div>
           </Row>
+          {projectContext != null && projectContext.skipped.length > 0 && (
+            <Row label={t("trace.config.skipped")}>
+              <div style={local.skippedWrap}>
+                {projectContext.skipped.map((skip) => (
+                  <span key={skip.path} className="mono" style={local.skipped}>
+                    {t("trace.config.skippedEntry", {
+                      path: skip.path,
+                      reason: t(`trace.config.skipReason.${skip.reason}`),
+                    })}
+                  </span>
+                ))}
+              </div>
+            </Row>
+          )}
         </div>
       </TraceSection>
 

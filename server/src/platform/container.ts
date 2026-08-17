@@ -30,6 +30,9 @@ import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import type { IntentFacade } from '../modules/intent/types.js';
 import { IntentService } from '../modules/intent/service.js';
+import { BlastService } from '../modules/blast/service.js';
+import type { ProjectContext } from '../modules/context/types.js';
+import { ContextService } from '../modules/context/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
 import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
 
@@ -53,6 +56,10 @@ export interface ContainerOverrides {
   repoIntel?: RepoIntel;
   /** derived-PR-intent facade (L03) — tests inject a stub IntentFacade. */
   intent?: IntentFacade;
+  /** blast-radius service (L06) — tests inject a stub BlastService. */
+  blast?: BlastService;
+  /** project-context facade (SPEC-01) — tests inject a stub ProjectContext. */
+  projectContext?: ProjectContext;
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
@@ -80,6 +87,8 @@ export class Container {
   private _reviewRepo?: ReviewRepository;
   private _repoIntel?: RepoIntel;
   private _intent?: IntentFacade;
+  private _blast?: BlastService;
+  private _projectContext?: ProjectContext;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
@@ -141,6 +150,36 @@ export class Container {
     if (this.overrides.intent) return this.overrides.intent;
     this._intent ??= new IntentService(this);
     return this._intent;
+  }
+
+  /**
+   * The blast-radius service (L06). Same sanctioned cross-slice channel as
+   * `intent` above: `no-cross-slice-import` scopes its `from` to
+   * `^src/modules/`, so `brief/service.ts` importing `blast/service.js`
+   * directly would fire the rule while this file importing it does not
+   * (`server/INSIGHTS.md` 2026-08-08).
+   *
+   * Tests inject a mock via `ContainerOverrides.blast`.
+   */
+  get blast(): BlastService {
+    if (this.overrides.blast) return this.overrides.blast;
+    this._blast ??= new BlastService(this);
+    return this._blast;
+  }
+
+  /**
+   * The project-context facade (SPEC-01) — Markdown discovery, attachment and
+   * the run-time read. Same sanctioned cross-slice channel as `intent` above:
+   * `no-cross-slice-import` scopes its `from` to `^src/modules/`, so
+   * `run-executor.ts` importing `context/service.js` would fire the rule while
+   * this file importing it does not.
+   *
+   * Tests inject a mock via `ContainerOverrides.projectContext`.
+   */
+  get projectContext(): ProjectContext {
+    if (this.overrides.projectContext) return this.overrides.projectContext;
+    this._projectContext ??= new ContextService(this);
+    return this._projectContext;
   }
 
   /** Import-graph builder (dependency-cruiser). T3 indexer pipeline only. */
