@@ -44,6 +44,7 @@ appending its row here in the same edit.**
 | 2026-08-09 | Patterns | `server/src/db/schema/**`, migrations | `findings` and `reviews` ARE indexed now — check the schema before you owe a migration |
 | 2026-08-02 | Patterns | `server/src/db/schema/**` | The `findings` table has no indexes at all — a FK is not an index |
 | 2026-08-02 | Patterns | `agents.system_prompt`, `docs/agent-prompts/**` | The live agent prompt is the DB column, not the markdown file |
+| 2026-08-18 | Tools | `server/.dependency-cruiser.cjs`, auditing `pnpm arch` coverage | Grepping for a `db/schema` import to find gate-blind SQL over-reports — a type-only import is not an edge |
 | 2026-08-08 | Tools | model ids, model config | `deepseek/deepseek-v4-flash` and `…-flash-latest` are DIFFERENT models at different prices |
 | 2026-08-05 | Tools | `server/src/db/migrations/**`, `pnpm db:generate` | `db:generate` goes INTERACTIVE when one migration both drops and adds a column |
 | 2026-08-05 | Tools | `server/test/*.it.test.ts`, running `pnpm test` | `pnpm test` is red here for an environmental reason: 8 files start 8 Postgres containers at once |
@@ -909,6 +910,41 @@ the editor field is
 `client/src/app/agents/[id]/_components/AgentEditor/_components/ConfigTab/ConfigTab.tsx:130`.
 
 ## Tool & Library Notes
+
+### 2026-08-18 — Grepping for a `db/schema` import to find gate-blind SQL over-reports: `tsPreCompilationDeps: false` means a type-only import is not an edge
+
+**Quirk:** the `modules/` rules in `.dependency-cruiser.cjs` select files by
+name, so any slice file not called `routes`/`service`/`repository`/`helpers` is
+outside them (SKILL §13). Sweeping for the files that exploit that — anything
+off-manifest importing Drizzle or `db/schema` — returns three hits out of the
+sixteen off-manifest files:
+
+```
+src/modules/reviews/diff-loader.ts       import * as schema from '../../db/schema.js'
+src/modules/reviews/run-executor.ts      import * as schema from '../../db/schema.js'
+src/modules/settings/feature-models.ts   import { eq } from 'drizzle-orm'
+```
+
+Only `feature-models.ts` is real. `diff-loader.ts` uses `schema` exactly once, as
+`typeof schema.repos.$inferSelect` in a parameter type (`diff-loader.ts:17`);
+`run-executor.ts` is the same shape. TypeScript elides an import whose binding is
+never used in a value position, and the gate runs with
+`tsPreCompilationDeps: false` (`.dependency-cruiser.cjs`), so those files emit no
+runtime edge at all. They are the `db/rows.ts` smell from SKILL §2, not unpoliced
+SQL — filing them as gate-blind SQL sites would have put two false rows into
+SKILL §12, where the list is only allowed to shrink.
+
+**Workaround:** a grep for the import is a candidate list, not a finding. Confirm
+each hit by checking whether the binding is used in a *value* position — for
+`import * as x`, grep `x\.` and see whether every use sits behind `typeof`. The
+same elision is why a dependency-cruiser rule probe has to *use* what it imports
+to fire at all (SKILL §10, trap 1); this is that trap seen from the other side,
+where it produces false positives in a manual audit instead of a silently passing
+rule.
+
+**Where:** `server/.dependency-cruiser.cjs` (`tsPreCompilationDeps: false`),
+`server/src/modules/reviews/diff-loader.ts:4,17`,
+`server/src/modules/settings/feature-models.ts:1,8`.
 
 ### 2026-08-08 — `deepseek/deepseek-v4-flash` and `…-flash-latest` are DIFFERENT models at different prices, and the pricier one is the one already hardcoded here
 

@@ -1,7 +1,7 @@
 ---
 name: backend-onion-architecture
-description: "Onion Architecture for the DevDigest backend — the `server/` Fastify API and the `reviewer-core/` engine. Answers which ring a piece of code belongs to and which rings it may import. Use when adding or reviewing a route, service, repository, adapter, port, background job, SSE event or migration; when deciding where a query, an external call, a pure transform or a literal goes; when wiring something into the DI container; when touching `reviewer-core`'s zero-I/O core; and whenever a module is created, split, or copied from an existing one. Covers the ring map, the dependency rule, ports and adapters, the composition root, repositories with Drizzle, the Fastify edge, the pure core, testing per ring, the `pnpm arch` gate, and the catalogued violations that must not be copied. Does NOT cover Fastify, Drizzle, Postgres or Zod mechanics — those belong to fastify-best-practices, drizzle-orm-patterns, postgresql-table-design and zod — nor frontend placement, which belongs to frontend-ui-architecture."
-version: 1.0.0
+description: "Onion Architecture for the DevDigest backend — the `server/` Fastify API and the `reviewer-core/` engine. Answers which ring a piece of code belongs to and which rings it may import. Use when adding or reviewing a route, service, repository, adapter, port, background job, SSE event or migration; when deciding where a query, an external call, a pure transform or a literal goes; when wiring something into the DI container; when touching `reviewer-core`'s zero-I/O core; whenever a module is created, split, or copied from an existing one; and whenever a file is added to a slice under a name other than `routes`, `service`, `repository`, `helpers`, `constants` or `types`. Covers the ring map, the dependency rule, ports and adapters, the composition root, repositories with Drizzle, the Fastify edge, the pure core, testing per ring, the slice file manifest that decides which files the `pnpm arch` gate can even see, the gate itself, and the catalogued violations that must not be copied. Does NOT cover Fastify, Drizzle, Postgres or Zod mechanics — those belong to fastify-best-practices, drizzle-orm-patterns, postgresql-table-design and zod — nor frontend placement, which belongs to frontend-ui-architecture."
+version: 1.1.0
 ---
 
 # Backend Onion Architecture
@@ -312,6 +312,8 @@ Find the row, follow it, stop.
 | A run event | `RunLogger` / `runBus` — one sink, never a second event path | §1 |
 | A mock for a new port | `adapters/mocks.ts`, `implements` the interface | §9 |
 | A DB-backed test | `test/<name>.it.test.ts` — the filename is the CI split | §9 |
+| A file in a slice under any other name | nowhere — fold it into `service.ts` / `helpers.ts`, or ship its `.dependency-cruiser.cjs` glob entries in the same commit | §13 |
+| A whole new slice | `modules/<name>/` **plus** one import and one entry in `modules/index.ts`, same commit | §13 |
 
 **When two rows seem to fit, take the inner one.** Logic that can live in a ring
 without I/O should.
@@ -371,6 +373,8 @@ load.
 | `shared-is-a-leaf` | ring 0 importing anything but `zod` (§1) |
 | `no-circular` | cycles anywhere |
 
+**Every `modules/` rule above selects files by name, not by content.** A file called anything other than `routes`, `service`, `repository`, `helpers`, `constants` or `types` is matched by none of them and the gate has no opinion on it at all — see §13 before adding one.
+
 `tsPreCompilationDeps` is **false** on purpose (§2): with it true, type-only
 `$inferSelect` imports register as SQL dependencies and the rules fire on files
 that emit no runtime import at all.
@@ -422,6 +426,10 @@ on anything but exit 0.
 | Gating, sorting or filtering on `findings.confidence` | not calibrated — `1.0` on a hallucination | treat it as prose, not a signal |
 | A jsonb-persisted contract field declared `.nullable()` | every document already on disk is missing the key | `.nullish()` (root `INSIGHTS.md`) |
 | A pass-through `service.ts` method that only forwards | layering theatre; no logic added | let the outer ring call inward directly (§2) |
+| A slice file with an invented name (`data-access.ts`, `feature-models.ts`) | matched by no `modules/` glob — `pnpm arch` is green because it is not looking | `service.ts` / `helpers.ts`, or ship the glob entries (§13) |
+| SQL or `fastify` inside an off-manifest file (`pipeline.ts`, `status.ts`, …) | the same violation §5/§6 forbid, with the gate switched off by the filename | move it to the manifest file that owns it (§13) |
+| A cross-slice import the gate allowed | `no-cross-slice-import` only knows the five names in `SLICE_PRIVATE` | still a violation — a green gate is a floor, not a verdict (§13) |
+| A new `modules/<name>/routes.ts` absent from `modules/index.ts` | every endpoint 404s; no typecheck, test or gate says a word | one import + one entry, same commit (§13) |
 
 ---
 
@@ -440,7 +448,70 @@ entry in `.dependency-cruiser.cjs`, so the list can only shrink.
 | `modules/settings/routes.ts`, `settings/feature-models.ts` | same; `feature-models.ts` is service-shaped but does its own reads, and its name keeps it out of the `no-sql-in-service` glob | same, plus rename to `service.ts` |
 | `modules/reviews/repository.ts` | facade re-declares `completeAgentRun`'s inline param type | derive it from `repository/run.repo.ts` (§3) |
 | `platform/{prompt,grounding,structured}.ts`, `reviews/helpers.ts` | re-export shims — the same symbol is importable from two or three paths | import from `@devdigest/reviewer-core` |
+| `modules/{brief,intent}/pipeline.ts`, `conventions/extract-pipeline.ts`, `reviews/{diff-loader,findings}.ts`, `pulls/status.ts` | off-manifest filenames — outside every `modules/` glob, so no gate governs them. Pure today, unpoliced tomorrow | fold into `service.ts`/`helpers.ts`, or add the names to the globs (§13) |
 | `modules/pulls/status.ts` | `rollupSeverities` fully written and unit-tested with **zero production callers**, and two docblocks that contradict each other about whether the feature exists | check the call graph before writing a second copy (`server/INSIGHTS.md`) |
+
+---
+
+## 13. The slice file manifest (CRITICAL)
+
+**A slice's filenames are the gate's interface.** Every §10 rule scoped to
+`modules/` selects files by *name*, never by content: `no-sql-in-service` fires
+only on `(service|helpers).ts`, `no-http-below-the-edge` only on
+`(service|helpers|repository|run-executor)`, and `no-cross-slice-import` treats
+only `(service|repository|routes|helpers|run-executor)` as private
+(`SLICE_PRIVATE` in `.dependency-cruiser.cjs`). Invent a filename and the file is
+not in a grey area — it is **outside every rule**, and `pnpm arch` stays green
+while it does whatever it likes.
+
+Not hypothetical: `modules/settings/feature-models.ts` is service-shaped, imports
+`drizzle-orm` and `db/schema` at runtime, and passes the gate — "its name keeps
+it out of the `no-sql-in-service` glob" (§12). The gate is a floor made of
+filenames, so a reviewer checks the name before trusting the exit code.
+
+**The manifest.** A slice is these files and nothing else:
+
+| File | Ring | Rules that see it |
+|---|---|---|
+| `routes.ts` | 5 | `no-sql-in-routes`; private to the slice |
+| `service.ts` | 2 | `no-sql-in-service`, `no-http-below-the-edge`; private |
+| `helpers.ts` | 2 | `no-sql-in-service`, `no-http-below-the-edge`; private |
+| `repository.ts`, `repository/<aggregate>.repo.ts` | 3 | `no-http-below-the-edge`; private |
+| `constants.ts` | 2 | **public** — literals, importable across slices |
+| `types.ts` | 0 · 2 | **public** — facade interfaces, importable across slices |
+
+`modules/index.ts` is the registry and `modules/_shared/**` the shared edge
+helpers; neither is a slice.
+
+**A file whose name is not on that list is a gate change, not a file change.**
+Three edits in the same commit, or do not add the file:
+
+1. Add the new name to every `from.path` glob in `.dependency-cruiser.cjs` whose
+   rule should govern it — at minimum `no-sql-in-service` and
+   `no-http-below-the-edge` for anything ring-2-shaped.
+2. Add it to `SLICE_PRIVATE` unless it is genuinely public. `constants.ts` and
+   `types.ts` are the only public names; everything else is private.
+3. **Prove each edited rule fires** (§10): introduce the violation with the
+   binding actually used, watch the rule name appear, revert.
+
+**Prefer not to.** `service.ts` and `helpers.ts` hold everything a ring-2 file
+can hold and are already covered. The existing off-manifest files —
+`*/pipeline.ts`, `conventions/extract-pipeline.ts`, `reviews/diff-loader.ts`,
+`reviews/findings.ts`, `pulls/status.ts` — are tolerated only because they are
+pure and import no SQL today. Every one of them is unpoliced, so the first person
+to add a query to one gets no warning from any gate (§12).
+
+**Renaming is the fix, never a `pathNot` entry.** `feature-models.ts` →
+`service.ts` puts the file under `no-sql-in-service` the moment it lands. §10
+forbids widening a glob to keep the gate quiet; choosing a filename no glob
+matches is the same move with extra steps.
+
+**A slice is dead until `modules/index.ts` names it.** A new `routes.ts`
+exporting a Fastify plugin mounts nothing until it gets one import and one entry
+there — registration is static and `@fastify/autoload` is a decoy (§6). Nothing
+fails on the way: typecheck passes, `pnpm arch` passes, and every endpoint 404s.
+Adding a slice is therefore always **two files minimum**, and the review is not
+done until the registry diff is in it.
 
 ---
 
@@ -463,4 +534,5 @@ change — several of the rules above exist because something already went wrong
 
 | Version | Date | Change |
 |---|---|---|
+| 1.1.0 | 2026-08-18 | §13 — the slice file manifest: the `modules/` gate rules select by filename, so an off-manifest name is outside every rule; adding one is a `.dependency-cruiser.cjs` change. Plus the registry rule (a slice is dead until `modules/index.ts` names it), §11 rows and the §12 off-manifest debt row. |
 | 1.0.0 | 2026-08-02 | Initial. Sources and provenance in `README.md`; annotated research and the conflicts between sources in `RESEARCH.md`. |
