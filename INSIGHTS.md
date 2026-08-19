@@ -48,6 +48,7 @@ entry nobody is told to open.
 | 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
 | 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
 | 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
+| 2026-08-18 | Patterns | `client/messages/**`, unwired scaffolding, spec intake, i18n catalogues | Unwired scaffolding's copy doesn't just go stale, it actively disagrees with the current design — diff it, don't just re-derive from it |
 | 2026-08-16 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, jsonb columns, run traces, unwired scaffolding | A REQUIRED array on a jsonb contract cannot be retrofitted with "not recorded" — the scaffolding already wrote `[]` into every row |
 | 2026-08-16 | Patterns | `client/messages/**`, `client/src/lib/hooks/**`, unwired scaffolding, spec intake | Shipped-but-unwired scaffolding also ships a stale product decision — its copy is a claim, not a requirement |
 | 2026-08-16 | Patterns | `server/src/adapters/git/**`, any feature that writes into the clone | The clone is a mirror that hard-resets on sync — writing into it is silent data loss after the UI says "Saved" |
@@ -985,6 +986,32 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-18 — Unwired scaffolding's copy doesn't just go stale, it actively disagrees with the current design — diff it, don't just re-derive from it
+
+**Rule:** extends 2026-08-16 ("Shipped-but-unwired scaffolding also ships a
+stale product decision") with a second check. That entry says re-derive
+requirements from the current request and treat old scaffolding copy as a
+claim. This time the scaffolding wasn't just silent about something the
+feature no longer does — it stated the OPPOSITE of what the design mock draws,
+in the same session, for a feature not yet built. Re-deriving alone would have
+missed it; you have to diff the catalogue string-by-string against the mock.
+
+**Why:** while spec-writer researched `specs/2026-08-18-l06-eval-pipeline.md`,
+`client/messages/en/eval.json` turned out to already carry a full i18n
+catalogue for the Eval Pipeline feature (dashboard, case editor, evals tab),
+unwired to any component. Two of its strings contradict the design mock
+outright: `evalsTab.newCase` says "New case" where the mock's button reads
+"+ New eval case", and `caseEditor.tabs` lists only `diff`/`prMeta` where the
+mock's case editor draws three input tabs — Diff / Files / PR meta. Neither
+is a case of the copy being merely incomplete; both assert a shape for the
+feature that the current design has already moved past.
+
+**Where:** `client/messages/en/eval.json:43-46` (`caseEditor.tabs`),
+`evalsTab.newCase`; the reconciliation is recorded as an open question in
+`specs/2026-08-18-l06-eval-pipeline.md`. See 2026-08-16 (line 1041 area,
+"Shipped-but-unwired scaffolding also ships a stale product decision") for the
+base rule this sharpens.
 
 ### 2026-08-16 — A REQUIRED array on a jsonb contract cannot be retrofitted with "not recorded" semantics — the scaffolding already wrote `[]` into every row
 
