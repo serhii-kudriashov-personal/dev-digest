@@ -57,4 +57,33 @@ describe("FindingCard (smoke, both themes)", () => {
     fireEvent.click(screen.getByText("Dismiss"));
     expect(onAction).toHaveBeenCalledWith("dismiss");
   });
+
+  it("AC-4: the eval-case action is disabled with a stated reason on an unjudged finding", () => {
+    const onCreateEvalCase = vi.fn();
+    renderWithIntl(
+      <FindingCard f={FINDING} defaultExpanded onAction={() => {}} onCreateEvalCase={onCreateEvalCase} />,
+    );
+    const button = screen.getByRole("button", { name: "Add to eval cases" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "Accept or dismiss this finding first");
+    fireEvent.click(button);
+    expect(onCreateEvalCase).not.toHaveBeenCalled();
+  });
+
+  it("AC-4: the eval-case action is enabled on an accepted finding", () => {
+    const onCreateEvalCase = vi.fn();
+    const accepted = { ...FINDING, accepted_at: "2026-08-01T00:00:00.000Z" };
+    renderWithIntl(
+      <FindingCard f={accepted} defaultExpanded onAction={() => {}} onCreateEvalCase={onCreateEvalCase} />,
+    );
+    const button = screen.getByRole("button", { name: "Add to eval cases" });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(onCreateEvalCase).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not render the eval-case action when no handler is passed", () => {
+    renderWithIntl(<FindingCard f={FINDING} defaultExpanded onAction={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Add to eval cases" })).not.toBeInTheDocument();
+  });
 });

@@ -28,6 +28,8 @@ appending its row here in the same edit.**
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
 | 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
 | 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-19 | Patterns | `server/src/modules/eval/service.ts`, `executeSet`, NFR-6 | NFR-6's "zero executed cases shall not be recorded" only fires on a pre-first-case cancellation — a parse-failed case still counts as executed and the run IS recorded |
+| 2026-08-19 | Patterns | `server/src/modules/eval/helpers.ts`, run-level scoring, arithmetic metrics | A run-level precision score has a real exception to "no denominator → `null`": a must-not-flag-only run that produces nothing scores `1`, not `null` |
 | 2026-08-16 | Patterns | `server/src/db/schema/**` link tables, composite PKs, reverse lookups | The composite PK that excuses a link table from an FK index leaves its SECOND column unindexed |
 | 2026-08-16 | Patterns | `server/src/modules/**` reading cloned/untrusted files, `node:fs` | `readFile` is the wrong primitive for attacker-supplied content you only need a bounded prefix of |
 | 2026-08-16 | Patterns | `server/src/modules/repo-intel/pipeline/walk.ts`, any `**/{dir}/**` file discovery | A depth-agnostic discovery glob makes `EXCLUDED_DIRS` load-bearing — and `walk.ts` will not apply it for you |
@@ -416,6 +418,70 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-19 — NFR-6's "zero executed cases shall not be recorded" only fires on a pre-first-case cancellation — a case that fails to PARSE still counts as executed and the run IS recorded
+
+**Rule:** `executeSet`'s NFR-6 branch (`if (casesDone === 0) { deleteSetRun(...); return }`)
+reads, from the spec prose alone, as "a run where every case fails to start
+leaves no `eval_set_runs` row." That is not what the code does. `casesDone` is
+incremented for **every** case that reaches `recordCaseResult`, including one
+whose diff fails to parse and is recorded as a failed case (see the AC-25
+handling in the same function) — a parse failure is still an executed case
+with a result, just a losing one. The delete-and-don't-record branch only
+fires when the run is **cancelled before the first case ever starts**, i.e.
+`casesDone` never leaves zero. A case set where every case fails to parse
+still produces a real, queryable `eval_set_runs` row with `status: 'incomplete'`
+and `cases_passed: 0` — it does not vanish.
+
+**Why:** discovered closing the plan-verifier gap for NFR-6 test coverage
+(`plans/2026-08-18-l06-eval-pipeline.md`, `server/test/eval.it.test.ts`). The
+literal spec reading ("every case fails to even start") does not correspond to
+any reachable code path, so the test that actually exercises the delete branch
+uses a **different** trigger: a case set that is empty at read time (zero
+cases at all), which is refused before `openSetRun` is ever called, not the
+"every case fails mid-flight" scenario the prose implies. Anyone extending
+`executeSet` to add a new failure mode should check which of these two the new
+failure resembles — "never reached `recordCaseResult`" (deletes the run) vs.
+"reached it and lost" (keeps the run, marks it incomplete) — because the
+NFR-6 prose alone does not disambiguate.
+
+**Where:** `server/src/modules/eval/service.ts:489` (`executeSet`'s
+`casesDone === 0` branch); the NFR-6 test is in `server/test/eval.it.test.ts`
+(the zero-case-set scenario, not a mid-run failure scenario).
+
+### 2026-08-19 — A run-level precision score has a real exception to "no denominator → `null`": a run with only `must_not_flag` cases that correctly produces nothing scores `1`, not `null`
+
+**Rule:** in `scoreRun`, `recall` and `citation_accuracy` are `null` whenever
+their denominator is zero, but `precision` is **not** unconditionally the
+same. Precision is `null` only when the case set contains at least one
+`must_find` expectation **and** the run produced no grounded findings at all —
+in every other zero-findings case (a run made entirely of `must_not_flag`
+cases that correctly stayed silent), precision is `1`, because "produced
+nothing forbidden" is itself a fully-determined precision of 1, not an
+undefined ratio.
+
+```ts
+// scoreRun — the branch that is easy to over-generalise from AC-23's headline
+if (producedCount === 0) {
+  return hasMustFindCase ? null : 1; // NOT: return null unconditionally
+}
+```
+
+**Why:** `plans/2026-08-18-l06-eval-pipeline.md` Step 4's own prose ("precision
+is `null` when nothing was produced") and its Step 10 test description (which
+implies the must-not-flag-only, nothing-produced case reports a precision
+value, not `null`) directly contradict each other — the plan was written
+against the spec's AC-23 headline case, not its full Edge-cases table. The
+`null`-for-every-empty-denominator rule (root `INSIGHTS.md` 2026-08-02,
+"Unknown cost is `null`, never `0`") is right for recall and citation accuracy
+but does not generalise to precision, because precision's denominator being
+zero is not "unknown" here — it is the observed, meaningful outcome of a
+must-not-flag-only case set behaving correctly. Resolving which reading was
+right required cross-referencing the spec's own `## Edge cases` table, not
+just the plan.
+
+**Where:** `server/src/modules/eval/helpers.ts:70-90` (`scoreRun`); the
+AC-23 exception is asserted in `server/test/eval-helpers.test.ts`.
 
 ### 2026-08-17 — `BriefService`'s single-flight `Map` is module-scoped, so it is shared across every instance in the process — a test that doesn't await `generate()` can leak a promise into the next case
 

@@ -142,6 +142,19 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
     },
   );
 
+  /** L06, SPEC-04 — AC-38, AC-39: promote a historical version forward. Reuses
+   *  `VersionParams` (id + version, same shape as the GET above). */
+  app.post(
+    '/agents/:id/versions/:version/promote',
+    { schema: { params: VersionParams } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const result = await service.promoteVersion(workspaceId, req.params.id, req.params.version);
+      if (!result) throw new NotFoundError('Agent or version not found');
+      return result;
+    },
+  );
+
   app.get('/agents/:id/skills', { schema: { params: IdParams } }, async (req) => {
     const { workspaceId } = await getContext(app.container, req);
     const agent = await service.get(workspaceId, req.params.id);

@@ -127,6 +127,13 @@
       "when": 1786886804782,
       "tag": "0017_solid_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787158288049,
+      "tag": "0018_sudden_metal_master",
+      "breakpoints": true
     }
   ]
 }

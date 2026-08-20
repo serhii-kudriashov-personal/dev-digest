@@ -24,4 +24,20 @@ export const s = {
     color: "var(--text-secondary)",
   } satisfies CSSProperties,
   list: { display: "flex", flexDirection: "column", gap: 12 } satisfies CSSProperties,
+  evalCaseBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    padding: "8px 12px",
+    marginBottom: 12,
+    borderRadius: 6,
+    border: "1px solid var(--border)",
+    background: "var(--bg-elevated)",
+    fontSize: 13,
+    color: "var(--text-secondary)",
+  } satisfies CSSProperties,
+  evalCaseWarning: {
+    color: "var(--warn)",
+  } satisfies CSSProperties,
 } as const;

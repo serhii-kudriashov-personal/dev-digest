@@ -9,7 +9,12 @@
     "replyToAuthor": "Reply to author",
     "replyPlaceholder": "Reply to the author about this finding…",
     "sendReply": "Send reply",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "addToEvals": "Add to eval cases",
+    "addToEvalsDisabledReason": "Accept or dismiss this finding first",
+    "evalCaseCreated": "Added as an eval case: {name}",
+    "viewEvalCase": "View eval case",
+    "secretRetainedWarning": "This diff may contain a secret-shaped literal. It is stored as-is, never redacted."
   },
   "trifecta": {
     "lethal": "LETHAL TRIFECTA — ALL 3 PRESENT",

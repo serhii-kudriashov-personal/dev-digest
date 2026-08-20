@@ -40,6 +40,8 @@ appending its row here in the same edit.**
 | 2026-08-02 | Patterns | `client/src/components/**` vs `_components/` | Cross-route components go in `src/components/` |
 | 2026-08-02 | Patterns | `client/src/app/**`, filters and facets | A facet counter is computed between the filters, never around them |
 | 2026-08-02 | Patterns | `client/src/app/**`, filters and facets | Page-wide selection + per-component counts: don't disable the zero option |
+| 2026-08-19 | Tools | `client/src/**` charts, `@devdigest/ui` recharts primitives, `*.test.tsx` | The vendored recharts `LineChart`/`ResponsiveContainer` logs a `width(0)/height(0)` warning under jsdom — hand-roll an inline-SVG polyline for a simple sparkline instead |
+| 2026-08-19 | Tools | `client/src/vendor/ui/primitives/Button.tsx`, ref forwarding | `Button` is a plain function component, not `forwardRef`-wrapped — React 19's ref-as-prop model does not make it accept a `ref` |
 | 2026-08-17 | Tools | `client/src/components/diff-viewer/**`, `*.test.tsx` asserting focus | Unlike `scrollIntoView`, jsdom DOES implement `focus()` — no stub needed |
 | 2026-08-10 | Tools | `client/src/**/*.test.tsx`, jsdom | jsdom 25 implements no `window.CSS` at all, so `CSS.escape` throws |
 | 2026-08-10 | Tools | `client/src/**` effects | An Effect keeping a memoized list in its deps needs an `id:nonce` ref guard |
@@ -757,6 +759,52 @@ the address moved: the page is now an 8-line wrapper and the selection owner is
 (`severities` / `onToggleSeverity`).
 
 ## Tool & Library Notes
+
+### 2026-08-19 — The vendored recharts `LineChart`/`ResponsiveContainer` logs a `width(0)/height(0)` warning under jsdom — a hand-rolled inline-SVG polyline is a working escape hatch for a simple sparkline
+
+**Quirk:** `client/src/test/smoke.test.tsx`'s component-gallery test already shows
+the vendored chart primitive (`@devdigest/ui`'s recharts-backed `LineChart` /
+`ResponsiveContainer`) logging a `width(0)/height(0)` console warning when
+rendered under jsdom, because `ResponsiveContainer` measures its parent via a
+`ResizeObserver`/layout pass jsdom doesn't perform. That warning is harmless in
+that smoke test (nothing asserts on console output), but it becomes a real
+testability tax the moment a *new* component wraps that same chart and gets
+its own `*.test.tsx` — every render in every test either has to swallow the
+warning or a suite grows console noise per test.
+
+**Workaround:** for a small per-metric trend/sparkline (one line, a handful of
+points, a text label per series — the AC-47 requirement, not a data-dense
+chart), skip the vendored chart entirely and render a plain inline
+`<svg><polyline points="..."/></svg>` sized from a fixed viewBox, not measured
+layout. No `ResizeObserver`, no jsdom warning, and it is trivially assertable
+in a test (query the `<svg>` by role/label, or just check point count).
+Reserve the vendored `LineChart` for a screen that already accepts
+recharts-under-jsdom's rough edges (the existing stats/donut screens) rather
+than pulling it into a new, hermetically-tested component.
+
+**Where:** `client/src/app/agents/[id]/_components/AgentEditor/_components/EvalsTab/EvalsTab.tsx`
+(`TrendSeries`, added for AC-47, `plans/2026-08-18-l06-eval-pipeline.md`); the
+warning is also visible in `client/src/test/smoke.test.tsx`'s existing
+component-gallery case.
+
+### 2026-08-19 — `Button` is a plain function component, not `forwardRef`-wrapped — React 19's ref-as-prop model does not make an arbitrary component accept a `ref`
+
+**Quirk:** React 19 allows `ref` to be read as an ordinary prop instead of
+requiring `React.forwardRef`, but that is a capability the *component itself*
+must opt into by declaring `ref` in its own props type. It is not a blanket
+JSX-runtime behaviour that makes every component ref-able. `client/src/vendor/ui/primitives/Button.tsx`
+is a plain function component with no `ref` in its props and no
+`forwardRef` wrapper, so `<Button ref={...} />` fails typecheck exactly as it
+would have under React 18 — the version bump changes nothing here.
+
+**Workaround:** don't pass `ref` to `Button`. Wrap the element that needs the
+ref in a plain native tag instead, e.g. `<span ref={runRowRef}><Button ...>...</Button></span>`,
+and target that wrapper for focus/measurement instead of the button itself.
+
+**Where:** `client/src/vendor/ui/primitives/Button.tsx`; the AC-48
+focus-return workaround is in
+`client/src/app/agents/[id]/_components/AgentEditor/_components/EvalsTab/EvalsTab.tsx`
+(`plans/2026-08-18-l06-eval-pipeline.md` Step 15).
 
 ### 2026-08-17 — Unlike `scrollIntoView`, jsdom DOES implement `HTMLElement.prototype.focus()` — no stub needed to assert focus landed
 

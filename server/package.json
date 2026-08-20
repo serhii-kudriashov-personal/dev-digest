@@ -11,6 +11,7 @@
     "arch": "depcruise src ../reviewer-core/src --config .dependency-cruiser.cjs",
     "test": "vitest run",
     "verify:l03": "pnpm typecheck && pnpm arch && pnpm verify:docker && vitest run intent --no-file-parallelism",
+    "verify:l06": "pnpm typecheck && pnpm arch && pnpm verify:docker && vitest run eval --no-file-parallelism",
     "verify:docker": "docker info > /dev/null 2>&1 || (echo 'FAIL: no reachable Docker daemon. intent.it.test.ts gates on dockerAvailable() and would SKIP — a skipped lane is unverified, not green (specs/l03-intent-layer.md, Verification plan).' && exit 1)",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",

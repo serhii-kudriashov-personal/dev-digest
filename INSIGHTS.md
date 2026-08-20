@@ -48,6 +48,7 @@ entry nobody is told to open.
 | 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
 | 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
 | 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
+| 2026-08-19 | Patterns | `*/src/vendor/shared/contracts/**`, zero-consumer contract edits, plans | "Zero consumers, safe to edit" proves the edit is SAFE, not that the field's existing shape fits the new consumer |
 | 2026-08-18 | Patterns | `client/messages/**`, unwired scaffolding, spec intake, i18n catalogues | Unwired scaffolding's copy doesn't just go stale, it actively disagrees with the current design — diff it, don't just re-derive from it |
 | 2026-08-16 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, jsonb columns, run traces, unwired scaffolding | A REQUIRED array on a jsonb contract cannot be retrofitted with "not recorded" — the scaffolding already wrote `[]` into every row |
 | 2026-08-16 | Patterns | `client/messages/**`, `client/src/lib/hooks/**`, unwired scaffolding, spec intake | Shipped-but-unwired scaffolding also ships a stale product decision — its copy is a claim, not a requirement |
@@ -986,6 +987,35 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-19 — "Zero consumers, safe to edit in place" only proves the edit is SAFE — it says nothing about whether the field's existing shape actually fits the new consumer
+
+**Rule:** extends 2026-08-11 ("A REQUIRED new field on a contract embedded in
+a jsonb-persisted parent goes on a sibling response schema"). That entry (and
+the R4 risk note it licenses in `plans/2026-08-18-l06-eval-pipeline.md`) treats
+"this field has zero consumers" as clearance to widen or edit a contract field
+in place rather than superseding it with a sibling schema. Zero consumers does
+make the edit *safe* — nothing breaks. It does **not** mean the field's
+pre-existing shape already matches what the new UI needs. Those are two
+independent claims, and a plan that only checks the first will still hand the
+implementer a type error (or a silent shape mismatch, if the field is loosely
+typed) on the second.
+
+**Why:** `plans/2026-08-18-l06-eval-pipeline.md` Step 1 licensed editing
+`EvalDashboard` in place — including `recent_runs` — solely on "it has zero
+consumers, verified by `rg`". That check is correct for every other field the
+step widened (metrics going nullable, `delta` going nullish). It was not
+sufficient for `recent_runs`: the field was typed as `EvalRunRecord` (the
+per-case detail shape), but AC-42's cross-agent recent-runs list needs
+`EvalSetRun` (agent, config version, the three run-level metrics, pass tally)
+— information a per-case row does not carry at all. The implementer had to
+change the element type mid-build; a planner re-checking "does this shape
+already carry what the consuming AC needs", not just "does anything read this
+today", would have caught it before the build started.
+
+**Where:** `server/src/vendor/shared/contracts/eval-ci.ts` (`EvalDashboard.recent_runs`,
+changed from `EvalRunRecord[]` to `EvalSetRun[]`); the AC it serves is AC-42 in
+`specs/2026-08-18-l06-eval-pipeline.md`.
 
 ### 2026-08-18 — Unwired scaffolding's copy doesn't just go stale, it actively disagrees with the current design — diff it, don't just re-derive from it
 

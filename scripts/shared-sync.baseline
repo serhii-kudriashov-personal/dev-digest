@@ -29,10 +29,10 @@ contracts/eval-ci.ts: <   system_prompt: z.string(),
 contracts/eval-ci.ts: < export const AgentManifest = z.object({
 contracts/eval-ci.ts: < export type AgentManifest = z.infer<typeof AgentManifest>;
 contracts/eval-ci.ts: < export type AgentManifestInput = z.input<typeof AgentManifest>;
-contracts/eval-ci.ts: < import { EvalRun, EvalOwnerKind, Conformance, Provider, CiFailOn } from './knowledge.js';
+contracts/eval-ci.ts: < import { EvalRun, EvalOwnerKind, Conformance, Provider, CiFailOn, Agent } from './knowledge.js';
 contracts/eval-ci.ts: < });
 contracts/eval-ci.ts: >   provider: z.enum(['openai', 'anthropic']).nullish(),
-contracts/eval-ci.ts: > import { EvalRun, EvalOwnerKind, Conformance } from './knowledge.js';
+contracts/eval-ci.ts: > import { EvalRun, EvalOwnerKind, Conformance, Agent } from './knowledge.js';
 contracts/knowledge.ts: <   agent_id: z.string(),
 contracts/knowledge.ts: <   ci_fail_on: CiFailOn,
 contracts/knowledge.ts: <   ci_fail_on: CiFailOn.nullish(),
