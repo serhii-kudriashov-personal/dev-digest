@@ -1,7 +1,13 @@
 import type { CSSProperties } from "react";
+import { EVAL_METRIC_COLORS } from "@/components/eval-metric-bar";
 
 export const s = {
-  wrap: { display: "flex", flexDirection: "column", gap: 24 } satisfies CSSProperties,
+  wrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 24,
+    padding: "24px 32px 44px",
+  } satisfies CSSProperties,
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 } satisfies CSSProperties,
   title: { fontSize: 20, fontWeight: 700 } satisfies CSSProperties,
   alert: {
@@ -24,6 +30,11 @@ export const s = {
     borderBottom: "1px solid var(--border)",
   } satisfies CSSProperties,
   td: { padding: "6px 8px", borderBottom: "1px solid var(--border)" } satisfies CSSProperties,
+  trClickable: { cursor: "pointer" } satisfies CSSProperties,
+  trHover: { cursor: "pointer", background: "var(--bg-hover)" } satisfies CSSProperties,
+  metricRecall: { fontWeight: 600, color: EVAL_METRIC_COLORS.recall } satisfies CSSProperties,
+  metricPrecision: { fontWeight: 600, color: EVAL_METRIC_COLORS.precision } satisfies CSSProperties,
+  metricCitation: { fontWeight: 600, color: EVAL_METRIC_COLORS.citation } satisfies CSSProperties,
   neverRunBadge: {
     fontSize: 11,
     color: "var(--text-muted)",

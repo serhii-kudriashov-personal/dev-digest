@@ -8,6 +8,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button, Checkbox, EmptyState, Icon, Modal, Skeleton } from "@devdigest/ui";
+import { EvalMetricBar, EVAL_METRIC_COLORS } from "@/components/eval-metric-bar";
 import { useAgent } from "@/lib/hooks/agents";
 import {
   useCancelEvalRun,
@@ -47,6 +48,7 @@ export function EvalsTab({ agentId }: { agentId: string }) {
   const isRunning = latestRow?.status === "running";
   const { data: liveRun } = useEvalRun(isRunning ? latestRow.id : undefined);
   const current = isRunning ? (liveRun ?? latestRow) : latestRow;
+  const previousMetricsRun = runs?.[1];
 
   // ---- case editor modal (?case=) ------------------------------------------
   const caseParam = search.get("case");
@@ -70,8 +72,6 @@ export function EvalsTab({ agentId }: { agentId: string }) {
   };
   const [a, b] = comparing && selected.length === 2 ? selected : [undefined, undefined];
   const { data: comparison } = useEvalComparison(a, b);
-
-  const cost = current?.cost_usd ?? null;
 
   // ---- run-all confirmation (NFR-4, AC-31): state the case count and the
   // previous comparable run's cost, or that none is known, before spending. */
@@ -135,19 +135,27 @@ export function EvalsTab({ agentId }: { agentId: string }) {
           <div style={s.metricRow}>
             <div style={s.metricCard}>
               <div style={s.metricLabel}>{t("dashboard.metrics.recall")}</div>
-              <div style={s.metricValue}>{formatPct(current.recall, dash)}</div>
+              <div style={s.metricValueRecall}>{formatPct(current.recall, dash)}</div>
+              <MetricDelta curr={current.recall} prev={previousMetricsRun?.recall ?? null} />
             </div>
             <div style={s.metricCard}>
               <div style={s.metricLabel}>{t("dashboard.metrics.precision")}</div>
-              <div style={s.metricValue}>{formatPct(current.precision, dash)}</div>
+              <div style={s.metricValuePrecision}>{formatPct(current.precision, dash)}</div>
+              <MetricDelta curr={current.precision} prev={previousMetricsRun?.precision ?? null} />
             </div>
             <div style={s.metricCard}>
               <div style={s.metricLabel}>{t("dashboard.metrics.citationAccuracy")}</div>
-              <div style={s.metricValue}>{formatPct(current.citation_accuracy, dash)}</div>
+              <div style={s.metricValueCitation}>{formatPct(current.citation_accuracy, dash)}</div>
+              <MetricDelta
+                curr={current.citation_accuracy}
+                prev={previousMetricsRun?.citation_accuracy ?? null}
+              />
             </div>
             <div style={s.metricCard}>
-              <div style={s.metricLabel}>{t("evalsTab.historyColumns.cost")}</div>
-              <div style={s.metricValue}>{formatCost(cost, dash)}</div>
+              <div style={s.metricLabel}>{t("dashboard.metrics.tracesPassed")}</div>
+              <div style={s.metricValue}>
+                {current.cases_passed}/{current.cases_covered}
+              </div>
             </div>
           </div>
         )}
@@ -275,9 +283,19 @@ export function EvalsTab({ agentId }: { agentId: string }) {
                   </td>
                   <td style={s.td}>{new Date(r.ran_at).toLocaleString()}</td>
                   <td style={s.td}>v{r.config_version}</td>
-                  <td style={s.td}>{formatPct(r.recall, dash)}</td>
-                  <td style={s.td}>{formatPct(r.precision, dash)}</td>
-                  <td style={s.td}>{formatPct(r.citation_accuracy, dash)}</td>
+                  <td style={s.td}>
+                    <EvalMetricBar value={r.recall} color={EVAL_METRIC_COLORS.recall} dash={dash} />
+                  </td>
+                  <td style={s.td}>
+                    <EvalMetricBar value={r.precision} color={EVAL_METRIC_COLORS.precision} dash={dash} />
+                  </td>
+                  <td style={s.td}>
+                    <EvalMetricBar
+                      value={r.citation_accuracy}
+                      color={EVAL_METRIC_COLORS.citation}
+                      dash={dash}
+                    />
+                  </td>
                   <td style={s.td}>
                     {r.cases_passed}/{r.cases_covered}
                   </td>
@@ -334,6 +352,29 @@ export function EvalsTab({ agentId }: { agentId: string }) {
 
       {caseParam && <CaseEditorModal agentId={agentId} caseId={caseParam} onClose={closeCase} />}
     </div>
+  );
+}
+
+/** The delta chip on a metric card, in whole percentage points against the
+ *  previous run — `null` when either side is unknown (never rendered, not a
+ *  false "0pt"). */
+function MetricDelta({ curr, prev }: { curr: number | null; prev: number | null }) {
+  const t = useTranslations("eval");
+  if (curr === null || prev === null) return null;
+  const diff = Math.round(curr * 100) - Math.round(prev * 100);
+  if (diff === 0) {
+    return (
+      <span style={{ ...s.metricDelta, ...s.directionFlat }}>
+        <Icon.Dot size={12} />
+        {t("evalsTab.deltaPoints", { delta: 0 })}
+      </span>
+    );
+  }
+  return (
+    <span style={{ ...s.metricDelta, ...(diff > 0 ? s.directionUp : s.directionDown) }}>
+      {diff > 0 ? <Icon.TrendingUp size={12} /> : <Icon.TrendingDown size={12} />}
+      {t("evalsTab.deltaPoints", { delta: Math.abs(diff) })}
+    </span>
   );
 }
 

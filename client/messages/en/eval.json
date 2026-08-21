@@ -12,7 +12,8 @@
     "metrics": {
       "recall": "RECALL",
       "precision": "PRECISION",
-      "citationAccuracy": "CITATION ACCURACY"
+      "citationAccuracy": "CITATION ACCURACY",
+      "tracesPassed": "TRACES PASSED"
     },
     "legend": {
       "recall": "Recall",
@@ -142,6 +143,7 @@
       "cost": "Cost",
       "status": "Status"
     },
+    "deltaPoints": "{delta}pt",
     "compare": "Compare",
     "compareNeedsTwo": "Select exactly two runs to compare.",
     "compareTooMany": "Select exactly two runs to compare — {count} selected.",

@@ -3,13 +3,18 @@
    is mocked at the boundary here, same principle as every hook mock below —
    this file tests the dashboard's OWN rendering, not the shell chrome. */
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 // Six `../`: src/app/evals/_components/EvalDashboardView.
 import messages from "../../../../../messages/en/eval.json";
 
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
+const push = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push }),
 }));
 
 const mutateRunAll = vi.fn();
@@ -25,6 +30,7 @@ import { EvalDashboardView } from "./EvalDashboardView";
 afterEach(() => {
   cleanup();
   dashboardData = undefined;
+  push.mockClear();
 });
 
 function renderView() {
@@ -81,6 +87,33 @@ describe("EvalDashboardView", () => {
     renderView();
     expect(screen.getByText("never run")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
+  });
+
+  it("clicking an agent row opens that agent's Evals tab", () => {
+    dashboardData = {
+      owner_kind: null,
+      owner_id: null,
+      cases_total: 3,
+      current: { recall: null, precision: null, citation_accuracy: null, traces_passed: 0, traces_total: 0, cost_usd: null },
+      delta: null,
+      trend: [],
+      recent_runs: [],
+      agents: [
+        {
+          agent_id: "ag1",
+          agent_name: "Security Reviewer",
+          cases_total: 3,
+          never_run: true,
+          last_run: null,
+          direction: null,
+          comparable: false,
+        },
+      ],
+      alert: null,
+    };
+    renderView();
+    fireEvent.click(screen.getByText("Security Reviewer"));
+    expect(push).toHaveBeenCalledWith("/agents/ag1?tab=evals");
   });
 
   it("AC-40, AC-42, AC-46: recent runs from more than one agent, newest first, each naming agent + version + direction", () => {

@@ -28,6 +28,7 @@ appending its row here in the same edit.**
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
 | 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
 | 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-21 | Patterns | `server/src/modules/eval/helpers.ts`, `service.ts#compare`, `client/.../EvalsTab/**`, small case sets | `eval-comparison`'s `attributable` flag guards against a different case set or model, NOT against LLM sampling noise between two runs of the identical config |
 | 2026-08-19 | Patterns | `server/src/modules/eval/service.ts`, `executeSet`, NFR-6 | NFR-6's "zero executed cases shall not be recorded" only fires on a pre-first-case cancellation — a parse-failed case still counts as executed and the run IS recorded |
 | 2026-08-19 | Patterns | `server/src/modules/eval/helpers.ts`, run-level scoring, arithmetic metrics | A run-level precision score has a real exception to "no denominator → `null`": a must-not-flag-only run that produces nothing scores `1`, not `null` |
 | 2026-08-16 | Patterns | `server/src/db/schema/**` link tables, composite PKs, reverse lookups | The composite PK that excuses a link table from an FK index leaves its SECOND column unindexed |
@@ -418,6 +419,41 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-21 — `eval-comparison`'s `attributability.attributable` guards against a different case set or model, NOT against LLM sampling noise between two runs of the identical config
+
+**Rule:** `compare()`'s attributability flag (`helpers.ts` ~line 222,
+`attributable: !caseSetChanged && !modelChanged`) reads as "this delta is caused
+by the prompt change" but it only rules out two specific confounds — the two
+runs covering a different `covered_case_ids` set, or a different model. It says
+nothing about whether the *same* config, run twice, would reproduce the same
+numbers. It does not, necessarily: re-running the Security Reviewer agent
+(8-case set) twice at the same `config_version`, same `system_prompt`, same
+model, with zero changes in between, produced recall 0.43 → 0.57 and precision
+0.75 → 1.0 — a swing of the same order of magnitude as the deltas this feature
+is meant to detect. The one real LLM call per case (`reviewPullRequest` inside
+`executeSet`) is not deterministic across runs; `scoreRun`/`matchExpectation`
+downstream of it are pure arithmetic and reproduce exactly given the same
+`actual_output`, so the variance is entirely in the model's sampling, not in
+scoring.
+
+**Why:** discovered manually walking the L06 eval pipeline end-to-end (case
+creation → run v4 → edit prompt to v5 → run v5 → compare → run v5 again with no
+prompt change). A single before/after run pair on a small case set (this one:
+8 cases) can show an `attributable: true` delta that is mostly or entirely
+run-to-run noise, not signal from the prompt edit. Anyone using this feature —
+or building UI copy/messaging around it — should not present `attributable:
+true` as "this delta is real"; it only means "this delta isn't explained by a
+different case set or model." Judging a prompt change with confidence needs
+either a larger case set or more than one run per config, neither of which this
+feature currently surfaces or suggests.
+
+**Where:** `server/src/modules/eval/helpers.ts:222` (`attributable` computation);
+`server/src/modules/eval/service.ts:554` (`reviewPullRequest` call inside
+`executeSet`, the one non-deterministic step per case); `client/src/app/agents/
+[id]/_components/AgentEditor/_components/EvalsTab/EvalsTab.tsx:401-407` (renders
+`notAttributable` only when the flag is false — never warns about sampling
+variance when it's true).
 
 ### 2026-08-19 — NFR-6's "zero executed cases shall not be recorded" only fires on a pre-first-case cancellation — a case that fails to PARSE still counts as executed and the run IS recorded
 

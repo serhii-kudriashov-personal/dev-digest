@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { EVAL_METRIC_COLORS } from "@/components/eval-metric-bar";
 
 export const s = {
   wrap: { display: "flex", flexDirection: "column", gap: 24, padding: "20px 24px" } satisfies CSSProperties,
@@ -26,6 +27,25 @@ export const s = {
     textTransform: "uppercase",
   } satisfies CSSProperties,
   metricValue: { fontSize: 22, fontWeight: 700, marginTop: 4 } satisfies CSSProperties,
+  metricValueRecall: {
+    fontSize: 22,
+    fontWeight: 700,
+    marginTop: 4,
+    color: EVAL_METRIC_COLORS.recall,
+  } satisfies CSSProperties,
+  metricValuePrecision: {
+    fontSize: 22,
+    fontWeight: 700,
+    marginTop: 4,
+    color: EVAL_METRIC_COLORS.precision,
+  } satisfies CSSProperties,
+  metricValueCitation: {
+    fontSize: 22,
+    fontWeight: 700,
+    marginTop: 4,
+    color: EVAL_METRIC_COLORS.citation,
+  } satisfies CSSProperties,
+  metricDelta: { fontSize: 12, marginTop: 4 } satisfies CSSProperties,
   caseRow: {
     display: "flex",
     alignItems: "center",
