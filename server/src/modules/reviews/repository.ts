@@ -141,6 +141,20 @@ export class ReviewRepository {
     return reviewRepo.setFindingDismissed(this.db, findingId, at);
   }
 
+  /**
+   * A finding's full source context (L06, SPEC-04 — AC-1, AC-4…AC-7): the
+   * finding, its producing agent, its PR, and the exact file patch it cites.
+   * Param/return types are DERIVED, not restated — re-declaring them here is
+   * the mistake `completeAgentRun` already makes (`backend-onion-architecture`
+   * §3, `server/INSIGHTS.md` 2026-08-02).
+   */
+  findingSource(
+    workspaceId: string,
+    findingId: string,
+  ): ReturnType<typeof reviewRepo.findingSource> {
+    return reviewRepo.findingSource(this.db, workspaceId, findingId);
+  }
+
   // ---- intent -------------------------------------------------------------
 
   upsertIntent(prId: string, intent: Intent): Promise<void> {

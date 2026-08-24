@@ -24,6 +24,7 @@ entry nobody is told to open.
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-18 | Works | `.claude/skills/**`, `evals/**`, measuring a prompt change | A/B a skill version against itself: force the load in BOTH arms, and make grading a separate entry point |
 | 2026-08-17 | Works | `specs/**`, `server/src/db/schema/**`, `docs/**`, implementation planning | A spec's claim that "no such record exists" needs verifying against the table, not just against the contract's declared type |
 | 2026-08-16 | Works | `specs/**`, design review, `.claude/agents/spec-writer.md` | Check every string a design mock draws against the feature's own specified input list, not against plausibility |
 | 2026-08-16 | Errors | `INSIGHTS.md` index rows, superseding an entry, `.claude/agents/**` | A superseded entry whose INDEX ROW still states the stale claim keeps propagating it — the index is the part agents actually read |
@@ -36,6 +37,7 @@ entry nobody is told to open.
 | 2026-08-05 | Works | any new feature; planning, inventory | A lesson feature is mostly already scaffolded: inventory Part 0 before writing a line |
 | 2026-08-03 | Works | debugging a test failure, `client/src/app/**` | To blame a refactor, rebuild the state just BEFORE it — `HEAD` is the wrong baseline |
 | 2026-08-03 | Works | `client/eslint.config.mjs`, introducing a linter | Grep the linter's own disable directives FIRST |
+| 2026-08-18 | Doesn't | `.claude/skills/**/evals/**`, eval assertions, graders | An eval assertion that BOTH arms fail is a broken assertion until proven otherwise |
 | 2026-08-11 | Doesn't | subagent prompts, `rg`/`grep` sweeps | Asserting a negative from a truncated `grep -il \| head` — a subagent cannot reject the premise |
 | 2026-08-09 | Doesn't | `mcp/tsconfig.json`, any package that EMITS JS | Aliasing tsconfig `paths` at another package's `.ts` sources |
 | 2026-08-08 | Doesn't | subagent orchestration | Racing `researcher` against the planner, and patching a running agent by `SendMessage` |
@@ -46,6 +48,8 @@ entry nobody is told to open.
 | 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
 | 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
 | 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
+| 2026-08-19 | Patterns | `*/src/vendor/shared/contracts/**`, zero-consumer contract edits, plans | "Zero consumers, safe to edit" proves the edit is SAFE, not that the field's existing shape fits the new consumer |
+| 2026-08-18 | Patterns | `client/messages/**`, unwired scaffolding, spec intake, i18n catalogues | Unwired scaffolding's copy doesn't just go stale, it actively disagrees with the current design — diff it, don't just re-derive from it |
 | 2026-08-16 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, jsonb columns, run traces, unwired scaffolding | A REQUIRED array on a jsonb contract cannot be retrofitted with "not recorded" — the scaffolding already wrote `[]` into every row |
 | 2026-08-16 | Patterns | `client/messages/**`, `client/src/lib/hooks/**`, unwired scaffolding, spec intake | Shipped-but-unwired scaffolding also ships a stale product decision — its copy is a claim, not a requirement |
 | 2026-08-16 | Patterns | `server/src/adapters/git/**`, any feature that writes into the clone | The clone is a mirror that hard-resets on sync — writing into it is silent data loss after the UI says "Saved" |
@@ -96,6 +100,45 @@ Fixes · Open = Open Questions.
 ---
 
 ## What Works
+
+### 2026-08-18 — A/B a skill version against itself: force the load in BOTH arms, and make grading a separate entry point
+
+**Pattern:** to measure whether an edit to a `SKILL.md` actually helps, run the
+old and new bodies against the same fixtures with two rules that are easy to get
+wrong:
+
+1. **Both arms get the identical prompt, including "load the skill".** The
+   skill-vs-no-skill experiment (iteration 1, `evals/README.md`) measures a
+   different thing. Once both arms load a skill, the run measures its *body*, and
+   a `description:` change becomes invisible to the harness — say so, or someone
+   will read a flat result as "the description edit did nothing".
+2. **Grading is its own command, run against reports already on disk.**
+   `evals/grade.py <evals.json> <out> prompts|report` re-scores without
+   re-running the reviews. This is what makes correcting a bad assertion
+   defensible: the reports cannot change under it, so a re-grade is a fix and not
+   a tuning pass. Wire grading into the review run and the two become
+   indistinguishable.
+
+The isolation that made it cheap: one throwaway workspace per (variant × case)
+holding *only* that variant's `SKILL.md` and that case's fixture tree, driven by
+`claude -p --setting-sources project --strict-mcp-config`. `--setting-sources
+project` is what keeps the user's own `~/.claude` skills out of the arm.
+
+**Why:** the result was not what the priors predicted. Adding §13 (72 lines) made
+the runs **cheaper** — 29,998 output tokens against 38,467, -22%, and the win was
+concentrated in the one case the new section addressed. v1.0.0 spent 17.8k output
+tokens on that case reasoning its way from a neighbouring note (§12's
+`feature-models.ts`) to a hedge — "**if** the rule is written as a filename
+allow-list … verify before merging" — and filed the finding MEDIUM. v1.1.0 stated
+the mechanism, filed it CRITICAL, and did it in 9.8k. **A rule that names a
+mechanism replaces derivation, so more skill text is not automatically more
+tokens.** This does not contradict 2026-08-02 ("stacking convention blocks into
+an agent's `system_prompt` made the review WORSE") — that is a different surface
+and a different failure — but it does mean "the skill got longer" is not by
+itself an argument against an edit. Measure it.
+
+**Where:** `.claude/skills/backend-onion-architecture/evals/run-ab.sh`,
+`evals/grade.py`, results in `evals/README.md` §"Iteration 2".
 
 ### 2026-08-17 — A spec's claim that "no such record exists" needs verifying against the table, not just against the contract's declared type
 
@@ -492,6 +535,33 @@ and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65
 (both removed).
 
 ## What Doesn't Work
+
+### 2026-08-18 — An eval assertion that BOTH arms fail is a broken assertion until proven otherwise
+
+**Tried:** graded `eval-4-digests` with an assertion demanding the reviewer cite
+`no-sql-in-service` for SQL sitting in an off-manifest `data-access.ts`. Both the
+old and the new `SKILL.md` failed it, which read as a shared blind spot — the
+kind of row that gets filed as "two open defects" and carried forward.
+
+**Failed:** the assertion was wrong. `no-sql-in-service` does not govern a
+correctly-named `repository.ts` either, so "the SQL is unpoliced" was never the
+consequence of the bad filename. The real consequences are that
+`no-http-below-the-edge` never inspects the file and that it is absent from
+`SLICE_PRIVATE`, so another slice may import it. The new skill's report had named
+both — and was marked FAIL for not naming the rule that does not apply. A strict
+grader will faithfully score a report against a wrong question.
+
+**Instead:** when an assertion fails in every arm, check the assertion against
+the config before recording a finding. Two failure modes look identical from the
+score table: an assertion nobody can satisfy, and one that does not discriminate.
+`eval-1` assertion 3 and `eval-3` assertion 2 have now failed in three separate
+configurations across two iterations — those are non-discriminating, and the set's
+real ceiling is 12/14, not 14/14. Record which of the two a persistent FAIL is;
+the number alone will be misread as a defect. Corrections belong in `evals.json`
+as a `grading_note`, so the next reader knows the wording moved and why.
+
+**Where:** `.claude/skills/backend-onion-architecture/evals/evals.json`
+(`eval-4-digests`, `grading_note`), `evals/README.md` §"Iteration 2".
 
 ### 2026-08-16 — A literal-string `Done when` grep goes unsatisfiable when another resolved open question in the same plan introduces the matching token
 
@@ -917,6 +987,61 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-19 — "Zero consumers, safe to edit in place" only proves the edit is SAFE — it says nothing about whether the field's existing shape actually fits the new consumer
+
+**Rule:** extends 2026-08-11 ("A REQUIRED new field on a contract embedded in
+a jsonb-persisted parent goes on a sibling response schema"). That entry (and
+the R4 risk note it licenses in `plans/2026-08-18-l06-eval-pipeline.md`) treats
+"this field has zero consumers" as clearance to widen or edit a contract field
+in place rather than superseding it with a sibling schema. Zero consumers does
+make the edit *safe* — nothing breaks. It does **not** mean the field's
+pre-existing shape already matches what the new UI needs. Those are two
+independent claims, and a plan that only checks the first will still hand the
+implementer a type error (or a silent shape mismatch, if the field is loosely
+typed) on the second.
+
+**Why:** `plans/2026-08-18-l06-eval-pipeline.md` Step 1 licensed editing
+`EvalDashboard` in place — including `recent_runs` — solely on "it has zero
+consumers, verified by `rg`". That check is correct for every other field the
+step widened (metrics going nullable, `delta` going nullish). It was not
+sufficient for `recent_runs`: the field was typed as `EvalRunRecord` (the
+per-case detail shape), but AC-42's cross-agent recent-runs list needs
+`EvalSetRun` (agent, config version, the three run-level metrics, pass tally)
+— information a per-case row does not carry at all. The implementer had to
+change the element type mid-build; a planner re-checking "does this shape
+already carry what the consuming AC needs", not just "does anything read this
+today", would have caught it before the build started.
+
+**Where:** `server/src/vendor/shared/contracts/eval-ci.ts` (`EvalDashboard.recent_runs`,
+changed from `EvalRunRecord[]` to `EvalSetRun[]`); the AC it serves is AC-42 in
+`specs/2026-08-18-l06-eval-pipeline.md`.
+
+### 2026-08-18 — Unwired scaffolding's copy doesn't just go stale, it actively disagrees with the current design — diff it, don't just re-derive from it
+
+**Rule:** extends 2026-08-16 ("Shipped-but-unwired scaffolding also ships a
+stale product decision") with a second check. That entry says re-derive
+requirements from the current request and treat old scaffolding copy as a
+claim. This time the scaffolding wasn't just silent about something the
+feature no longer does — it stated the OPPOSITE of what the design mock draws,
+in the same session, for a feature not yet built. Re-deriving alone would have
+missed it; you have to diff the catalogue string-by-string against the mock.
+
+**Why:** while spec-writer researched `specs/2026-08-18-l06-eval-pipeline.md`,
+`client/messages/en/eval.json` turned out to already carry a full i18n
+catalogue for the Eval Pipeline feature (dashboard, case editor, evals tab),
+unwired to any component. Two of its strings contradict the design mock
+outright: `evalsTab.newCase` says "New case" where the mock's button reads
+"+ New eval case", and `caseEditor.tabs` lists only `diff`/`prMeta` where the
+mock's case editor draws three input tabs — Diff / Files / PR meta. Neither
+is a case of the copy being merely incomplete; both assert a shape for the
+feature that the current design has already moved past.
+
+**Where:** `client/messages/en/eval.json:43-46` (`caseEditor.tabs`),
+`evalsTab.newCase`; the reconciliation is recorded as an open question in
+`specs/2026-08-18-l06-eval-pipeline.md`. See 2026-08-16 (line 1041 area,
+"Shipped-but-unwired scaffolding also ships a stale product decision") for the
+base rule this sharpens.
 
 ### 2026-08-16 — A REQUIRED array on a jsonb contract cannot be retrofitted with "not recorded" semantics — the scaffolding already wrote `[]` into every row
 

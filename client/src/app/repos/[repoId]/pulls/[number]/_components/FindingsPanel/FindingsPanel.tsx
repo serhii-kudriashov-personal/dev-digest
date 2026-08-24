@@ -3,12 +3,14 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Toggle, EmptyState } from "@devdigest/ui";
+import { Toggle, EmptyState, Icon } from "@devdigest/ui";
 import type { FindingRecord, Severity } from "@devdigest/shared";
 import { FindingCard } from "../FindingCard";
 import { SeverityFilterBar } from "../SeverityFilterBar";
 import { useFindingAction } from "@/lib/hooks/reviews";
+import { useCreateEvalCaseFromFinding } from "@/lib/hooks/eval";
 import { KEY_TO_ACTION } from "./constants";
 import { byConfidence, countBySeverity, visibleFindings } from "./helpers";
 import { s } from "./styles";
@@ -46,6 +48,15 @@ export function FindingsPanel({
 }) {
   const t = useTranslations("prReview");
   const action = useFindingAction();
+  const createEvalCase = useCreateEvalCaseFromFinding();
+  // L06, SPEC-04 — AC-8: the confirmation for the MOST RECENTLY created case.
+  // The PR view stays mounted (no navigation); the link opens the case editor.
+  const [evalCaseCreated, setEvalCaseCreated] = React.useState<{
+    caseId: string;
+    agentId: string;
+    name: string;
+    secretWarning: boolean;
+  } | null>(null);
   const [hideLow, setHideLow] = React.useState(false);
   const [focusIdx, setFocusIdx] = React.useState(0);
   // A card is uncontrolled until navigation forces it open; from then on its
@@ -124,6 +135,19 @@ export function FindingsPanel({
         </div>
       </div>
 
+      {evalCaseCreated && (
+        <div style={s.evalCaseBanner}>
+          <Icon.FlaskConical size={14} />
+          <span>{t("finding.evalCaseCreated", { name: evalCaseCreated.name })}</span>
+          <Link href={`/agents/${evalCaseCreated.agentId}?tab=evals&case=${evalCaseCreated.caseId}`}>
+            {t("finding.viewEvalCase")}
+          </Link>
+          {evalCaseCreated.secretWarning && (
+            <span style={s.evalCaseWarning}>{t("finding.secretRetainedWarning")}</span>
+          )}
+        </div>
+      )}
+
       <div ref={listRef} style={s.list}>
         {shown.length === 0 ? (
           <EmptyState icon="Filter" title={t("panel.noMatchTitle")} body={t("panel.noMatchBody")} />
@@ -140,6 +164,18 @@ export function FindingsPanel({
               repoFullName={repoFullName}
               headSha={headSha}
               onAction={(act) => action.mutate({ findingId: f.id, action: act, prId })}
+              creatingEvalCase={createEvalCase.isPending}
+              onCreateEvalCase={() =>
+                createEvalCase.mutate(f.id, {
+                  onSuccess: (result) =>
+                    setEvalCaseCreated({
+                      caseId: result.case.id,
+                      agentId: result.case.owner_id,
+                      name: result.case.name,
+                      secretWarning: result.secret_warning,
+                    }),
+                })
+              }
             />
           ))
         )}

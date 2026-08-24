@@ -1,0 +1,75 @@
+{
+  "skill_name": "backend-onion-architecture",
+  "evals": [
+    {
+      "id": 1,
+      "name": "eval-1-notifications",
+      "prompt": "You are reviewing a small pull request against the DevDigest repo before it merges. The PR adds a `notifications` module under `server/src/modules/notifications/`. Read these three files and review them for architecture-boundary problems (which ring code belongs in, which rings it may depend on, and this repo's specific conventions for ports, the composition root, and repositories) \u2014 not general code style. For every problem you find, cite the file and the specific line/expression, explain what's wrong, and state a severity (CRITICAL / HIGH / MEDIUM). Save your findings as a markdown report.\n\nFiles to review:\n- server/src/modules/notifications/routes.ts\n- server/src/modules/notifications/service.ts\n- server/src/modules/notifications/repository.ts",
+      "files": [
+        "fixtures/eval-1-notifications/server/src/modules/notifications/routes.ts",
+        "fixtures/eval-1-notifications/server/src/modules/notifications/service.ts",
+        "fixtures/eval-1-notifications/server/src/modules/notifications/repository.ts"
+      ],
+      "expected_output": "A findings report flagging: (1) raw Drizzle SQL executed directly in routes.ts's mark-read handler instead of going through the repository/service, (2) service.ts constructing `new SlackWebhookNotifier(...)` directly instead of resolving it from the composition root/container, (3) repository.ts's findRecent returning the un-awaited Drizzle query builder chain instead of plain rows.",
+      "expectations": [
+        "Flags that the POST /read handler in routes.ts runs a Drizzle update directly against the database instead of delegating to the repository or service (SQL belongs in ring 3, not in routes.ts)",
+        "Flags that service.ts instantiates `new SlackWebhookNotifier(...)` directly instead of resolving the notifier from the composition root/container, which makes the service hard to test without a real webhook",
+        "Flags that repository.ts's `findRecent` method returns the Drizzle query builder chain without awaiting it, leaking a query-builder/ORM object across the ring boundary instead of returning plain rows"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "eval-2-exports",
+      "prompt": "You are reviewing a small pull request against the DevDigest repo before it merges. The PR adds an `exports` module under `server/src/modules/exports/`. Read these two files and review them for architecture-boundary problems (which ring code belongs in, which rings it may depend on, and this repo's specific conventions for the composition root, services, and pure helpers) \u2014 not general code style. For every problem you find, cite the file and the specific line/expression, explain what's wrong, and state a severity (CRITICAL / HIGH / MEDIUM). Save your findings as a markdown report.\n\nFiles to review:\n- server/src/modules/exports/service.ts\n- server/src/modules/exports/helpers.ts",
+      "files": [
+        "fixtures/eval-2-exports/server/src/modules/exports/service.ts",
+        "fixtures/eval-2-exports/server/src/modules/exports/helpers.ts"
+      ],
+      "expected_output": "A findings report flagging: (1) generateCsvExport in service.ts taking a FastifyRequest parameter directly, (2) markExportDelivered in service.ts reading/writing container.db directly instead of going through a repository, (3) normalizeAmountsToUsd in helpers.ts making a network fetch() call from a file that is supposed to be a pure, I/O-free transform.",
+      "expectations": [
+        "Flags that service.ts's `generateCsvExport` takes a `FastifyRequest` parameter directly instead of the specific values the service needs (Fastify types should stay at the HTTP edge, not leak into the service layer)",
+        "Flags that service.ts's `markExportDelivered` reads and writes `container.db` directly instead of delegating the update to a repository (a service should not do a repository's job)",
+        "Flags that helpers.ts's `normalizeAmountsToUsd` performs a network call (`fetch`) even though helpers/pure-transform files are supposed to have no I/O"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "eval-3-billing",
+      "prompt": "You are reviewing a small pull request against the DevDigest repo before it merges. The PR touches a `billing` module, a `workspace` module, and `reviewer-core`. Read these three files and review them for architecture-boundary problems (which ring code belongs in, which rings it may depend on, and this repo's specific conventions for cross-module access and reviewer-core's purity) \u2014 not general code style. For every problem you find, cite the file and the specific line/expression, explain what's wrong, and state a severity (CRITICAL / HIGH / MEDIUM). Save your findings as a markdown report.\n\nFiles to review:\n- server/src/modules/billing/service.ts\n- server/src/modules/workspace/repository.ts\n- reviewer-core/src/pricing.ts",
+      "files": [
+        "fixtures/eval-3-billing/server/src/modules/billing/service.ts",
+        "fixtures/eval-3-billing/server/src/modules/workspace/repository.ts",
+        "fixtures/eval-3-billing/reviewer-core/src/pricing.ts"
+      ],
+      "expected_output": "A findings report flagging: (1) billing/service.ts importing and instantiating WorkspaceRepository directly from another module instead of going through the container/a shared repository, (2) getInvoices in billing/service.ts being a pass-through method that adds no logic over the repository call, (3) reviewer-core/src/pricing.ts reading the filesystem (node:fs) even though reviewer-core is supposed to be a zero-I/O pure core.",
+      "expectations": [
+        "Flags that billing/service.ts imports `WorkspaceRepository` directly from the workspace module (a cross-module/cross-slice import) instead of obtaining it through the container or a shared repository",
+        "Flags that `getInvoices` in billing/service.ts is a pure pass-through method that only forwards to `this.repository.getInvoices(...)` without adding any logic",
+        "Flags that `loadPriceBook` in reviewer-core/src/pricing.ts reads from the filesystem (`node:fs`), violating reviewer-core's zero-I/O pure-core requirement"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "eval-4-digests",
+      "prompt": "You are reviewing a small pull request against the DevDigest repo before it merges. The PR adds a `digests` module under `server/src/modules/digests/`. Read these files and review them for architecture-boundary problems (which ring code belongs in, which rings it may depend on, this repo's conventions for slices and their file layout, and whether this repo's own boundary gate actually covers the change) \u2014 not general code style. Assume `pnpm arch` currently exits 0 on this PR; say whether that means anything. For every problem you find, cite the file and the specific line/expression, explain what's wrong, and state a severity (CRITICAL / HIGH / MEDIUM). Save your findings as a markdown report.\n\nFiles to review:\n- server/src/modules/digests/routes.ts\n- server/src/modules/digests/service.ts\n- server/src/modules/digests/data-access.ts\n- server/src/modules/digests/constants.ts\n- server/src/modules/index.ts\n- server/src/modules/conventions/extract-pipeline.ts (context \u2014 an existing slice, not part of this PR)",
+      "files": [
+        "fixtures/eval-4-digests/server/src/modules/digests/routes.ts",
+        "fixtures/eval-4-digests/server/src/modules/digests/service.ts",
+        "fixtures/eval-4-digests/server/src/modules/digests/data-access.ts",
+        "fixtures/eval-4-digests/server/src/modules/digests/constants.ts",
+        "fixtures/eval-4-digests/server/src/modules/index.ts",
+        "fixtures/eval-4-digests/server/src/modules/conventions/extract-pipeline.ts"
+      ],
+      "expected_output": "A findings report flagging: (1) the slice's SQL living in an off-manifest filename `data-access.ts`, which no `modules/` rule in .dependency-cruiser.cjs matches, so the green `pnpm arch` proves nothing \u2014 rename to repository.ts; (2) the cross-slice import of `conventions/extract-pipeline.ts` from digests/service.ts, which no-cross-slice-import misses because the target filename is not in SLICE_PRIVATE; (3) the new digests plugin never being registered in modules/index.ts, so every endpoint 404s with no gate, test or typecheck failing.",
+      "expectations": [
+        "Flags that `digests/data-access.ts` holds the slice's SQL under a filename that is not one of the slice's canonical names (routes/service/repository/helpers/constants/types), and that the fix is to name it `repository.ts`",
+        "States that the off-manifest filename puts the file outside EVERY `modules/` glob in `.dependency-cruiser.cjs`, naming at least one concrete consequence \u2014 `no-http-below-the-edge` never inspects it, or it is absent from `SLICE_PRIVATE` so another slice may import `DigestStore` directly \u2014 and concludes that `pnpm arch` exiting 0 therefore says nothing about this file",
+        "Flags that `digests/service.ts` imports `../conventions/extract-pipeline.js`, reaching into another slice's private internals instead of going through the container",
+        "States that this particular cross-slice import is NOT caught by `no-cross-slice-import`, because the rule's private-file list (SLICE_PRIVATE) names only service/repository/routes/helpers/run-executor and `extract-pipeline.ts` is not among them",
+        "Flags that the new `digests` plugin is missing from `server/src/modules/index.ts` \u2014 registration is static (no autoload), so the routes never mount and every endpoint 404s while typecheck, tests and the arch gate all stay green"
+      ],
+      "targets_section": "SKILL.md \u00a713 (slice file manifest) \u2014 added in v1.1.0; absent from v1.0.0",
+      "grading_note": "Assertion 2 was reworded after the 2026-08-18 run: the original cited `no-sql-in-service`, but that rule does not govern a correctly-named `repository.ts` either, so 'the SQL is unpoliced' was never the real consequence. Both variants' reports were already written when it was corrected."
+    }
+  ]
+}

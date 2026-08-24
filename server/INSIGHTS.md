@@ -21,6 +21,7 @@ appending its row here in the same edit.**
 | 2026-08-09 | Works | `server/test/**`, response assertions | A value returned but rendered NOWHERE has no UI that can notice it breaking — assert it at the boundary |
 | 2026-08-08 | Works | `server/src/modules/**/service.ts`, facade tests | A never-throw facade is untestable through a caller with its own `.catch` — test the guarantee at the service |
 | 2026-08-03 | Works | `server/test/*.it.test.ts`, vitest config | `--no-file-parallelism` makes the integration suite deterministic AND faster; re-running is the wrong fix |
+| 2026-08-21 | Doesn't | `server/src/modules/eval/helpers.ts`, `matchExpectation`, severity-restricting prompt edits | A "only report severity X" prompt line can make the agent OVER-LABEL instead of under-report — eval matching is file+line only and cannot tell the difference |
 | 2026-08-17 | Doesn't | `server/test/*.it.test.ts`, `dockerAvailable()`, multi-turn verification | "Docker was unavailable" from an earlier turn is not a property of the environment — it re-checks on every invocation |
 | 2026-08-17 | Doesn't | `plans/**`, `Done when` file references | A plan's `Done when` naming a specific test file as proof does not mean that file actually asserts the thing |
 | 2026-08-08 | Doesn't | `server/test/reviews.it.test.ts`, `run-executor.ts`, provider mocks | A pre-work step made the suite spend REAL money — `.env` holds live keys and the file mocks only ONE provider |
@@ -28,6 +29,9 @@ appending its row here in the same edit.**
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
 | 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
 | 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-21 | Patterns | `server/src/modules/eval/helpers.ts`, `service.ts#compare`, `client/.../EvalsTab/**`, small case sets | `eval-comparison`'s `attributable` flag guards against a different case set or model, NOT against LLM sampling noise between two runs of the identical config |
+| 2026-08-19 | Patterns | `server/src/modules/eval/service.ts`, `executeSet`, NFR-6 | NFR-6's "zero executed cases shall not be recorded" only fires on a pre-first-case cancellation — a parse-failed case still counts as executed and the run IS recorded |
+| 2026-08-19 | Patterns | `server/src/modules/eval/helpers.ts`, run-level scoring, arithmetic metrics | A run-level precision score has a real exception to "no denominator → `null`": a must-not-flag-only run that produces nothing scores `1`, not `null` |
 | 2026-08-16 | Patterns | `server/src/db/schema/**` link tables, composite PKs, reverse lookups | The composite PK that excuses a link table from an FK index leaves its SECOND column unindexed |
 | 2026-08-16 | Patterns | `server/src/modules/**` reading cloned/untrusted files, `node:fs` | `readFile` is the wrong primitive for attacker-supplied content you only need a bounded prefix of |
 | 2026-08-16 | Patterns | `server/src/modules/repo-intel/pipeline/walk.ts`, any `**/{dir}/**` file discovery | A depth-agnostic discovery glob makes `EXCLUDED_DIRS` load-bearing — and `walk.ts` will not apply it for you |
@@ -44,6 +48,7 @@ appending its row here in the same edit.**
 | 2026-08-09 | Patterns | `server/src/db/schema/**`, migrations | `findings` and `reviews` ARE indexed now — check the schema before you owe a migration |
 | 2026-08-02 | Patterns | `server/src/db/schema/**` | The `findings` table has no indexes at all — a FK is not an index |
 | 2026-08-02 | Patterns | `agents.system_prompt`, `docs/agent-prompts/**` | The live agent prompt is the DB column, not the markdown file |
+| 2026-08-18 | Tools | `server/.dependency-cruiser.cjs`, auditing `pnpm arch` coverage | Grepping for a `db/schema` import to find gate-blind SQL over-reports — a type-only import is not an edge |
 | 2026-08-08 | Tools | model ids, model config | `deepseek/deepseek-v4-flash` and `…-flash-latest` are DIFFERENT models at different prices |
 | 2026-08-05 | Tools | `server/src/db/migrations/**`, `pnpm db:generate` | `db:generate` goes INTERACTIVE when one migration both drops and adds a column |
 | 2026-08-05 | Tools | `server/test/*.it.test.ts`, running `pnpm test` | `pnpm test` is red here for an environmental reason: 8 files start 8 Postgres containers at once |
@@ -51,6 +56,7 @@ appending its row here in the same edit.**
 | 2026-08-03 | Tools | `server/src/modules/**/repository.ts`, transactions | A Drizzle transaction handle is NOT a `Db` — compose with `DbOrTx` |
 | 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | `octokit` and `p-queue` are UNRESOLVABLE to dependency-cruiser |
 | 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | The depcruise config must be `.cjs`, and `--init` writes the wrong extension |
+| 2026-08-21 | Errors | `server/src/modules/reviews/repository/review.repo.ts`, list queries feeding a mutated list | Accept/Dismiss reshuffled the findings list because its fetch query had no `ORDER BY` |
 | 2026-08-11 | Errors | `server/src/modules/repo-intel/**`, blast contracts | `DownstreamImpact.symbol` is not unique across `blast.downstream` |
 | 2026-08-09 | Errors | `server/src/modules/reviews/**`, `agent_runs` | Deleting an `agent_runs` row does NOT stop the run — it keeps spending |
 | 2026-08-08 | Errors | `server/test/reviews.it.test.ts`, traces | The `prompt_assembly` flake is a run-vs-trace ordering race |
@@ -195,6 +201,48 @@ to probe.
 ("Commands") without the flag — add it there if you touch that table.
 
 ## What Doesn't Work
+
+### 2026-08-21 — A "only report severity X" prompt line does not make the agent under-report — it can make the agent OVER-LABEL, and eval matching (file+line only) cannot tell the difference
+
+**Tried:** adding `Only report CRITICAL severity findings. Do not report WARNING
+or SUGGESTION severity findings.` to the Security Reviewer's `system_prompt`,
+expecting recall to drop (the WARNING/SUGGESTION `must_find` cases should stop
+matching) while precision rises (less noise). Verified live against an 8-case
+set (3 CRITICAL `must_find`, 4 WARNING/SUGGESTION `must_find`, 1 WARNING
+`must_not_flag`) with a real OpenRouter call per case, comparing the run before
+and after the prompt edit.
+
+**Failed:** recall did not move (0.857 → 0.857, identical). Precision did rise
+(0.4 → 0.75) but not for the predicted reason. Reading each case's
+`actual_output` (`eval_runs.actual_output->'findings'`) showed the model kept
+producing a finding at every WARNING/SUGGESTION case's location, but relabelled
+`severity: "CRITICAL"` on all of them — one case ("No rate limiting on export
+endpoint", expected severity SUGGESTION) came back with a finding titled
+"Missing access control on findings export endpoint" at the same file:line,
+severity CRITICAL. `matchExpectation` (AC-19) matches on file + line overlap
+only, never on title or severity, so this still scored as `matched: true`. The
+model satisfied "only report CRITICAL" literally by re-classifying everything
+as CRITICAL rather than by omitting the non-critical findings — the opposite of
+the intended effect, and invisible to this eval set's scoring because severity
+isn't part of what gets checked.
+
+**Instead:** a prompt edit meant to filter by severity cannot be verified by
+recall/precision alone here — the case's `expected_output.severity` is stored
+(`eval_cases.expected_output->>'severity'`) but `matchExpectation` never reads
+it. To actually catch this failure mode, either compare the *returned*
+severity per matched case by hand (as done here, reading `actual_output`
+directly), or treat "recall held steady across a stated severity-restricting
+prompt change" as a signal to go check `actual_output`, not as evidence the
+prompt had no effect. This is the same root cause as `findings.confidence is
+not calibrated` (2026-08-02, below): the model's own severity/confidence label
+is a claim, not a verified property, and neither this eval feature nor the
+live review pipeline cross-checks it against anything.
+
+**Where:** `server/src/modules/eval/helpers.ts` (`matchExpectation`, matches on
+`file`/line overlap only); `server/src/modules/eval/service.ts:554`
+(`reviewPullRequest` call whose `actual_output` carries the real severity);
+`server/src/db/schema/eval.ts` (`eval_cases.expected_output`, `eval_runs.
+actual_output`, both jsonb, severity present but unchecked).
 
 ### 2026-08-17 — "Docker was unavailable" from an earlier turn is not a property of the environment — a `dockerAvailable()`-gated `*.it.test.ts` file re-checks on every invocation
 
@@ -415,6 +463,105 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-21 — `eval-comparison`'s `attributability.attributable` guards against a different case set or model, NOT against LLM sampling noise between two runs of the identical config
+
+**Rule:** `compare()`'s attributability flag (`helpers.ts` ~line 222,
+`attributable: !caseSetChanged && !modelChanged`) reads as "this delta is caused
+by the prompt change" but it only rules out two specific confounds — the two
+runs covering a different `covered_case_ids` set, or a different model. It says
+nothing about whether the *same* config, run twice, would reproduce the same
+numbers. It does not, necessarily: re-running the Security Reviewer agent
+(8-case set) twice at the same `config_version`, same `system_prompt`, same
+model, with zero changes in between, produced recall 0.43 → 0.57 and precision
+0.75 → 1.0 — a swing of the same order of magnitude as the deltas this feature
+is meant to detect. The one real LLM call per case (`reviewPullRequest` inside
+`executeSet`) is not deterministic across runs; `scoreRun`/`matchExpectation`
+downstream of it are pure arithmetic and reproduce exactly given the same
+`actual_output`, so the variance is entirely in the model's sampling, not in
+scoring.
+
+**Why:** discovered manually walking the L06 eval pipeline end-to-end (case
+creation → run v4 → edit prompt to v5 → run v5 → compare → run v5 again with no
+prompt change). A single before/after run pair on a small case set (this one:
+8 cases) can show an `attributable: true` delta that is mostly or entirely
+run-to-run noise, not signal from the prompt edit. Anyone using this feature —
+or building UI copy/messaging around it — should not present `attributable:
+true` as "this delta is real"; it only means "this delta isn't explained by a
+different case set or model." Judging a prompt change with confidence needs
+either a larger case set or more than one run per config, neither of which this
+feature currently surfaces or suggests.
+
+**Where:** `server/src/modules/eval/helpers.ts:222` (`attributable` computation);
+`server/src/modules/eval/service.ts:554` (`reviewPullRequest` call inside
+`executeSet`, the one non-deterministic step per case); `client/src/app/agents/
+[id]/_components/AgentEditor/_components/EvalsTab/EvalsTab.tsx:401-407` (renders
+`notAttributable` only when the flag is false — never warns about sampling
+variance when it's true).
+
+### 2026-08-19 — NFR-6's "zero executed cases shall not be recorded" only fires on a pre-first-case cancellation — a case that fails to PARSE still counts as executed and the run IS recorded
+
+**Rule:** `executeSet`'s NFR-6 branch (`if (casesDone === 0) { deleteSetRun(...); return }`)
+reads, from the spec prose alone, as "a run where every case fails to start
+leaves no `eval_set_runs` row." That is not what the code does. `casesDone` is
+incremented for **every** case that reaches `recordCaseResult`, including one
+whose diff fails to parse and is recorded as a failed case (see the AC-25
+handling in the same function) — a parse failure is still an executed case
+with a result, just a losing one. The delete-and-don't-record branch only
+fires when the run is **cancelled before the first case ever starts**, i.e.
+`casesDone` never leaves zero. A case set where every case fails to parse
+still produces a real, queryable `eval_set_runs` row with `status: 'incomplete'`
+and `cases_passed: 0` — it does not vanish.
+
+**Why:** discovered closing the plan-verifier gap for NFR-6 test coverage
+(`plans/2026-08-18-l06-eval-pipeline.md`, `server/test/eval.it.test.ts`). The
+literal spec reading ("every case fails to even start") does not correspond to
+any reachable code path, so the test that actually exercises the delete branch
+uses a **different** trigger: a case set that is empty at read time (zero
+cases at all), which is refused before `openSetRun` is ever called, not the
+"every case fails mid-flight" scenario the prose implies. Anyone extending
+`executeSet` to add a new failure mode should check which of these two the new
+failure resembles — "never reached `recordCaseResult`" (deletes the run) vs.
+"reached it and lost" (keeps the run, marks it incomplete) — because the
+NFR-6 prose alone does not disambiguate.
+
+**Where:** `server/src/modules/eval/service.ts:489` (`executeSet`'s
+`casesDone === 0` branch); the NFR-6 test is in `server/test/eval.it.test.ts`
+(the zero-case-set scenario, not a mid-run failure scenario).
+
+### 2026-08-19 — A run-level precision score has a real exception to "no denominator → `null`": a run with only `must_not_flag` cases that correctly produces nothing scores `1`, not `null`
+
+**Rule:** in `scoreRun`, `recall` and `citation_accuracy` are `null` whenever
+their denominator is zero, but `precision` is **not** unconditionally the
+same. Precision is `null` only when the case set contains at least one
+`must_find` expectation **and** the run produced no grounded findings at all —
+in every other zero-findings case (a run made entirely of `must_not_flag`
+cases that correctly stayed silent), precision is `1`, because "produced
+nothing forbidden" is itself a fully-determined precision of 1, not an
+undefined ratio.
+
+```ts
+// scoreRun — the branch that is easy to over-generalise from AC-23's headline
+if (producedCount === 0) {
+  return hasMustFindCase ? null : 1; // NOT: return null unconditionally
+}
+```
+
+**Why:** `plans/2026-08-18-l06-eval-pipeline.md` Step 4's own prose ("precision
+is `null` when nothing was produced") and its Step 10 test description (which
+implies the must-not-flag-only, nothing-produced case reports a precision
+value, not `null`) directly contradict each other — the plan was written
+against the spec's AC-23 headline case, not its full Edge-cases table. The
+`null`-for-every-empty-denominator rule (root `INSIGHTS.md` 2026-08-02,
+"Unknown cost is `null`, never `0`") is right for recall and citation accuracy
+but does not generalise to precision, because precision's denominator being
+zero is not "unknown" here — it is the observed, meaningful outcome of a
+must-not-flag-only case set behaving correctly. Resolving which reading was
+right required cross-referencing the spec's own `## Edge cases` table, not
+just the plan.
+
+**Where:** `server/src/modules/eval/helpers.ts:70-90` (`scoreRun`); the
+AC-23 exception is asserted in `server/test/eval-helpers.test.ts`.
 
 ### 2026-08-17 — `BriefService`'s single-flight `Map` is module-scoped, so it is shared across every instance in the process — a test that doesn't await `generate()` can leak a promise into the next case
 
@@ -910,6 +1057,41 @@ the editor field is
 
 ## Tool & Library Notes
 
+### 2026-08-18 — Grepping for a `db/schema` import to find gate-blind SQL over-reports: `tsPreCompilationDeps: false` means a type-only import is not an edge
+
+**Quirk:** the `modules/` rules in `.dependency-cruiser.cjs` select files by
+name, so any slice file not called `routes`/`service`/`repository`/`helpers` is
+outside them (SKILL §13). Sweeping for the files that exploit that — anything
+off-manifest importing Drizzle or `db/schema` — returns three hits out of the
+sixteen off-manifest files:
+
+```
+src/modules/reviews/diff-loader.ts       import * as schema from '../../db/schema.js'
+src/modules/reviews/run-executor.ts      import * as schema from '../../db/schema.js'
+src/modules/settings/feature-models.ts   import { eq } from 'drizzle-orm'
+```
+
+Only `feature-models.ts` is real. `diff-loader.ts` uses `schema` exactly once, as
+`typeof schema.repos.$inferSelect` in a parameter type (`diff-loader.ts:17`);
+`run-executor.ts` is the same shape. TypeScript elides an import whose binding is
+never used in a value position, and the gate runs with
+`tsPreCompilationDeps: false` (`.dependency-cruiser.cjs`), so those files emit no
+runtime edge at all. They are the `db/rows.ts` smell from SKILL §2, not unpoliced
+SQL — filing them as gate-blind SQL sites would have put two false rows into
+SKILL §12, where the list is only allowed to shrink.
+
+**Workaround:** a grep for the import is a candidate list, not a finding. Confirm
+each hit by checking whether the binding is used in a *value* position — for
+`import * as x`, grep `x\.` and see whether every use sits behind `typeof`. The
+same elision is why a dependency-cruiser rule probe has to *use* what it imports
+to fire at all (SKILL §10, trap 1); this is that trap seen from the other side,
+where it produces false positives in a manual audit instead of a silently passing
+rule.
+
+**Where:** `server/.dependency-cruiser.cjs` (`tsPreCompilationDeps: false`),
+`server/src/modules/reviews/diff-loader.ts:4,17`,
+`server/src/modules/settings/feature-models.ts:1,8`.
+
 ### 2026-08-08 — `deepseek/deepseek-v4-flash` and `…-flash-latest` are DIFFERENT models at different prices, and the pricier one is the one already hardcoded here
 
 **Quirk:** the two slugs look like the same model with an optional freshness
@@ -1123,6 +1305,44 @@ than relying on config auto-discovery. Same trap applies to any future
 (`"arch"`); `"type": "module"` at `server/package.json:4`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-21 — Accept/Dismiss on a finding visually reshuffles the whole findings list, because its fetch query has no `ORDER BY`
+
+**Symptom:** clicking Accept (or Dismiss) on a `FindingCard` makes the findings
+list appear to "collapse" — cards change position, the just-clicked card
+scrolls out of view. Reported while manually accepting findings for L06 eval
+cases; reproduced live, not a one-off render glitch.
+
+**Cause:** `reviewsForPull`'s findings query (`server/src/modules/reviews/
+repository/review.repo.ts:102`, before the fix) had no `.orderBy(...)`, unlike
+its sibling `reviews` query two lines above (`orderBy(desc(t.reviews.
+createdAt))`). Postgres gives no row-order guarantee for a query without
+`ORDER BY`. Accept/Dismiss (`setFindingAccepted`) issues an `UPDATE` on one
+finding row; the client's mutation `onSuccess` (`client/src/lib/hooks/
+reviews.ts`) invalidates `["reviews", prId]`, forcing an immediate refetch of
+that same unordered query — and MVCC's new tuple version can surface in a
+different scan position than before. The client's own sort
+(`FindingsPanel/helpers.ts#visibleFindings`) is a **stable** sort keyed only by
+severity, so it faithfully preserves whatever order the server just handed it
+— including a changed one. No accordion/expand state was involved; `open` and
+`expandedById` are keyed by stable ids, not index (verified, not the cause).
+
+**Takeaway:** a `db.select()` with no `.orderBy()` is not "unordered until I
+add sorting later" — it is a live footgun the moment ANY row in that result
+set gets written between two reads in the same session, and a query invalidate
++ refetch flow (this repo's standard mutation pattern) creates exactly that
+condition on every mutation. Any list-returning query feeding a client list
+that survives a same-row mutation needs a deterministic `.orderBy(...)`, mirroring
+the sibling `reviews` query's own `orderBy(desc(createdAt))` — fixed here with
+`.orderBy(asc(t.findings.file), asc(t.findings.startLine))` (findings has no
+`createdAt` column to order by instead).
+
+**Where:** `server/src/modules/reviews/repository/review.repo.ts:91-107`
+(`reviewsForPull`); `server/src/modules/reviews/repository/review.repo.ts:157-162`
+(`setFindingAccepted`, the mutating query); `client/src/lib/hooks/reviews.ts:188-193`
+(`useFindingAction`'s `onSuccess` invalidation); `client/src/app/repos/[repoId]/
+pulls/[number]/_components/FindingsPanel/helpers.ts` (`visibleFindings`'s
+stable severity-only sort, which faithfully surfaces the unstable input order).
 
 ### 2026-08-11 — Blast Radius `DownstreamImpact.symbol` was not a unique key across `blast.downstream` — two changed symbols can share a bare name from different files
 

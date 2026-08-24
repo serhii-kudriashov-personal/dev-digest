@@ -33,6 +33,8 @@ export function FindingCard({
   pending,
   repoFullName,
   headSha,
+  onCreateEvalCase,
+  creatingEvalCase,
 }: {
   f: FindingRecord;
   focused?: boolean;
@@ -50,6 +52,13 @@ export function FindingCard({
   pending?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
+  /**
+   * L06, SPEC-04 — AC-1…AC-9: freeze this finding into an eval case. Optional:
+   * omitted, the third action is not rendered at all (used outside a PR view
+   * that has nowhere to send the confirmation).
+   */
+  onCreateEvalCase?: () => void;
+  creatingEvalCase?: boolean;
 }) {
   const t = useTranslations("prReview");
   const [uncontrolledExpanded, setUncontrolledExpanded] = React.useState(defaultExpanded ?? false);
@@ -126,6 +135,19 @@ export function FindingCard({
             >
               {t("finding.dismiss")}
             </Button>
+            {onCreateEvalCase && (
+              <Button
+                kind="ghost"
+                size="sm"
+                icon="FlaskConical"
+                disabled={!muted || creatingEvalCase}
+                title={!muted ? t("finding.addToEvalsDisabledReason") : undefined}
+                aria-label={t("finding.addToEvals")}
+                onClick={() => onCreateEvalCase()}
+              >
+                {t("finding.addToEvals")}
+              </Button>
+            )}
           </div>
         </div>
       )}

@@ -1,10 +1,9 @@
 /* EvalsTab — present in the navigation, deliberately empty.
 
    `eval_cases.owner_kind` is already the enum `['skill','agent']` and `owner_id`
-   is ready for a skill id, so the schema anticipates this. But AGENTS.md reserves
-   the `eval_*` tables for a later lesson, and upstream carries a separate
-   `l06-evals` branch — building it here would land a second feature on tables
-   another lesson owns. Saying so beats an empty grid that looks broken. */
+   is ready for a skill id, so the schema anticipates this — L06 (SPEC-04) built
+   the eval pipeline for AGENTS only (non-goal 2); a skill-owned case set is not
+   part of that spec. Saying so beats an empty grid that looks broken. */
 "use client";
 
 import React from "react";
