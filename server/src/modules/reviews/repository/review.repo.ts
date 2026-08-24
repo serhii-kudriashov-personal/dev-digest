@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Db, DbOrTx } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { Finding } from '@devdigest/shared';
@@ -99,7 +99,11 @@ export async function reviewsForPull(
     .orderBy(desc(t.reviews.createdAt));
   if (reviews.length === 0) return [];
   const ids = reviews.map((r) => r.id);
-  const findings = await db.select().from(t.findings).where(inArray(t.findings.reviewId, ids));
+  const findings = await db
+    .select()
+    .from(t.findings)
+    .where(inArray(t.findings.reviewId, ids))
+    .orderBy(asc(t.findings.file), asc(t.findings.startLine));
   return reviews.map((review) => ({
     review,
     findings: findings.filter((f) => f.reviewId === review.id),

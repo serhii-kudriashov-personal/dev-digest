@@ -153,7 +153,20 @@
     "caseSetChanged": "The case set changed between these two runs.",
     "modelChanged": "The model changed between these two runs.",
     "notAttributable": "A metric change here may not be caused by the prompt alone.",
-    "closeCompare": "Close comparison"
+    "closeCompare": "Close comparison",
+    "viewDetails": "View details",
+    "hideDetails": "Hide details",
+    "caseDetail": {
+      "loading": "Loading case detail…",
+      "empty": "No per-case detail recorded for this run.",
+      "notExecuted": "not executed",
+      "columns": {
+        "case": "Case",
+        "expectation": "Expectation",
+        "result": "Result",
+        "error": "Error"
+      }
+    }
   },
   "compare": {
     "title": "Compare runs",

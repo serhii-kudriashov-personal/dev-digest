@@ -151,4 +151,22 @@ export const s = {
     justifyContent: "flex-end",
     gap: 8,
   } satisfies CSSProperties,
+  detailPanelRow: { padding: 0, borderBottom: "1px solid var(--border)" } satisfies CSSProperties,
+  detailPanel: {
+    padding: "10px 12px",
+    background: "var(--bg-surface)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  } satisfies CSSProperties,
+  detailCaseRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    fontSize: 12.5,
+    padding: "4px 0",
+  } satisfies CSSProperties,
+  detailCaseName: { flex: 1 } satisfies CSSProperties,
+  detailCaseMeta: { color: "var(--text-secondary)", minWidth: 90 } satisfies CSSProperties,
+  detailCaseError: { color: "var(--crit)", flex: 1 } satisfies CSSProperties,
 } as const;

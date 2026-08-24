@@ -15,6 +15,7 @@ import {
   useEvalCases,
   useEvalComparison,
   useEvalRun,
+  useEvalRunCases,
   useEvalRuns,
   useEvalTrend,
   useDeleteEvalCase,
@@ -65,6 +66,8 @@ export function EvalsTab({ agentId }: { agentId: string }) {
   const toggleSelect = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const [comparing, setComparing] = React.useState(false);
+  const [detailRunId, setDetailRunId] = React.useState<string | null>(null);
+  const toggleDetail = (id: string) => setDetailRunId((prev) => (prev === id ? null : id));
   const compareBtnWrapRef = React.useRef<HTMLSpanElement | null>(null);
   const closeCompare = () => {
     setComparing(false);
@@ -277,7 +280,8 @@ export function EvalsTab({ agentId }: { agentId: string }) {
             </thead>
             <tbody>
               {runs.map((r) => (
-                <tr key={r.id}>
+                <React.Fragment key={r.id}>
+                  <tr>
                   <td style={s.td}>
                     <Checkbox checked={selected.includes(r.id)} onChange={() => toggleSelect(r.id)} />
                   </td>
@@ -310,17 +314,35 @@ export function EvalsTab({ agentId }: { agentId: string }) {
                     )}
                   </td>
                   <td style={s.td}>
-                    {agent && r.config_version !== agent.version && (
+                    <div style={{ display: "flex", gap: 6 }}>
                       <Button
                         kind="ghost"
                         size="sm"
-                        onClick={() => promote.mutate({ agentId, version: r.config_version })}
+                        icon="ChevronDown"
+                        onClick={() => toggleDetail(r.id)}
                       >
-                        {t("evalsTab.promote")}
+                        {detailRunId === r.id ? t("evalsTab.hideDetails") : t("evalsTab.viewDetails")}
                       </Button>
-                    )}
+                      {agent && r.config_version !== agent.version && (
+                        <Button
+                          kind="ghost"
+                          size="sm"
+                          onClick={() => promote.mutate({ agentId, version: r.config_version })}
+                        >
+                          {t("evalsTab.promote")}
+                        </Button>
+                      )}
+                    </div>
                   </td>
-                </tr>
+                  </tr>
+                  {detailRunId === r.id && (
+                    <tr>
+                      <td style={s.detailPanelRow} colSpan={10}>
+                        <RunCaseDetail runId={r.id} dash={dash} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -411,6 +433,36 @@ function TrendSeries({
       ) : (
         <span style={s.sectionSubtitle}>{dash}</span>
       )}
+    </div>
+  );
+}
+
+/** Per-case breakdown for one past set run (AC-28's `GET /eval-runs/:id/cases`,
+ *  wired to the UI here for the first time — the hook already existed). */
+function RunCaseDetail({ runId, dash }: { runId: string; dash: string }) {
+  const t = useTranslations("eval");
+  const { data: cases, isLoading } = useEvalRunCases(runId);
+
+  if (isLoading) return <div style={s.detailPanel}>{t("evalsTab.caseDetail.loading")}</div>;
+  if (!cases || cases.length === 0) {
+    return <div style={s.detailPanel}>{t("evalsTab.caseDetail.empty")}</div>;
+  }
+
+  return (
+    <div style={s.detailPanel}>
+      {cases.map((c) => (
+        <div key={c.id} style={s.detailCaseRow}>
+          <span style={s.detailCaseName}>{c.case_name ?? c.case_id}</span>
+          <span style={s.detailCaseMeta}>
+            {c.pass === null
+              ? t("evalsTab.caseDetail.notExecuted")
+              : c.pass
+                ? t("evalsTab.passed")
+                : t("evalsTab.failed")}
+          </span>
+          {c.error ? <span style={s.detailCaseError}>{c.error}</span> : <span style={{ flex: 1 }}>{dash}</span>}
+        </div>
+      ))}
     </div>
   );
 }

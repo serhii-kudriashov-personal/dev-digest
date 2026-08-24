@@ -183,6 +183,30 @@ shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
 
+### 2026-08-21 — `useEvalRunCases` was a fully correct, working hook with zero consumers — a run's per-case detail had no UI at all, not even a stale one
+
+**Rule:** `client/src/lib/hooks/eval.ts` exports `useEvalRunCases(setRunId)`,
+correctly calling `GET /eval-runs/:id/cases`, but `rg -n "useEvalRunCases"
+client/src` returned only its own definition before this entry — no component
+imported it. `EvalsTab.tsx`'s Run history table showed aggregate metrics per
+run and a Compare panel for exactly two runs, but had no way to open a single
+past run and see which of its cases passed, failed, or errored. This differs
+from the already-documented "shipped-but-unwired scaffolding" pattern (below,
+2026-08-16): that one is a stale COPY (a message catalogue or a contract field
+someone wrote and moved on from); this one is a hook that is still correct and
+current, just never called by anything.
+
+**Why:** discovered while manually walking the L06 eval pipeline — the only
+way to see why a run was `incomplete` was to query Postgres directly. Fixed by
+wiring `useEvalRunCases` into a "View details" expand row per `Run history`
+entry (`EvalsTab.tsx`). The lesson for next time: a query hook with a working
+endpoint behind it is not evidence a screen exposes that data — grep for the
+hook's own name across `client/src`, not just for the endpoint path.
+
+**Where:** `client/src/lib/hooks/eval.ts` (`useEvalRunCases`); `client/src/app/
+agents/[id]/_components/AgentEditor/_components/EvalsTab/EvalsTab.tsx`
+(`RunCaseDetail`, the new consumer).
+
 ### 2026-08-17 — `VerdictBanner` gained THREE opt-in props (`costUsd`/`tokensIn`, `onOpenRun`, and effectively regenerate lives beside it) that only `PrBriefSection` ever passes — a shared component is quietly becoming one caller's private layout
 
 **Rule:** `VerdictBanner.tsx` is used by exactly two callers —

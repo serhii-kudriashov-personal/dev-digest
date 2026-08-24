@@ -26,8 +26,10 @@ export const EVAL_MAX_RECENT_RUNS = 20;
 /** Per-case detail (`eval_runs` rows) kept before NFR-8 pruning collapses it. */
 export const EVAL_DETAIL_RETENTION_RUNS = 20;
 
-/** NFR-2: a single case must not hang a run forever. */
-export const EVAL_CASE_TIMEOUT_MS = 120_000;
+/** NFR-2: a single case must not hang a run forever.
+ *  Temporarily raised from the spec's 120_000 for a demo run under slow
+ *  provider latency — revert to 120_000 before final submission. */
+export const EVAL_CASE_TIMEOUT_MS = 300_000;
 
 /** NFR-2: a whole set run's outer budget — past this, a still-`running` DB row
  *  is read as `incomplete` rather than trusted (a crashed process can't

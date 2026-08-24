@@ -21,6 +21,7 @@ appending its row here in the same edit.**
 | 2026-08-09 | Works | `server/test/**`, response assertions | A value returned but rendered NOWHERE has no UI that can notice it breaking — assert it at the boundary |
 | 2026-08-08 | Works | `server/src/modules/**/service.ts`, facade tests | A never-throw facade is untestable through a caller with its own `.catch` — test the guarantee at the service |
 | 2026-08-03 | Works | `server/test/*.it.test.ts`, vitest config | `--no-file-parallelism` makes the integration suite deterministic AND faster; re-running is the wrong fix |
+| 2026-08-21 | Doesn't | `server/src/modules/eval/helpers.ts`, `matchExpectation`, severity-restricting prompt edits | A "only report severity X" prompt line can make the agent OVER-LABEL instead of under-report — eval matching is file+line only and cannot tell the difference |
 | 2026-08-17 | Doesn't | `server/test/*.it.test.ts`, `dockerAvailable()`, multi-turn verification | "Docker was unavailable" from an earlier turn is not a property of the environment — it re-checks on every invocation |
 | 2026-08-17 | Doesn't | `plans/**`, `Done when` file references | A plan's `Done when` naming a specific test file as proof does not mean that file actually asserts the thing |
 | 2026-08-08 | Doesn't | `server/test/reviews.it.test.ts`, `run-executor.ts`, provider mocks | A pre-work step made the suite spend REAL money — `.env` holds live keys and the file mocks only ONE provider |
@@ -55,6 +56,7 @@ appending its row here in the same edit.**
 | 2026-08-03 | Tools | `server/src/modules/**/repository.ts`, transactions | A Drizzle transaction handle is NOT a `Db` — compose with `DbOrTx` |
 | 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | `octokit` and `p-queue` are UNRESOLVABLE to dependency-cruiser |
 | 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | The depcruise config must be `.cjs`, and `--init` writes the wrong extension |
+| 2026-08-21 | Errors | `server/src/modules/reviews/repository/review.repo.ts`, list queries feeding a mutated list | Accept/Dismiss reshuffled the findings list because its fetch query had no `ORDER BY` |
 | 2026-08-11 | Errors | `server/src/modules/repo-intel/**`, blast contracts | `DownstreamImpact.symbol` is not unique across `blast.downstream` |
 | 2026-08-09 | Errors | `server/src/modules/reviews/**`, `agent_runs` | Deleting an `agent_runs` row does NOT stop the run — it keeps spending |
 | 2026-08-08 | Errors | `server/test/reviews.it.test.ts`, traces | The `prompt_assembly` flake is a run-vs-trace ordering race |
@@ -199,6 +201,48 @@ to probe.
 ("Commands") without the flag — add it there if you touch that table.
 
 ## What Doesn't Work
+
+### 2026-08-21 — A "only report severity X" prompt line does not make the agent under-report — it can make the agent OVER-LABEL, and eval matching (file+line only) cannot tell the difference
+
+**Tried:** adding `Only report CRITICAL severity findings. Do not report WARNING
+or SUGGESTION severity findings.` to the Security Reviewer's `system_prompt`,
+expecting recall to drop (the WARNING/SUGGESTION `must_find` cases should stop
+matching) while precision rises (less noise). Verified live against an 8-case
+set (3 CRITICAL `must_find`, 4 WARNING/SUGGESTION `must_find`, 1 WARNING
+`must_not_flag`) with a real OpenRouter call per case, comparing the run before
+and after the prompt edit.
+
+**Failed:** recall did not move (0.857 → 0.857, identical). Precision did rise
+(0.4 → 0.75) but not for the predicted reason. Reading each case's
+`actual_output` (`eval_runs.actual_output->'findings'`) showed the model kept
+producing a finding at every WARNING/SUGGESTION case's location, but relabelled
+`severity: "CRITICAL"` on all of them — one case ("No rate limiting on export
+endpoint", expected severity SUGGESTION) came back with a finding titled
+"Missing access control on findings export endpoint" at the same file:line,
+severity CRITICAL. `matchExpectation` (AC-19) matches on file + line overlap
+only, never on title or severity, so this still scored as `matched: true`. The
+model satisfied "only report CRITICAL" literally by re-classifying everything
+as CRITICAL rather than by omitting the non-critical findings — the opposite of
+the intended effect, and invisible to this eval set's scoring because severity
+isn't part of what gets checked.
+
+**Instead:** a prompt edit meant to filter by severity cannot be verified by
+recall/precision alone here — the case's `expected_output.severity` is stored
+(`eval_cases.expected_output->>'severity'`) but `matchExpectation` never reads
+it. To actually catch this failure mode, either compare the *returned*
+severity per matched case by hand (as done here, reading `actual_output`
+directly), or treat "recall held steady across a stated severity-restricting
+prompt change" as a signal to go check `actual_output`, not as evidence the
+prompt had no effect. This is the same root cause as `findings.confidence is
+not calibrated` (2026-08-02, below): the model's own severity/confidence label
+is a claim, not a verified property, and neither this eval feature nor the
+live review pipeline cross-checks it against anything.
+
+**Where:** `server/src/modules/eval/helpers.ts` (`matchExpectation`, matches on
+`file`/line overlap only); `server/src/modules/eval/service.ts:554`
+(`reviewPullRequest` call whose `actual_output` carries the real severity);
+`server/src/db/schema/eval.ts` (`eval_cases.expected_output`, `eval_runs.
+actual_output`, both jsonb, severity present but unchecked).
 
 ### 2026-08-17 — "Docker was unavailable" from an earlier turn is not a property of the environment — a `dockerAvailable()`-gated `*.it.test.ts` file re-checks on every invocation
 
@@ -1261,6 +1305,44 @@ than relying on config auto-discovery. Same trap applies to any future
 (`"arch"`); `"type": "module"` at `server/package.json:4`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-21 — Accept/Dismiss on a finding visually reshuffles the whole findings list, because its fetch query has no `ORDER BY`
+
+**Symptom:** clicking Accept (or Dismiss) on a `FindingCard` makes the findings
+list appear to "collapse" — cards change position, the just-clicked card
+scrolls out of view. Reported while manually accepting findings for L06 eval
+cases; reproduced live, not a one-off render glitch.
+
+**Cause:** `reviewsForPull`'s findings query (`server/src/modules/reviews/
+repository/review.repo.ts:102`, before the fix) had no `.orderBy(...)`, unlike
+its sibling `reviews` query two lines above (`orderBy(desc(t.reviews.
+createdAt))`). Postgres gives no row-order guarantee for a query without
+`ORDER BY`. Accept/Dismiss (`setFindingAccepted`) issues an `UPDATE` on one
+finding row; the client's mutation `onSuccess` (`client/src/lib/hooks/
+reviews.ts`) invalidates `["reviews", prId]`, forcing an immediate refetch of
+that same unordered query — and MVCC's new tuple version can surface in a
+different scan position than before. The client's own sort
+(`FindingsPanel/helpers.ts#visibleFindings`) is a **stable** sort keyed only by
+severity, so it faithfully preserves whatever order the server just handed it
+— including a changed one. No accordion/expand state was involved; `open` and
+`expandedById` are keyed by stable ids, not index (verified, not the cause).
+
+**Takeaway:** a `db.select()` with no `.orderBy()` is not "unordered until I
+add sorting later" — it is a live footgun the moment ANY row in that result
+set gets written between two reads in the same session, and a query invalidate
++ refetch flow (this repo's standard mutation pattern) creates exactly that
+condition on every mutation. Any list-returning query feeding a client list
+that survives a same-row mutation needs a deterministic `.orderBy(...)`, mirroring
+the sibling `reviews` query's own `orderBy(desc(createdAt))` — fixed here with
+`.orderBy(asc(t.findings.file), asc(t.findings.startLine))` (findings has no
+`createdAt` column to order by instead).
+
+**Where:** `server/src/modules/reviews/repository/review.repo.ts:91-107`
+(`reviewsForPull`); `server/src/modules/reviews/repository/review.repo.ts:157-162`
+(`setFindingAccepted`, the mutating query); `client/src/lib/hooks/reviews.ts:188-193`
+(`useFindingAction`'s `onSuccess` invalidation); `client/src/app/repos/[repoId]/
+pulls/[number]/_components/FindingsPanel/helpers.ts` (`visibleFindings`'s
+stable severity-only sort, which faithfully surfaces the unstable input order).
 
 ### 2026-08-11 — Blast Radius `DownstreamImpact.symbol` was not a unique key across `blast.downstream` — two changed symbols can share a bare name from different files
 
