@@ -1,5 +1,5 @@
 {
-  "id": "94a6e131-eac8-446b-ae28-d9435a2f672c",
+  "id": "33cd0d37-2421-454a-9420-2e38a9993d46",
   "prevId": "d4f57e1b-d24b-4a4e-b149-3eb0812c85f4",
   "version": "7",
   "dialect": "postgresql",
@@ -832,6 +832,12 @@
         },
         "dismissed_at": {
           "name": "dismissed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "learned_at": {
+          "name": "learned_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -3154,29 +3160,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "ci_installations_agent_repo_uq": {
-          "name": "ci_installations_agent_repo_uq",
-          "columns": [
-            {
-              "expression": "agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "repo",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "ci_installations_agent_id_agents_id_fk": {
           "name": "ci_installations_agent_id_agents_id_fk",
@@ -3258,50 +3242,7 @@
           "notNull": false
         }
       },
-      "indexes": {
-        "ci_runs_installation_url_uq": {
-          "name": "ci_runs_installation_url_uq",
-          "columns": [
-            {
-              "expression": "ci_installation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "github_url",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "ci_runs_installation_ran_idx": {
-          "name": "ci_runs_installation_ran_idx",
-          "columns": [
-            {
-              "expression": "ci_installation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "\"ran_at\" desc",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "ci_runs_ci_installation_id_ci_installations_id_fk": {
           "name": "ci_runs_ci_installation_id_ci_installations_id_fk",
@@ -3530,6 +3471,89 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.multi_agent_run_members": {
+      "name": "multi_agent_run_members",
+      "schema": "",
+      "columns": {
+        "multi_agent_run_id": {
+          "name": "multi_agent_run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "multi_agent_run_members_run_idx": {
+          "name": "multi_agent_run_members_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "multi_agent_run_members_multi_agent_run_id_multi_agent_runs_id_fk": {
+          "name": "multi_agent_run_members_multi_agent_run_id_multi_agent_runs_id_fk",
+          "tableFrom": "multi_agent_run_members",
+          "tableTo": "multi_agent_runs",
+          "columnsFrom": [
+            "multi_agent_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "multi_agent_run_members_run_id_agent_runs_id_fk": {
+          "name": "multi_agent_run_members_run_id_agent_runs_id_fk",
+          "tableFrom": "multi_agent_run_members",
+          "tableTo": "agent_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "multi_agent_run_members_multi_agent_run_id_run_id_pk": {
+          "name": "multi_agent_run_members_multi_agent_run_id_run_id_pk",
+          "columns": [
+            "multi_agent_run_id",
+            "run_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.multi_agent_runs": {
       "name": "multi_agent_runs",
       "schema": "",
@@ -3559,6 +3583,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "head_sha": {
+          "name": "head_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         }
       },
       "indexes": {},

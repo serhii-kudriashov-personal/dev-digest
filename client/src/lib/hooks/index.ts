@@ -15,3 +15,4 @@ export * from "./blast";
 export * from "./brief";
 export * from "./eval";
 export * from "./ci";
+export * from "./multi-agent";

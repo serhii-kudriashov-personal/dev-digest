@@ -75,6 +75,8 @@ export const findings = pgTable(
     skillId: uuid('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    /** AC-43 "Learn" intent. Nullable, no index — nothing filters on it yet. */
+    learnedAt: timestamp('learned_at', { withTimezone: true }),
   },
   // A foreign key is NOT an index — Postgres auto-indexes primary keys and
   // unique constraints only. Every read of findings joins or filters on

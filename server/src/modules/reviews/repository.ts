@@ -141,6 +141,11 @@ export class ReviewRepository {
     return reviewRepo.setFindingDismissed(this.db, findingId, at);
   }
 
+  /** AC-43 "Learn". */
+  setFindingLearned(findingId: string, at: Date | null): Promise<FindingRow | undefined> {
+    return reviewRepo.setFindingLearned(this.db, findingId, at);
+  }
+
   /**
    * A finding's full source context (L06, SPEC-04 — AC-1, AC-4…AC-7): the
    * finding, its producing agent, its PR, and the exact file patch it cites.

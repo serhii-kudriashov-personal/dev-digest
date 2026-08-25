@@ -1,0 +1,52 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for AgentLane. */
+export const s = {
+  lane: {
+    border: "1px solid var(--border)",
+    borderRadius: 10,
+    background: "var(--bg-surface)",
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
+    minWidth: 0,
+  } satisfies CSSProperties,
+  header: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "12px 14px",
+    borderBottom: "1px solid var(--border)",
+    flexWrap: "wrap",
+  } satisfies CSSProperties,
+  agentName: { fontWeight: 600, fontSize: 14, color: "var(--text-primary)" } satisfies CSSProperties,
+  meta: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  spacer: { flex: 1 } satisfies CSSProperties,
+  body: { padding: 14, display: "flex", flexDirection: "column", gap: 10 } satisfies CSSProperties,
+  summary: { fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 } satisfies CSSProperties,
+  emptyNote: { fontSize: 13, color: "var(--text-muted)", padding: "6px 0" } satisfies CSSProperties,
+  errorNote: {
+    fontSize: 13,
+    color: "var(--crit)",
+    background: "var(--crit-bg)",
+    borderRadius: 6,
+    padding: "10px 12px",
+    lineHeight: 1.5,
+  } satisfies CSSProperties,
+  findingsList: { display: "flex", flexDirection: "column", gap: 8 } satisfies CSSProperties,
+  capsNote: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  /** Visually hidden but present in the accessibility tree — the live region
+   *  that announces a lane's status change (AC-47). Content mirrors what the
+   *  status badge already shows sighted users. */
+  srOnly: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    padding: 0,
+    margin: -1,
+    overflow: "hidden",
+    clip: "rect(0, 0, 0, 0)",
+    whiteSpace: "nowrap",
+    border: 0,
+  } satisfies CSSProperties,
+} as const;
