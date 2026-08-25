@@ -24,6 +24,7 @@ entry nobody is told to open.
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-24 | Works | `specs/**`, design review, multi-step wizard mocks, `.claude/agents/spec-writer.md` | A multi-step wizard's mock can be internally inconsistent — check a later step's copy against an EARLIER step's controls, not just against the feature's input list |
 | 2026-08-18 | Works | `.claude/skills/**`, `evals/**`, measuring a prompt change | A/B a skill version against itself: force the load in BOTH arms, and make grading a separate entry point |
 | 2026-08-17 | Works | `specs/**`, `server/src/db/schema/**`, `docs/**`, implementation planning | A spec's claim that "no such record exists" needs verifying against the table, not just against the contract's declared type |
 | 2026-08-16 | Works | `specs/**`, design review, `.claude/agents/spec-writer.md` | Check every string a design mock draws against the feature's own specified input list, not against plausibility |
@@ -37,6 +38,7 @@ entry nobody is told to open.
 | 2026-08-05 | Works | any new feature; planning, inventory | A lesson feature is mostly already scaffolded: inventory Part 0 before writing a line |
 | 2026-08-03 | Works | debugging a test failure, `client/src/app/**` | To blame a refactor, rebuild the state just BEFORE it — `HEAD` is the wrong baseline |
 | 2026-08-03 | Works | `client/eslint.config.mjs`, introducing a linter | Grep the linter's own disable directives FIRST |
+| 2026-08-25 | Doesn't | `plans/**`, `Done when` checks, `client/src/vendor/ui/nav.ts` | A literal-string `Done when` grep can be structurally unsatisfiable, not just token-collision-unsatisfiable |
 | 2026-08-18 | Doesn't | `.claude/skills/**/evals/**`, eval assertions, graders | An eval assertion that BOTH arms fail is a broken assertion until proven otherwise |
 | 2026-08-11 | Doesn't | subagent prompts, `rg`/`grep` sweeps | Asserting a negative from a truncated `grep -il \| head` — a subagent cannot reject the premise |
 | 2026-08-09 | Doesn't | `mcp/tsconfig.json`, any package that EMITS JS | Aliasing tsconfig `paths` at another package's `.ts` sources |
@@ -48,8 +50,9 @@ entry nobody is told to open.
 | 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
 | 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
 | 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
-| 2026-08-24 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, `RunTraceDrawer/**`, spec intake, feature briefs | "Rejected grounding-gate findings with reasons" is not what the trace contract records — only a pass/fail count is |
+| 2026-08-25 | Patterns | `plans/**`, `.claude/agents/implementation-planner.md`, multi-agent dispatch design | A plan's "Files owned" cell needs cross-checking against that same dispatch's OWN "Done when" text, not just its prose description |
 | 2026-08-25 | Patterns | `plans/**`, disjoint-file-ownership hops, multi-agent execution | Splitting a plan into disjoint-file-ownership hops lets a renamed/deleted symbol's stale COMMENT survive in a file none of them own |
+| 2026-08-24 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, `RunTraceDrawer/**`, spec intake, feature briefs | "Rejected grounding-gate findings with reasons" is not what the trace contract records — only a pass/fail count is |
 | 2026-08-24 | Patterns | `server/src/modules/reviews/run-executor.ts`, `specs/**`, spec intake, feature briefs | A brief's "reuse this existing parallel/isolated infra" claim is verified against the executor's control flow, not against its prose |
 | 2026-08-19 | Patterns | `*/src/vendor/shared/contracts/**`, zero-consumer contract edits, plans | "Zero consumers, safe to edit" proves the edit is SAFE, not that the field's existing shape fits the new consumer |
 | 2026-08-18 | Patterns | `client/messages/**`, unwired scaffolding, spec intake, i18n catalogues | Unwired scaffolding's copy doesn't just go stale, it actively disagrees with the current design — diff it, don't just re-derive from it |
@@ -104,6 +107,35 @@ Fixes · Open = Open Questions.
 ---
 
 ## What Works
+
+### 2026-08-24 — A multi-step wizard's mock can be internally inconsistent — check a later step's copy against an EARLIER step's controls, not just against the feature's input list
+
+**Pattern:** 2026-08-16 ("Check every string a design mock draws against the
+feature's own specified input list") catches a mock that draws output its
+inputs cannot produce. It does not catch a *different* failure: a later step's
+copy referencing data that no earlier step in the same flow ever gave the
+operator a control to set. For a multi-step wizard, run both checks — each
+screen against the feature's input list, AND each screen against every other
+screen in the same flow — because the second pass finds gaps the first one
+structurally cannot.
+
+**Why:** while `spec-writer` reviewed the "Export to CI" wizard mocks
+(`specs/2026-08-24-export-to-ci.md`), step 1 ("Target") drew only four
+CI-platform tiles — GitHub Actions, CircleCI, Jenkins, Generic CLI — with no
+repository field anywhere on it. Step 4 ("Install")'s copy read "DevDigest
+opens a PR in `acme/payments-api`," naming a specific target repository. No
+screen in the flow ever let the operator choose one. Checking step 4's string
+against the feature's input list would have passed — a target repository
+*is* a legitimate input to this feature — so the gap was invisible to that
+check. It only surfaced by asking "where, in an earlier step of this same
+flow, was this value set?" and finding no answer. The fix landed as AC-2
+(step 1 requires a repository, identified as `owner/name`, before advancing)
+and is recorded as Open question 1 in the same spec, since the mock gave no
+guidance on *how* it should be chosen.
+
+**Where:** `specs/2026-08-24-export-to-ci.md` §Design & UX review (the "Mock
+gap: no repository control in step 1" row) and AC-2; the two mock screenshots
+for wizard steps 1 and 4 supplied with the feature request on 2026-08-24.
 
 ### 2026-08-18 — A/B a skill version against itself: force the load in BOTH arms, and make grading a separate entry point
 
@@ -539,6 +571,31 @@ and `.../pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.tsx:65
 (both removed).
 
 ## What Doesn't Work
+
+### 2026-08-25 — A literal-string `Done when` grep can be structurally unsatisfiable, not just token-collision-unsatisfiable
+
+**Tried:** `plans/2026-08-24-export-to-ci.md` Step 5.4 phrased its check as
+`rg -n 'ci-runs' client/src/vendor/ui/nav.ts` returning **both** a `NAV` row and
+a `SHORTCUTS` row — the same greppable-`Done-when` instinct as 2026-08-16 below.
+
+**Failed:** `nav.ts`'s `SHORTCUTS` array entries carry only `keys`/`label`/`group`
+— no `key` field at all. The correctly-built row for "go to CI Runs" is
+`{ keys: "g i", label: "Go to CI Runs", group: "Navigation" }`, which contains
+the literal substring `ci-runs` nowhere. The grep can never match that row, no
+matter how correct the code is — a different failure shape from 2026-08-16's
+(there, a *later* plan step introduces the colliding token; here, the *target
+data structure itself* never carries the literal being searched for). The
+implementer caught it by reading the file directly instead of trusting the
+grep, and reported it rather than silently declaring the check unsatisfied.
+
+**Instead:** before writing a literal-string grep as a plan's verification
+step, confirm the target *array's shape* actually contains that literal —
+don't assume every sibling array in one vendored config file carries the same
+fields. When two arrays serve related but different purposes (`NAV` routes vs.
+`SHORTCUTS` bindings), check each one's actual shape, not just the file's name.
+
+**Where:** `client/src/vendor/ui/nav.ts` (`NAV` entries have `key`, `SHORTCUTS`
+entries do not); `plans/2026-08-24-export-to-ci.md` Step 5.4.
 
 ### 2026-08-18 — An eval assertion that BOTH arms fail is a broken assertion until proven otherwise
 
@@ -991,6 +1048,30 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-25 — A plan's "Files owned" cell needs cross-checking against that same dispatch's OWN "Done when" text, not just its prose description
+
+**Rule:** an implementation plan's per-dispatch "Files owned" list and its
+per-step "Done when" checks are two independent things an author can write
+inconsistently — check them against each other before dispatching, not just
+each against the step's prose.
+
+**Why:** `plans/2026-08-24-export-to-ci.md`'s Dispatch 5 "Files owned" cell
+named `CiTab/**`, `AgentEditor/constants.ts`, `ci-runs/**` and `nav.ts` — every
+file the step's *prose* describes building. But Step 5.1's own "Done when"
+required "navigating to `?tab=ci` renders the pane rather than falling back to
+`config`," which is only achievable by editing
+`AgentEditor/AgentEditor.tsx` — the file that actually switches on `tab` to
+choose which component renders — and that file appeared in no dispatch's
+"Files owned" cell at all. The Dispatch 5 implementer correctly stayed inside
+its assigned cell, built `CiTab` fully and gated it, and reported the gap
+rather than silently expanding scope to fix it. The one-line fix (one import,
+one ternary branch) then had to be made outside any dispatch, by the orchestrating
+session.
+
+**Where:** `plans/2026-08-24-export-to-ci.md` `## Execution` table, Dispatch 5
+row; the omitted file was
+`client/src/app/agents/[id]/_components/AgentEditor/AgentEditor.tsx`.
 
 ### 2026-08-25 — Splitting a plan into disjoint-file-ownership hops lets a renamed/deleted symbol's stale COMMENT survive in a file none of them own
 

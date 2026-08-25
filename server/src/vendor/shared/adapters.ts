@@ -113,6 +113,25 @@ export interface RepoRef {
   name: string;
 }
 
+/** One GitHub Actions workflow run, as GitHub itself describes it. This is
+ *  the provenance for an ingested CI run (SPEC-05 AC-26) — never the
+ *  uploaded result file. */
+export interface WorkflowRunSummary {
+  id: number;
+  /** `html_url` — the Actions job page. Always present (AC-28). */
+  htmlUrl: string;
+  headSha: string;
+  /** `queued` | `in_progress` | `completed`. */
+  status: string;
+  /** `success` | `failure` | `cancelled` | … ; null while not completed. */
+  conclusion: string | null;
+  /** ISO-8601. */
+  createdAt: string;
+  /** PR numbers GitHub attributes to this run; empty for a run it cannot
+   *  attribute. */
+  pullRequestNumbers: number[];
+}
+
 export interface GitHubReviewPayload {
   body: string;
   event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
@@ -174,6 +193,15 @@ export interface GitHubClient {
   commitFiles(repo: RepoRef, payload: CommitFilesPayload): Promise<{ branch: string }>;
   /** The open PR whose head is `branch`, if any (so re-publish reuses it). */
   findOpenPr(repo: RepoRef, branch: string): Promise<{ url: string } | null>;
+  /** Recent runs of ONE workflow file, newest first, capped by `perPage`
+   *  (SPEC-05 NFR-2). */
+  listWorkflowRuns(
+    repo: RepoRef,
+    opts: { workflowFile: string; perPage: number },
+  ): Promise<WorkflowRunSummary[]>;
+  /** Raw bytes of the named artifact of a run, as a zip. `null` when the run
+   *  uploaded no artifact of that name or it has expired. */
+  downloadRunArtifact(repo: RepoRef, runId: number, name: string): Promise<Uint8Array | null>;
   getIssue(repo: RepoRef, n: number): Promise<IssueMeta>;
   /** GET /user — for "posting as @user". */
   currentLogin(): Promise<string>;
