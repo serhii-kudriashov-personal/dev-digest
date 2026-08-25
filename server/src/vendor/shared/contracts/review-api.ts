@@ -16,6 +16,13 @@ export const FindingRecord = Finding.extend({
   review_id: z.string(),
   accepted_at: z.string().nullable(),
   dismissed_at: z.string().nullable(),
+  /**
+   * AC-43 "Learn" intent. `.nullish()`, not `.nullable()` — `FindingRecord` is
+   * reproduced inside documents already on disk (e.g. eval fixtures) that
+   * predate this column and lack the key outright (root `INSIGHTS.md`
+   * 2026-08-02, `server/INSIGHTS.md` 2026-08-03).
+   */
+  learned_at: z.string().nullish(),
 });
 export type FindingRecord = z.infer<typeof FindingRecord>;
 

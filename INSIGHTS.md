@@ -48,6 +48,9 @@ entry nobody is told to open.
 | 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
 | 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
 | 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
+| 2026-08-24 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, `RunTraceDrawer/**`, spec intake, feature briefs | "Rejected grounding-gate findings with reasons" is not what the trace contract records — only a pass/fail count is |
+| 2026-08-25 | Patterns | `plans/**`, disjoint-file-ownership hops, multi-agent execution | Splitting a plan into disjoint-file-ownership hops lets a renamed/deleted symbol's stale COMMENT survive in a file none of them own |
+| 2026-08-24 | Patterns | `server/src/modules/reviews/run-executor.ts`, `specs/**`, spec intake, feature briefs | A brief's "reuse this existing parallel/isolated infra" claim is verified against the executor's control flow, not against its prose |
 | 2026-08-19 | Patterns | `*/src/vendor/shared/contracts/**`, zero-consumer contract edits, plans | "Zero consumers, safe to edit" proves the edit is SAFE, not that the field's existing shape fits the new consumer |
 | 2026-08-18 | Patterns | `client/messages/**`, unwired scaffolding, spec intake, i18n catalogues | Unwired scaffolding's copy doesn't just go stale, it actively disagrees with the current design — diff it, don't just re-derive from it |
 | 2026-08-16 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, jsonb columns, run traces, unwired scaffolding | A REQUIRED array on a jsonb contract cannot be retrofitted with "not recorded" — the scaffolding already wrote `[]` into every row |
@@ -76,6 +79,7 @@ entry nobody is told to open.
 | 2026-08-02 | Patterns | `*/src/vendor/shared/contracts/**`, jsonb columns | A field added to a persisted-jsonb contract must be `.nullish()` |
 | 2026-08-02 | Patterns | cost display, `client/src/**`, `server/**` | Unknown cost is `null`, never `0` |
 | 2026-08-01 | Patterns | `server/src/modules/reviews/**`, cost pipeline | `costUsd` reaches the server and dies there |
+| 2026-08-24 | Tools | `reviewer-core/**`, fresh-worktree setup, `pnpm install` | `reviewer-core` is the one package on npm, not pnpm — `pnpm install` there creates a stray second lockfile instead of respecting the tracked one |
 | 2026-08-14 | Tools | `scripts/pr-self-review.sh`, `.claude/agents/implementer.md` | `gates` selects by path PREFIX, so touching `server/INSIGHTS.md` runs `pnpm typecheck` and `pnpm arch` |
 | 2026-08-14 | Tools | `.claude/agents/**` frontmatter | A subagent `description:` may not contain a colon-space |
 | 2026-08-09 | Tools | dependency evaluation, lockfiles | `pnpm add --lockfile-only` in a scratch copy gives a real lockfile diff with no install |
@@ -988,6 +992,76 @@ historical drift is its own task.
 
 ## Codebase Patterns
 
+### 2026-08-25 — Splitting a plan into disjoint-file-ownership hops lets a renamed/deleted symbol's stale COMMENT survive in a file none of them own
+
+**Rule:** when a multi-agent implementation plan gives each hop a disjoint `Files owned` set (so parallel or sequential agents never conflict on a write), a literal-string `Done when` check like `rg -rn "<OldName>" client/src` returning empty is only guaranteed if every file that could mention `<OldName>` falls inside *some* hop's ownership. A doc comment in a file owned by neither the hop that deletes the old component nor the hop that owns the file is nobody's job to fix — each hop's own scoped check passes, and the grep still finds the stale name once run repo-wide. Run the plan's literal-string `Done when` checks once, unscoped, after the last hop finishes — not only per-hop.
+
+**Why:** `plans/2026-08-24-multi-agent-review.md` Step 11 ("delete `RunReviewDropdown`") had exactly this `Done when`: `rg -rn "RunReviewDropdown" client/src` returns nothing. The **impl-client-entry** hop deleted the component and swapped its own consumer, and its own re-check of that grep still found two hits — a docblock comment in `PrDetailView/PrDetailView.tsx:3` (owned by the impl-client-results hop) and one in `lib/hooks/reviews.ts:200` (owned by neither client hop). Both were pre-existing prose describing what a nearby file does, not code, and the deleting hop correctly refused to edit files outside its `Files owned` list rather than silently overstepping scope — the right call locally, but it meant the plan's own acceptance check would report a false pass if read hop-by-hop and a true fail if read at the end. Caught here only because the deleting hop explicitly flagged the two hits in its report instead of declaring the grep satisfied.
+
+**Where:** `plans/2026-08-24-multi-agent-review.md` Step 11's `Done when`; the two stale comments (now fixed) were `client/src/app/repos/[repoId]/pulls/[number]/_components/PrDetailView/PrDetailView.tsx:3` and `client/src/lib/hooks/reviews.ts:200`. Same family as the 2026-08-16 entry below ("a literal-string `Done when` grep goes unsatisfiable when another resolved open question introduces the matching token") — that entry is about a token being *reintroduced*; this one is about a token *surviving in unowned territory*.
+
+### 2026-08-24 — "Rejected grounding-gate findings with reasons" is not what the trace contract records — only a pass/fail count is
+
+**Rule:** when a brief lists a piece of UI/data as "already there, just reuse
+it", check the field actually exists on the persisted contract before writing
+an acceptance criterion around it — a plausible-sounding capability ("shows
+why a finding was rejected") can be one field short of what the brief assumes,
+even when a *related* field genuinely is there.
+
+**Why:** the Multi-Agent Review brief listed the reused `RunTraceDrawer` as
+already showing "rejected grounding-gate findings with reasons" per agent. It
+does not, and cannot from current data: `server/src/vendor/shared/contracts/
+trace.ts:80` records only a summary count ("2/2 passed") for the grounding
+gate, not a list of rejected findings or their rejection reasons — nobody
+writes that list today. The adjacent claim in the same brief sentence — "cost
+of each call" — checked out fine (`trace.ts:87`, nullish when unknown, never
+zero, per 2026-08-02 below), which is exactly why the false half is easy to
+wave through: one correct fact in a sentence lends borrowed credibility to the
+other. Landing an AC on the missing half would have committed the UI to
+displaying data the engine never produces, discovered only once someone tried
+to wire the drawer section to a field that isn't in the payload.
+
+**Where:** `server/src/vendor/shared/contracts/trace.ts:80` (summary count),
+`:111-124` (no multi-run membership either, a related gap); drawer content at
+`client/src/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer/
+RunTraceDrawer.tsx:36` and `_components/TraceBody/TraceBody.tsx:1-2`; recorded
+as a correction plus Open question 7(c) (default: not built, `reviewer-core`
+recording it is out of scope) in `specs/2026-08-24-multi-agent-review.md`.
+
+### 2026-08-24 — A brief's "reuse this existing parallel/isolated infra" claim is verified against the executor's control flow, not against its prose
+
+**Rule:** when a feature brief or a design mock asserts that some piece of
+infrastructure is already built and merely needs wiring — "runs in parallel",
+"isolated via worktrees" — check the actual control flow of the code that
+would run it before writing an acceptance criterion that repeats the claim.
+Brief language and unwired i18n copy are both untrusted sources for an infra
+claim; only the executor's own code is.
+
+**Why:** the Multi-Agent Review brief and its five mockups both described agent
+fan-out as parallel ("fan-out via worktrees", "≈8.2s · parallel fan-out" as a
+single combined estimate) and named it as existing infrastructure to reuse
+as-is. `server/src/modules/reviews/run-executor.ts` `executeRuns` (~lines
+148-184) runs agents in a sequential `for…await` loop — no `Promise.all`, no
+queue; the repo's only queue (`p-queue`) lives in `platform/jobs.ts:40` and is
+unrelated to review execution. What actually exists is per-agent error
+isolation and a separate context/trace/review per agent, not parallel
+execution or worktree isolation. Had the claim gone unchecked, the spec would
+have shipped an acceptance criterion promising a speed guarantee the executor
+cannot back — a UI that tells a person "parallel" before they spend money on a
+multi-agent run needs that word to be true. Compounding it: `client/messages/
+en/runs.json` already ships a stale, unwired copy for this same feature that
+also says "fan-out via p-queue" and "Run all agents" instead of a picker —
+another instance of 2026-08-18 below (unwired scaffolding's copy is a stale
+product decision, not a requirement), but this time the stale claim was about
+*infrastructure* rather than product behaviour, so it agreed with the wrong
+brief instead of merely disagreeing with the new design.
+
+**Where:** `server/src/modules/reviews/run-executor.ts:148-184`;
+`server/src/modules/platform/jobs.ts:40`; the stale copy is
+`client/messages/en/runs.json`; the corrected acceptance criterion is AC-14 in
+`specs/2026-08-24-multi-agent-review.md` (estimate is a summed duration, the
+word "parallel" is withheld until the executor is actually parallel).
+
 ### 2026-08-19 — "Zero consumers, safe to edit in place" only proves the edit is SAFE — it says nothing about whether the field's existing shape actually fits the new consumer
 
 **Rule:** extends 2026-08-11 ("A REQUIRED new field on a contract embedded in
@@ -1898,6 +1972,16 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 "fix" there.
 
 ## Tool & Library Notes
+
+### 2026-08-24 — `reviewer-core` is the one package on npm, not pnpm — `pnpm install` there creates a stray second lockfile instead of respecting the tracked one
+
+**Quirk:** `CLAUDE.md`'s `## Stack` states "Node 22 · pnpm 10" for the whole repo, and every other package (`server`, `client`, `mcp`, `e2e`, `agent-runner`, `evals`) tracks a `pnpm-lock.yaml`. `reviewer-core` is the exception: it tracks `package-lock.json` and has none of the others. Nothing declares this — no `packageManager` field anywhere in the repo, no note in `reviewer-core`'s own files. Running `cd reviewer-core && pnpm install` (the reflex from every other package) does not error and does not touch `package-lock.json` — it silently creates a brand-new, untracked `pnpm-lock.yaml` beside it, resolved independently of the tracked npm lockfile.
+
+**Workaround:** in `reviewer-core`, use `npm install`, not `pnpm install`. If `pnpm install` already ran there, delete the stray `reviewer-core/pnpm-lock.yaml` it created and re-run `npm install` — otherwise the package now has two lockfiles that can silently drift from each other, and a later `pnpm install` in that directory will trust the stray one instead of `package-lock.json`.
+
+**Why it bites now:** a fresh worktree needs `reviewer-core`'s `node_modules` populated before `server`'s own `pnpm typecheck` can resolve clean — `server` consumes `reviewer-core` as raw `.ts` sources via a tsconfig path alias (`AGENTS.md` §Repo rules: "`reviewer-core` never emits JS"), and some of `server`'s type resolution for packages like `openai`/`zod` walks through `reviewer-core`'s own `node_modules`. The natural move — `pnpm install` in all three packages that lack `node_modules` — is correct for `server` and `client` and wrong for `reviewer-core`.
+
+**Where:** `reviewer-core/package-lock.json` (tracked), `reviewer-core/package.json` (no `packageManager` field); contrast `server/pnpm-lock.yaml`, `client/pnpm-lock.yaml`. Surfaced while bootstrapping a fresh worktree for `plans/2026-08-24-multi-agent-review.md` hop 1 (impl-server).
 
 ### 2026-08-14 — `pr-self-review.sh gates` selects by path PREFIX, so touching `server/INSIGHTS.md` runs `pnpm typecheck` and `pnpm arch`
 
