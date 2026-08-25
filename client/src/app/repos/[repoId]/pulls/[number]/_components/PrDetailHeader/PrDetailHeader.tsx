@@ -1,8 +1,12 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Icon, Avatar, Badge, Button, Tabs } from "@devdigest/ui";
-import { RunReviewDropdown } from "../RunReviewDropdown";
+import { AgentPicker, type AgentPickerAgent } from "@/components/agent-picker";
+import { useAgents } from "@/lib/hooks/agents";
+import { useStartMultiAgentRun } from "@/lib/hooks/multi-agent";
 import { s } from "./styles";
 import type { PrDetail } from "@/lib/types";
 
@@ -28,13 +32,57 @@ export function PrDetailHeader({
   onRunStart,
   onRunsStarted,
 }: PrDetailHeaderProps) {
-  const handleRunStart = useCallback(() => {
-    onRunStart();
-  }, [onRunStart]);
+  const t = useTranslations("prReview");
+  const { repoId } = useParams<{ repoId: string }>();
+  const { data: agentsData } = useAgents();
+  const startRun = useStartMultiAgentRun();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const popoverRef = React.useRef<HTMLDivElement>(null);
 
-  const handleRunsStarted = useCallback(() => {
-    onRunsStarted();
-  }, [onRunsStarted]);
+  const agents: AgentPickerAgent[] = useMemo(
+    () => (agentsData ?? []).map((a) => ({ id: a.id, name: a.name, enabled: a.enabled })),
+    [agentsData],
+  );
+
+  React.useEffect(() => {
+    if (!pickerOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) setPickerOpen(false);
+    };
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPickerOpen(false);
+    };
+    document.addEventListener("mousedown", onOutside);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [pickerOpen]);
+
+  const handleToggle = useCallback((agentId: string) => {
+    setSelected((prev) => (prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId]));
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    setSelected(agents.map((a) => a.id));
+  }, [agents]);
+
+  const handleConfirm = useCallback(() => {
+    if (!prId || selected.length === 0) return;
+    onRunStart();
+    startRun.mutate(
+      { prId, agentIds: selected },
+      {
+        onSuccess: () => {
+          onRunsStarted();
+          setSelected([]);
+          setPickerOpen(false);
+        },
+      },
+    );
+  }, [prId, selected, startRun, onRunStart, onRunsStarted]);
 
   const statusColor =
     pr.status === "merged"
@@ -90,12 +138,37 @@ export function PrDetailHeader({
             View on GitHub
           </Button>
           {prId && (
-            <RunReviewDropdown
-              prId={prId}
-              warnMerged={pr.status === "merged" || pr.status === "closed"}
-              onRunStart={handleRunStart}
-              onRunsStarted={handleRunsStarted}
-            />
+            <div ref={popoverRef} style={s.pickerWrap}>
+              <span
+                title={pr.status === "merged" || pr.status === "closed" ? t("picker.mergedTooltip") : undefined}
+                style={pr.status === "merged" || pr.status === "closed" ? { opacity: 0.6 } : undefined}
+              >
+                <Button
+                  kind="primary"
+                  size="sm"
+                  icon="Sparkles"
+                  iconRight="ChevronDown"
+                  loading={startRun.isPending}
+                  onClick={() => setPickerOpen((o) => !o)}
+                >
+                  {startRun.isPending ? t("picker.running") : t("picker.trigger")}
+                </Button>
+              </span>
+              {pickerOpen && (
+                <div style={s.pickerPanel}>
+                  <AgentPicker
+                    agents={agents}
+                    selected={selected}
+                    onToggle={handleToggle}
+                    onSelectAll={handleSelectAll}
+                    onConfirm={handleConfirm}
+                    pending={startRun.isPending}
+                    warnMerged={pr.status === "merged" || pr.status === "closed"}
+                    configureHref={`/repos/${repoId}/multi-agent?pr=${prId}`}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

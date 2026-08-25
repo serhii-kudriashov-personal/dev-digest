@@ -29,6 +29,7 @@ appending its row here in the same edit.**
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
 | 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
 | 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-25 | Patterns | `server/src/modules/reviews/{routes,service,repository}.ts`, `repository/run.repo.ts`, cross-tenant auth checks | `GET /runs/:id/trace` has NO workspace predicate anywhere in its call chain — any authenticated caller who has a run id can read another workspace's trace |
 | 2026-08-21 | Patterns | `server/src/modules/eval/helpers.ts`, `service.ts#compare`, `client/.../EvalsTab/**`, small case sets | `eval-comparison`'s `attributable` flag guards against a different case set or model, NOT against LLM sampling noise between two runs of the identical config |
 | 2026-08-19 | Patterns | `server/src/modules/eval/service.ts`, `executeSet`, NFR-6 | NFR-6's "zero executed cases shall not be recorded" only fires on a pre-first-case cancellation — a parse-failed case still counts as executed and the run IS recorded |
 | 2026-08-19 | Patterns | `server/src/modules/eval/helpers.ts`, run-level scoring, arithmetic metrics | A run-level precision score has a real exception to "no denominator → `null`": a must-not-flag-only run that produces nothing scores `1`, not `null` |
@@ -463,6 +464,14 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-25 — `GET /runs/:id/trace` has NO workspace predicate anywhere in its call chain — any authenticated caller who has a run id can read another workspace's trace
+
+**Rule:** before reusing or adding a second UI entry point to an existing route, trace its full call chain for a `workspaceId`/`getContext()` check — a route that has shipped for a while is not proof it is scoped, and `pnpm arch`/`tsc` catch neither omission.
+
+**Why:** `server/src/modules/reviews/routes.ts:121-124` (`app.get('/runs/:id/trace', …)`) never calls `getContext`, so no `workspaceId` is even extracted from the request. It calls `service.getRunTrace(req.params.id)` (`service.ts:176-178`), which calls `repo.getRunTrace(runId)` (`repository.ts:226-227`), which calls the free function `getRunTrace(db, runId)` in `repository/run.repo.ts:214` — a plain `SELECT` by `run_id` alone, no `workspace_id` in the `WHERE` clause at any layer. Contrast every other run-scoped read added for SPEC-05 (`MultiAgentRepository.getRun(workspaceId, id)`, `membersWithReviews`), which all filter by workspace. This is not new: the route predates this feature and was found only because SPEC-05's `RunTraceDrawer` promotion (`client/src/components/run-trace-drawer/`) gives it a second caller (the Multi-Agent Review page, in addition to the PR page) — the promotion itself does not widen the hole, but it does mean a second screen now depends on an endpoint that has always trusted the run id alone. Exploitability is bounded by run ids being UUIDs (unguessable), but any leaked or logged run id — a shared link, a browser history entry, a support screenshot — lets any authenticated user from any workspace pull that run's full trace: prompt assembly, tool calls, raw model output.
+
+**Where:** `server/src/modules/reviews/routes.ts:121-124`, `service.ts:176-178`, `repository.ts:226-227`, `repository/run.repo.ts:214-217`. Fixing it is out of scope for `specs/2026-08-24-multi-agent-review.md` (the spec's own §Non-goals declares the trace surface's content and access pattern reused unchanged) — this entry exists so the next person touching `reviews/routes.ts` or adding a third trace caller doesn't inherit the gap silently. A fix would add a `workspaceId` parameter threaded through all four layers and a join from `agent_runs`/`reviews` to confirm the pull's `workspace_id` matches the caller's, mirroring `MultiAgentRepository.getRun`.
 
 ### 2026-08-21 — `eval-comparison`'s `attributability.attributable` guards against a different case set or model, NOT against LLM sampling noise between two runs of the identical config
 

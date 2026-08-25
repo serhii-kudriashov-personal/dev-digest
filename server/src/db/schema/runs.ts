@@ -112,4 +112,45 @@ export const multiAgentRuns = pgTable('multi_agent_runs', {
     .notNull()
     .references(() => pullRequests.id, { onDelete: 'cascade' }),
   ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow().notNull(),
+  /** The pull's head_sha at launch time — staleness (AC-46) is derived at read
+   *  time by comparing this against the pull's CURRENT head_sha; never stored. */
+  headSha: text('head_sha').notNull(),
 });
+
+/**
+ * Membership of an `agent_runs` row in a `multi_agent_runs` run (SPEC-05).
+ * Kept as a separate link table rather than a column on `agent_runs` so
+ * `ReviewRepository.createAgentRun`'s signature stays untouched (the facade
+ * already re-declares one delegated signature by hand — `server/INSIGHTS.md`
+ * 2026-08-02 — and this avoids adding a second).
+ */
+export const multiAgentRunMembers = pgTable(
+  'multi_agent_run_members',
+  {
+    multiAgentRunId: uuid('multi_agent_run_id')
+      .notNull()
+      .references(() => multiAgentRuns.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    /** Preserves the selection order the lanes render in. */
+    position: integer('position').notNull().default(0),
+    /**
+     * SNAPSHOT of the agent's name at the moment this run started (AC-23).
+     * `agents.id` is a hard delete and `agent_runs.agent_id` is
+     * `onDelete: 'set null'`, so once an agent is deleted there is no row
+     * left to name it from — this column is what keeps the lane's identity
+     * intact after that. Nullable only because rows written before this
+     * column existed have nothing to backfill it from; every row inserted
+     * from here on carries it (`MultiAgentRepository.addMembers`).
+     */
+    agentName: text('agent_name'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.multiAgentRunId, t.runId] }),
+    // The composite PK serves `WHERE multi_agent_run_id = ?` as a leftmost
+    // prefix, but leaves the reverse lookup (`WHERE run_id = ?`) unindexed —
+    // `server/INSIGHTS.md` 2026-08-16.
+    index('multi_agent_run_members_run_idx').on(t.runId),
+  ],
+);

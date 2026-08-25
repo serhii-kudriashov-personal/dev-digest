@@ -18,6 +18,7 @@ appending its row here in the same edit.**
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-25 | Patterns | `client/src/app/repos/[repoId]/multi-agent/**`, `client/src/vendor/ui/nav.ts` | `runs?.[0]` as the "last run" fallback makes Configure unreachable once a PR has history, and the PR-less nav entry has nothing to feed that fallback in the first place |
 | 2026-08-17 | Patterns | `client/.../VerdictBanner/**`, `client/.../PrBriefSection/**`, `client/.../ReviewRunAccordion/**` | `VerdictBanner` gained three opt-in props only `PrBriefSection` ever passes — next one-caller prop should split the components instead |
 | 2026-08-17 | Patterns | `client/.../PrBriefSection/**`, `client/.../ReviewRunAccordion/**`, `review.summary` vs `brief.what`/`why` | `PrBriefSection`'s text is `brief.what + brief.why`, NEVER `review.summary` — two summary-shaped strings answer different questions |
 | 2026-08-17 | Patterns | `client/.../BriefBar/**`, `client/src/vendor/shared/contracts/review-api.ts`, `BriefRisk` | `BriefRisk.file_refs` was on the wire since SPEC-02 shipped and was never rendered anywhere — a contract field existing is not evidence a UI reads it |
@@ -54,13 +55,14 @@ appending its row here in the same edit.**
 | 2026-08-03 | Tools | `client/eslint.config.mjs` | `pnpm lint` UNDER-reports deep relative imports: the rule is off in test files |
 | 2026-08-03 | Tools | `client/eslint.config.mjs` | `import/no-cycle` makes `eslint .` unusable here (>5 min → 25s without it) |
 | 2026-08-02 | Tools | `client/src/components/**`, severity chips | `SeverityBadge compact` renders NO label — icon and count only |
+| 2026-08-25 | Errors | `client/src/**/*.test.tsx`, cross-route component promotion | Promoting a component also breaks a RELATIVE `vi.mock(...)` path in its moved test — the failure reads as an unrelated "No QueryClient set" bug |
 | 2026-08-16 | Errors | `client/messages/**`, `client/src/**` rendering engine output | A message reproducing engine output goes through `t.raw`, not `t()` — `<untrusted …>` throws INVALID_TAG |
 | 2026-08-16 | Errors | `client/src/app/**` `?tab=` allowlists, editor tab bars | A duplicated `VALID_TABS` swallows every new tab: the URL changes, the pane does not |
 | 2026-08-16 | Errors | `client/src/vendor/ui/nav.ts`, `client/src/components/app-shell/**`, new screens | A new screen does not appear in the left panel until it has a row in the vendored `NAV` array |
 | 2026-08-11 | Errors | `client/src/app/**`, blast radius | `entry.symbol` is not a unique React key |
 | 2026-08-09 | Errors | `client/src/lib/hooks/**` | A `retry: false` query for a resource that does not exist YET caches the 404 forever |
 | 2026-08-09 | Errors | `client/src/**/*.test.tsx`, diff viewer | `getByText` normalizes whitespace, so an INDENTED diff line can never be matched by its literal text |
-| 2026-08-08 | Errors | `client/package.json`, `client/src/**/*.test.tsx` | `@testing-library/user-event` is NOT installed here, so every interactive test uses `fireEvent` |
+| 2026-08-08 | Errors | `client/package.json`, `client/src/**/*.test.tsx` | **Superseded 2026-08-09** — `@testing-library/user-event` is now installed; new tests use it. Eight pre-existing files still use `fireEvent` and are not migrated as a drive-by |
 | 2026-08-02 | Errors | `client/src/**/styles.ts` | Dropping `border` is NOT enough: `borderColor` and `borderWidth` are shorthands too |
 | 2026-08-02 | Errors | `client/messages/**`, i18n imports | Count the `../` for `messages/en/*.json` from the FILE, not from a sibling test |
 
@@ -182,6 +184,36 @@ lines were in
 shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
+
+### 2026-08-25 — `activeRunId = runId ?? runs?.[0]?.id ?? null` made Configure permanently unreachable once a PR had one run, and the nav entry with no `?pr=` had no way back to it either
+
+**Rule:** `MultiAgentView.tsx`'s "reopen the last run" logic
+(`activeRunId = runId ?? runs?.[0]?.id ?? null`) is correct for AC-17/US-6, but
+it is a one-way door: there was no query param that could ever make it resolve
+to `null` again once `useMultiAgentRuns(prId)` returned at least one row, so
+the "start a new multi-agent review" action the spec's mock draws (§Design &
+UX review) had no path back to `ConfigureRunPanel` for a PR with history.
+Fixed with a `new=1` param (`NEW_PARAM`) checked before the fallback chain
+(`forceNew ? null : runId ?? runs?.[0]?.id ?? null`) and a "Start new review"
+button that sets it.
+
+Separately, `client/src/vendor/ui/nav.ts`'s left-nav "Multi-Agent Review" row
+links to `/repos/:repoId/multi-agent` with **no** `pr=` — that entry point has
+no PR context at all, so every visit landed on an empty Configure screen even
+when the user had a run to return to. Fixed with a localStorage "last PR
+viewed here" (`dd-multiagent-pr-<repoId>`, the same convention as `dd-repo` in
+`client/src/lib/repo-context.tsx`), read on mount when `?pr=` is absent and
+written whenever a `pr` is set.
+
+**Why:** a PR-scoped "show the last run" default and a PR-less nav entry
+point are two different problems that both look like the same bug report
+("I can't get back to my run") — the first needs an escape hatch out of the
+default, the second needs something to feed the default in the first place.
+Fixing only one leaves the other complaint standing.
+
+**Where:** `client/src/app/repos/[repoId]/multi-agent/_components/MultiAgentView/MultiAgentView.tsx`
+(`forceNew`, the two `localStorage` effects); `client/src/app/repos/[repoId]/multi-agent/constants.ts`
+(`NEW_PARAM`); `client/src/vendor/ui/nav.ts:26` (the PR-less nav row).
 
 ### 2026-08-21 — `useEvalRunCases` was a fully correct, working hook with zero consumers — a run's per-case detail had no UI at all, not even a stale one
 
@@ -1202,6 +1234,16 @@ s.label}`); consumers are `src/components/findings-hover-card/SeverityBadges.tsx
 and the card's own per-finding rows.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-25 — Promoting a component also breaks a RELATIVE `vi.mock(...)` path in its moved test, and the failure reads as an unrelated React Query bug
+
+**Symptom:** after promoting `RunTraceDrawer` from a route-local `_components/` folder to `client/src/components/run-trace-drawer/`, its moved test started failing with "No QueryClient set" — a setup error that looks like a missing `QueryClientProvider` wrapper, not like a broken mock.
+
+**Cause:** the test mocked its data hooks with a relative path counted from the OLD file location — `vi.mock("../../../../../../../lib/hooks/trace", ...)`. After the `git mv`, that many `../` no longer lands on `lib/hooks/trace`. `vi.mock` does not error on a path that fails to resolve to the module actually imported by the component under test — it just never applies, so the real hook module loads, `useQuery` runs for real with no provider in the render tree, and the resulting crash points nowhere near the actual cause.
+
+**Takeaway:** before moving a test as part of a component promotion, grep it for `vi.mock("\.\./` — every relative mock path needs recalculating for the new location, exactly like the `messages/en/*.json` import depth (2026-08-02, below) and the component's own constants (2026-08-05, below). Prefer the `@/lib/hooks/...` alias form for any `vi.mock` going forward (already house convention in `PRRow.test.tsx`, `FindingsCell.test.tsx`) — an alias-form mock has no `../` count to break on a future move.
+
+**Where:** `client/src/components/run-trace-drawer/RunTraceDrawer.test.tsx:22-27` (post-fix, alias form). Same family as the 2026-08-16 "cross-route promotion rule fires on a COMPONENT" entry above — that entry covers the folder and its constants; this one covers what a moved *test* can silently carry.
 
 ### 2026-08-16 — A message that reproduces engine output goes through `t.raw`, not `t()` — next-intl reads `<untrusted source="spec-N">` as a rich-text tag and throws
 
