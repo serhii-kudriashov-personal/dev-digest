@@ -29,6 +29,10 @@ appending its row here in the same edit.**
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
 | 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
 | 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-25 | Patterns | `server/src/modules/ci/repository.ts#upsertRun`, `service.ts#refresh`, any upsert inside a fan-out loop | An upsert called from inside a fan-out loop should return the row, not `void` |
+| 2026-08-25 | Patterns | `server/src/modules/skills/helpers.ts#previewFromZip`, `server/src/modules/ci/helpers.ts#parseResultArtifact`, untrusted-archive validation | Throw when the caller is one request; return `null` when the caller is a fan-out loop that must not abort on one bad item |
+| 2026-08-25 | Patterns | `server/src/modules/ci/constants.ts`, `agent-runner/src/run.ts`, generated GitHub Actions workflows | A generated workflow needs `actions/upload-artifact` pinned too — `agent-runner` writes its result file but never uploads it |
+| 2026-08-25 | Patterns | `server/src/modules/**/helpers.ts`, `server/src/db/rows.ts`, single-consumer row types | A slice's `helpers.ts` sources its row type from the slice's own `repository.ts`, not `db/rows.ts`, when nothing outside the slice needs it |
 | 2026-08-21 | Patterns | `server/src/modules/eval/helpers.ts`, `service.ts#compare`, `client/.../EvalsTab/**`, small case sets | `eval-comparison`'s `attributable` flag guards against a different case set or model, NOT against LLM sampling noise between two runs of the identical config |
 | 2026-08-19 | Patterns | `server/src/modules/eval/service.ts`, `executeSet`, NFR-6 | NFR-6's "zero executed cases shall not be recorded" only fires on a pre-first-case cancellation — a parse-failed case still counts as executed and the run IS recorded |
 | 2026-08-19 | Patterns | `server/src/modules/eval/helpers.ts`, run-level scoring, arithmetic metrics | A run-level precision score has a real exception to "no denominator → `null`": a must-not-flag-only run that produces nothing scores `1`, not `null` |
@@ -48,6 +52,9 @@ appending its row here in the same edit.**
 | 2026-08-09 | Patterns | `server/src/db/schema/**`, migrations | `findings` and `reviews` ARE indexed now — check the schema before you owe a migration |
 | 2026-08-02 | Patterns | `server/src/db/schema/**` | The `findings` table has no indexes at all — a FK is not an index |
 | 2026-08-02 | Patterns | `agents.system_prompt`, `docs/agent-prompts/**` | The live agent prompt is the DB column, not the markdown file |
+| 2026-08-25 | Tools | `server/src/modules/ci/constants.ts`, `PINNED_ACTIONS`, SHA-pinning third-party actions | `gh api .../git/refs/tags/<version>` resolves straight to a commit SHA for `actions/checkout`/`actions/upload-artifact` — no annotated-tag dereference needed |
+| 2026-08-25 | Tools | `server/tsconfig.json`, fresh git worktrees, `reviewer-core/**` | A fresh secondary worktree needs `pnpm install` in BOTH `server/` and `reviewer-core/` before `server`'s gates mean anything |
+| 2026-08-25 | Tools | `reviewer-core/package-lock.json`, fresh installs | `pnpm install` inside `reviewer-core/` silently creates an untracked `pnpm-lock.yaml` — that package is npm, not pnpm |
 | 2026-08-18 | Tools | `server/.dependency-cruiser.cjs`, auditing `pnpm arch` coverage | Grepping for a `db/schema` import to find gate-blind SQL over-reports — a type-only import is not an edge |
 | 2026-08-08 | Tools | model ids, model config | `deepseek/deepseek-v4-flash` and `…-flash-latest` are DIFFERENT models at different prices |
 | 2026-08-05 | Tools | `server/src/db/migrations/**`, `pnpm db:generate` | `db:generate` goes INTERACTIVE when one migration both drops and adds a column |
@@ -63,6 +70,8 @@ appending its row here in the same edit.**
 | 2026-08-05 | Errors | `server/test/reviews.it.test.ts` | It fails on `prompt_assembly` for reasons that have nothing to do with your change |
 | 2026-08-03 | Errors | `*/src/vendor/shared/contracts/**`, DTOs | The jsonb `.nullish()` trap, second instance — and the fix is NOT to loosen the DTO |
 | 2026-08-02 | Errors | `server/src/modules/reviews/**` | `completeAgentRun`'s parameter type is declared TWICE |
+| 2026-08-25 | Open | `server/src/db/schema/ci.ts`, `CiInstallation`, `CiTab/**` | `CiInstallation` never persisted `triggers`/`post_as` — "Update" can't restore a repo's previous configuration |
+| 2026-08-25 | Open | `server/src/modules/ci/service.ts#refresh` | `{ ingested }`'s count has no defined semantics — new-this-call or touched-this-call? |
 | 2026-08-08 | Open | `server/src/modules/settings/**`, §12 debt | Two slices import `settings/feature-models.ts`, and the §12 fix would break both |
 | 2026-08-05 | Open | metrics, `server/src/modules/**` | `pull_rate` counts pre-provenance runs as "not pulled" |
 
@@ -463,6 +472,93 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-25 — Throw when the caller is one request; return `null` when the caller is a fan-out loop that must not abort on one bad item
+
+**Rule:** this repo now has two precedents for "unzip and validate an untrusted
+archive" that deliberately differ in error-handling style — match the style to
+the caller, not to the operation. `server/src/modules/skills/helpers.ts:72-99`
+(`previewFromZip`) throws `ValidationError` on every rejection, because its
+caller is a single import request that should fail loudly and stop.
+`server/src/modules/ci/helpers.ts` (`parseResultArtifact`, added for CI ingest)
+returns `null` on every rejection instead — unzip failure, over-cap size,
+missing result entry, `JSON.parse` failure, schema mismatch, or a provenance
+mismatch — because its caller, `service.ts#refresh`, is a fan-out loop over many
+installations/runs where one bad artifact must not abort the whole refresh.
+Copying `previewFromZip`'s throw into a fan-out caller would turn one
+misbehaving CI run into a refresh that reports nothing for every installation.
+
+**Why:** the operation (unzip + cap + parse + validate) is identical between the
+two; only the blast radius of failure differs, and that is a property of the
+caller's shape, not the validator's.
+
+**Where:** `server/src/modules/skills/helpers.ts:72-99` (`previewFromZip`,
+throws); `server/src/modules/ci/helpers.ts` (`parseResultArtifact`, returns
+`null`), called from `server/src/modules/ci/service.ts#refresh`.
+
+### 2026-08-25 — An upsert called from inside a fan-out loop should return the row, not `void`
+
+**Rule:** when a repository upsert is called once per item inside a loop that
+then needs to act differently per item (skip vs. proceed), have it return the
+resulting row rather than `void`. `CiRepository.upsertRun` was changed from
+`void` to `Promise<CiRunRow>` specifically because `CiService.refresh`
+(`server/src/modules/ci/service.ts:206-265`) needs the row's `id` and whether it
+already carries a result, to decide whether to bother calling
+`downloadRunArtifact` again for that run. A `void`-returning upsert would force
+either a redundant artifact re-fetch on every refresh or a second read
+immediately after the upsert.
+
+**Why:** the loop already paid for the write; returning what it wrote is free,
+and the alternative is either wasted network calls (against GitHub, rate-limited
+API calls) or an extra read the upsert could have answered directly.
+
+**Where:** `server/src/modules/ci/repository.ts` (`upsertRun`);
+`server/src/modules/ci/service.ts:206-265` (`refresh`).
+
+### 2026-08-25 — A generated GitHub Actions workflow needs `actions/upload-artifact` pinned too — `agent-runner` writes its result file but never uploads it
+
+**Rule:** `agent-runner` writes `devdigest-result.json` to `process.cwd()`
+(`agent-runner/src/run.ts:149`, invoked from `agent-runner/src/index.ts:32`) and
+stops there — nothing inside `agent-runner` calls any upload API. A workflow
+generator that runs the bundled runner must separately pin and invoke
+`actions/upload-artifact` to publish that file under the artifact name the
+server later fetches (`CI_ARTIFACT_NAME` in
+`server/src/modules/ci/constants.ts`), or `downloadRunArtifact`
+(`server/src/vendor/shared/adapters.ts`) finds nothing and every CI run reads as
+resultless. `plans/2026-08-24-export-to-ci.md` Step 2.1 names only
+`actions/checkout` explicitly for `PINNED_ACTIONS` ("and any other action the
+workflow ends up using" is the only hint) — a reader who stops at the named
+example ships a workflow that checks out the repo, runs the review, and silently
+never publishes its result.
+
+**Why:** the runner/uploader split is real and by design — `agent-runner` has no
+GitHub Actions dependency of its own — but it means the *workflow generator*,
+not the runner, owns getting the result off the runner and into something the
+ingest side can reach.
+
+**Where:** `agent-runner/src/run.ts:149`; `agent-runner/src/index.ts:32`;
+`server/src/modules/ci/constants.ts` (`PINNED_ACTIONS` includes
+`actions/upload-artifact` pinned at `ea165f8d65b6e75b540449e92b4886f43607fa02`).
+
+### 2026-08-25 — A slice's `helpers.ts` sources its row type from the slice's own `repository.ts`, not `db/rows.ts`, when nothing outside the slice needs it
+
+**Rule:** `db/rows.ts` reads like the sanctioned place for any ring-2 file's row
+type, but the actual convention only sends a row type there when more than one
+slice needs it. A row type with exactly one consumer, inside the slice that
+defines it, is declared directly in that slice's own `repository.ts` and
+imported from there — `server/src/modules/agents/helpers.ts:3` imports
+`AgentRow` from `server/src/modules/agents/repository.ts`, not from `db/rows.ts`.
+`server/src/modules/ci/repository.ts` follows the same shape for
+`CiInstallationRow`/`CiRunRow`, consumed only by `server/src/modules/ci/helpers.ts:10`.
+
+**Why:** `db/rows.ts`'s own docblock doesn't distinguish "shared across slices"
+from "used once, inside the slice that owns the table" — the first genuinely
+belongs there, the second is one more file to check for anyone reading the
+slice in isolation, for no cross-slice benefit.
+
+**Where:** `server/src/modules/agents/helpers.ts:3`,
+`server/src/modules/agents/repository.ts`; `server/src/modules/ci/repository.ts`,
+`server/src/modules/ci/helpers.ts:10`.
 
 ### 2026-08-21 — `eval-comparison`'s `attributability.attributable` guards against a different case set or model, NOT against LLM sampling noise between two runs of the identical config
 
@@ -1057,6 +1153,67 @@ the editor field is
 
 ## Tool & Library Notes
 
+### 2026-08-25 — `gh api .../git/refs/tags/<version> --jq '.object.sha'` resolves straight to a commit SHA for `actions/checkout` and `actions/upload-artifact` — no annotated-tag dereference needed
+
+**Quirk:** pinning a third-party GitHub Action to a full commit SHA (AC-18-style
+requirements) is usually written defensively — "dereference the tag object if it
+turns out to be an annotated tag, not a commit" — because a tag ref *can* point
+at a tag object instead of a commit. In practice, for both
+`actions/checkout@v4` and `actions/upload-artifact@v4`,
+`gh api repos/<owner>/<repo>/git/refs/tags/<version> --jq '.object.sha'` returned
+a commit SHA directly on the first call; no second `gh api` call to dereference
+an annotated tag object was needed.
+
+**Workaround:** still write the defensive check if scripting this for arbitrary
+actions (some projects do use annotated tags), but don't expect to need it for
+these two specific actions.
+
+**Where:** `server/src/modules/ci/constants.ts`'s `PINNED_ACTIONS` map —
+`actions/checkout` → `11d5960a326750d5838078e36cf38b85af677262`,
+`actions/upload-artifact` → `ea165f8d65b6e75b540449e92b4886f43607fa02`, both
+verified independently during `plans/2026-08-24-export-to-ci.md`'s
+Dispatch 2 / `plan-verifier` pass.
+
+### 2026-08-25 — A fresh secondary worktree needs `pnpm install` in BOTH `server/` and `reviewer-core/` before `server`'s gates mean anything
+
+**Quirk:** `cd server && pnpm typecheck` in a freshly created worktree first
+fails with `sh: tsc: command not found` (no `server/node_modules`). Installing
+only `server/`'s own deps and re-running typecheck then fails a second time with
+`Cannot find module 'openai'` / `Cannot find module 'zod'`, with the error
+pointing at paths under `reviewer-core/src/llm/**`. That second failure reads
+like a broken import inside `reviewer-core`'s own code, not like a missing
+dependency — `reviewer-core` never emits JS and `server/tsconfig.json`
+path-aliases straight to `../reviewer-core/src` (root `CLAUDE.md` §Repo rules:
+"`reviewer-core` never emits JS… the server consumes its `.ts` sources
+directly"), so `server`'s typecheck is transitively compiling
+`reviewer-core`'s source tree and needs *its* `node_modules` too.
+
+**Workaround:** in a fresh worktree, run `pnpm install` in `server/` **and**
+`reviewer-core/` before trusting any `server` gate (`typecheck`, `arch`, `test`)
+— installing only `server/` leaves the second failure waiting for whoever runs
+the gate next.
+
+**Where:** `server/tsconfig.json` (the path alias to `../reviewer-core/src`);
+observed running `cd server && pnpm typecheck` in a fresh worktree during
+`plans/2026-08-24-export-to-ci.md` Dispatch 1.
+
+### 2026-08-25 — `pnpm install` inside `reviewer-core/` silently creates an untracked `pnpm-lock.yaml` — that package is npm, not pnpm
+
+**Quirk:** `reviewer-core/` is committed with `package-lock.json`; running
+`pnpm install` there (e.g. to fix the entry above) generates a second, untracked
+`reviewer-core/pnpm-lock.yaml` that `git status` will show as a new file. Nothing
+warns about the mismatch — pnpm installs happily against an npm-lockfile
+package.
+
+**Workaround:** install `reviewer-core/`'s deps with `npm install`, matching its
+committed lockfile; if `pnpm install` was already run there, delete the stray
+`reviewer-core/pnpm-lock.yaml` before staging anything, or a later commit ends up
+carrying two divergent lockfiles for one package.
+
+**Where:** `reviewer-core/package-lock.json` (tracked) vs. the untracked
+`reviewer-core/pnpm-lock.yaml` a stray `pnpm install` there generates; same
+Dispatch 1 run as the entry above.
+
 ### 2026-08-18 — Grepping for a `db/schema` import to find gate-blind SQL over-reports: `tsPreCompilationDeps: false` means a type-only import is not an edge
 
 **Quirk:** the `modules/` rules in `.dependency-cruiser.cjs` select files by
@@ -1605,6 +1762,55 @@ other delegated methods there.
 _Empty so far._
 
 ## Open Questions
+
+### 2026-08-25 — `CiInstallation` never persisted `triggers`/`post_as`, so the CI tab's "Update" action can't actually restore a repo's previous configuration
+
+**Question:** should `ci_installations` gain `triggers`/`post_as` columns so
+"Update" can genuinely pre-fill an operator's prior choices, or is silently
+falling back to defaults acceptable for v1?
+
+`server/src/db/schema/ci.ts:14-24` (and the `CiInstallation` contract) persists
+only `agentId`, `repo`, `targetType`, `installedAt` — never the trigger events
+or publish mode chosen at export time. SPEC-05's AC-24 asks the CI tab's
+"Update" action to reopen the export wizard pre-filled with "its previous
+triggers and publish mode," but with nothing stored, `CiTab` can only honestly
+pre-fill `repo`; `triggers`/`postAs` fall back to
+`client/src/app/agents/[id]/_components/CiTab/constants.ts`'s
+`DEFAULT_PREFILL_TRIGGERS`/`DEFAULT_PREFILL_POST_AS` — which look like the
+right values in the UI but aren't necessarily what the operator originally
+chose. General lesson: check an "Update"/"restore previous configuration" UI
+requirement against what the record it reads from actually persists, not
+against what a design mock implies.
+
+**Blocked:** on a product decision — whether restoring the exact prior
+triggers/publish-mode matters enough for v1 to warrant a schema + contract
+addition, given `## Not in scope for v1` already defers most CI-installation
+staleness/state tracking.
+
+**Where:** `server/src/db/schema/ci.ts:14-24`;
+`server/src/vendor/shared/contracts/eval-ci.ts` (`CiInstallation`);
+`client/src/app/agents/[id]/_components/CiTab/constants.ts`.
+
+### 2026-08-25 — `CiService.refresh`'s `{ ingested }` count has no defined semantics — new-this-call or touched-this-call?
+
+**Question:** should `refresh`'s returned count mean "brand-new rows recorded
+this call" or "every run this call looked at, new or already-known"?
+
+`server/src/modules/ci/service.ts:206-264` increments `ingested` for every run
+in the per-installation loop, before checking whether that run already carried
+an accepted result — i.e. it counts touched-this-call, the simpler of the two
+readings. Neither `plans/2026-08-24-export-to-ci.md` Step 3.3 nor the spec's
+AC-25 constrains this, and `CiExport`/`eval-ci.ts` defines no `RefreshResult`
+shape the count has to match, so `plan-verifier` judged the choice `met` rather
+than `deviated` — there was nothing to deviate from. If a later UI wants to
+report "N new runs found," the current count will overstate it on every refresh
+that finds nothing new but re-touches existing rows.
+
+**Blocked:** on a product decision, not a technical one — whoever wires this
+into a UI needs to say which meaning they want, and today's value silently means
+the touched-this-call reading until someone objects.
+
+**Where:** `server/src/modules/ci/service.ts:206-264`.
 
 ### 2026-08-08 — Two slices now import `settings/feature-models.ts`, and the §12 fix for it would break both
 
