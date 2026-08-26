@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Verdict, Finding } from './findings.js';
-import { EvalRun, EvalOwnerKind, Conformance } from './knowledge.js';
+import { EvalRun, EvalOwnerKind, Conformance, Agent } from './knowledge.js';
 
 /**
  * A4 — Eval / CI / Compose / Conformance API contracts (L06).
@@ -13,8 +13,36 @@ import { EvalRun, EvalOwnerKind, Conformance } from './knowledge.js';
  */
 
 // ===========================================================================
-// Eval — case input + persisted run record + dashboard
+// Eval — case input + persisted run record + dashboard (L06, SPEC-04)
 // ===========================================================================
+
+/** What an eval case asserts about the fixture: a finding must (not) appear. */
+export const EvalExpectationKind = z.enum(['must_find', 'must_not_flag']);
+export type EvalExpectationKind = z.infer<typeof EvalExpectationKind>;
+
+/** One expectation: a file + inclusive line range the case's fixture concerns. */
+export const EvalExpectation = z.object({
+  kind: EvalExpectationKind,
+  file: z.string(),
+  start_line: z.number().int(),
+  end_line: z.number().int(),
+});
+export type EvalExpectation = z.infer<typeof EvalExpectation>;
+
+/**
+ * Where a case came from (AC-6, AC-7). `available: false` covers both "never
+ * had provenance" (hand-authored case) and "source since deleted" — the two
+ * are otherwise indistinguishable once the source PR is gone.
+ */
+export const EvalCaseProvenance = z.object({
+  available: z.boolean(),
+  finding_id: z.string().nullish(),
+  pr_id: z.string().nullish(),
+  pr_number: z.number().int().nullish(),
+  repo_full_name: z.string().nullish(),
+  head_sha: z.string().nullish(),
+});
+export type EvalCaseProvenance = z.infer<typeof EvalCaseProvenance>;
 
 /** Create/update payload for an eval case (id + owner resolved by the route). */
 export const EvalCaseInput = z.object({
@@ -26,14 +54,80 @@ export const EvalCaseInput = z.object({
   input_meta: z.unknown().nullish(),
   expected_output: z.unknown(),
   notes: z.string().nullish(),
+  expectation: EvalExpectation.nullish(),
+  /** Re-run this case automatically whenever it is saved (AC-14). */
+  run_on_save: z.boolean().default(false),
 });
 export type EvalCaseInput = z.infer<typeof EvalCaseInput>;
+/** Caller-facing input type — `.default()` fields stay optional. */
+export type EvalCaseInputBody = z.input<typeof EvalCaseInput>;
 
-/** A persisted eval run row (one execution of a case), returned by the API. */
+/** A persisted eval case, returned by the API. */
+export const EvalCaseRecord = z.object({
+  id: z.string(),
+  owner_kind: EvalOwnerKind,
+  owner_id: z.string(),
+  name: z.string(),
+  input_diff: z.string(),
+  input_files: z.unknown().nullish(),
+  input_meta: z.unknown().nullish(),
+  expected_output: z.unknown().nullish(),
+  notes: z.string().nullish(),
+  run_on_save: z.boolean(),
+  created_at: z.string(),
+  expectation: EvalExpectation.nullish(),
+  provenance: EvalCaseProvenance.nullish(),
+  /** True when the case has no expectation kind yet — presented as needing
+   *  repair rather than silently treated as must-find. */
+  needs_repair: z.boolean(),
+  last_result: z.enum(['pass', 'fail', 'never_run']),
+  last_ran_at: z.string().nullish(),
+});
+export type EvalCaseRecord = z.infer<typeof EvalCaseRecord>;
+
+export const EvalRunStatus = z.enum(['running', 'complete', 'incomplete']);
+export type EvalRunStatus = z.infer<typeof EvalRunStatus>;
+
+/**
+ * AC-17's run identity: one row per "run this agent's case set", carrying its
+ * own denormalised metrics so they survive a case being deleted afterwards
+ * (`eval_runs.case_id` cascades; these columns never do — AC-16).
+ */
+export const EvalSetRun = z.object({
+  id: z.string(),
+  agent_id: z.string(),
+  agent_name: z.string().nullish(),
+  config_version: z.number().int(),
+  provider: z.string(),
+  model: z.string(),
+  covered_case_ids: z.array(z.string()),
+  ran_at: z.string(),
+  finished_at: z.string().nullable(),
+  status: EvalRunStatus,
+  incomplete_reason: z.string().nullable(),
+  recall: z.number().nullable(),
+  precision: z.number().nullable(),
+  citation_accuracy: z.number().nullable(),
+  cases_passed: z.number().int(),
+  cases_covered: z.number().int(),
+  cases_done: z.number().int(),
+  cost_usd: z.number().nullable(),
+  duration_ms: z.number().int().nullable(),
+  /** True once per-case detail (`eval_runs` rows) has been pruned by
+   *  retention (NFR-8) — the set-run's own metrics remain intact. */
+  detail_expired: z.boolean(),
+});
+export type EvalSetRun = z.infer<typeof EvalSetRun>;
+
+/** A persisted eval run row (one case's execution within a set run), returned
+ *  by the API. */
 export const EvalRunRecord = z.object({
   id: z.string(),
   case_id: z.string(),
   case_name: z.string().nullish(),
+  /** The set run this case execution belongs to; null for a single-case run
+   *  (AC-32). */
+  set_run_id: z.string().nullish(),
   ran_at: z.string(),
   actual_output: z.unknown(),
   pass: z.boolean().nullable(),
@@ -42,6 +136,13 @@ export const EvalRunRecord = z.object({
   citation_accuracy: z.number().nullable(),
   duration_ms: z.number().int().nullable(),
   cost_usd: z.number().nullable(),
+  /** Why this case's execution did not complete (parse failure, timeout,
+   *  provider error) — set only when the case did not run to a normal result. */
+  error: z.string().nullish(),
+  /** Findings dropped by the citation-grounding gate during this case's run. */
+  grounding_dropped: z.unknown().nullish(),
+  /** Whether the expectation was matched by a grounded finding. */
+  matched: z.boolean().nullish(),
 });
 export type EvalRunRecord = z.infer<typeof EvalRunRecord>;
 
@@ -53,40 +154,104 @@ export const EvalRunResult = z.object({
 });
 export type EvalRunResult = z.infer<typeof EvalRunResult>;
 
-/** One point on the dashboard trend (per run, chronological). */
+/** One point on the dashboard trend (per completed set run, chronological). */
 export const EvalTrendPoint = z.object({
+  set_run_id: z.string(),
+  config_version: z.number().int(),
   ran_at: z.string(),
-  recall: z.number(),
-  precision: z.number(),
-  citation_accuracy: z.number(),
-  pass_rate: z.number(),
+  recall: z.number().nullable(),
+  precision: z.number().nullable(),
+  citation_accuracy: z.number().nullable(),
+  pass_rate: z.number().nullable(),
   cost_usd: z.number().nullable(),
 });
 export type EvalTrendPoint = z.infer<typeof EvalTrendPoint>;
 
-/** Aggregate dashboard for an owner (agent/skill) or the whole workspace. */
+/** One agent's row on the cross-agent dashboard (AC-40, AC-41). */
+export const EvalAgentSummary = z.object({
+  agent_id: z.string(),
+  agent_name: z.string(),
+  cases_total: z.number().int(),
+  never_run: z.boolean(),
+  last_run: EvalSetRun.nullable(),
+  /** Direction against this agent's previous COMPARABLE run; null when the
+   *  last two runs are not comparable (or there is no previous run). */
+  direction: z.enum(['up', 'down', 'flat']).nullable(),
+  comparable: z.boolean(),
+});
+export type EvalAgentSummary = z.infer<typeof EvalAgentSummary>;
+
+/** Aggregate dashboard across every agent with an eval case set. */
 export const EvalDashboard = z.object({
   owner_kind: EvalOwnerKind.nullable(),
   owner_id: z.string().nullable(),
   cases_total: z.number().int(),
   current: z.object({
-    recall: z.number(),
-    precision: z.number(),
-    citation_accuracy: z.number(),
+    recall: z.number().nullable(),
+    precision: z.number().nullable(),
+    citation_accuracy: z.number().nullable(),
     traces_passed: z.number().int(),
     traces_total: z.number().int(),
     cost_usd: z.number().nullable(),
   }),
-  delta: z.object({
-    recall: z.number(),
-    precision: z.number(),
-    citation_accuracy: z.number(),
-  }),
+  delta: z
+    .object({
+      recall: z.number().nullable(),
+      precision: z.number().nullable(),
+      citation_accuracy: z.number().nullable(),
+    })
+    .nullish(),
   trend: z.array(EvalTrendPoint),
-  recent_runs: z.array(EvalRunRecord),
+  /** Cross-agent recent list (AC-42) — SET runs (not per-case detail rows),
+   *  newest first, capped at `EVAL_MAX_RECENT_RUNS`. */
+  recent_runs: z.array(EvalSetRun),
+  /** Per-agent rows (AC-40…AC-44); empty when no agent has a case. */
+  agents: z.array(EvalAgentSummary),
   alert: z.string().nullable(),
 });
 export type EvalDashboard = z.infer<typeof EvalDashboard>;
+
+/** Body of `POST /agents/:id/eval-runs` — omit `case_ids` to run the whole set. */
+export const EvalRunSetInput = z.object({
+  case_ids: z.array(z.string()).nullish(),
+});
+export type EvalRunSetInput = z.infer<typeof EvalRunSetInput>;
+
+/** Two-run comparison (AC-33…AC-37), with the attributability warning. */
+export const EvalComparison = z.object({
+  earlier: EvalSetRun,
+  later: EvalSetRun,
+  metrics: z.array(
+    z.object({
+      key: z.enum(['recall', 'precision', 'citation_accuracy']),
+      earlier: z.number().nullable(),
+      later: z.number().nullable(),
+      delta: z.number().nullable(),
+    }),
+  ),
+  prompts: z.object({
+    earlier: z.string().nullable(),
+    later: z.string().nullable(),
+  }),
+  attributability: z.object({
+    case_set_changed: z.boolean(),
+    model_changed: z.boolean(),
+    attributable: z.boolean(),
+  }),
+  /** True when either side's per-case detail has been pruned (NFR-8). */
+  detail_expired: z.boolean(),
+});
+export type EvalComparison = z.infer<typeof EvalComparison>;
+
+/** Response of `POST /agents/:id/versions/:version/promote` (AC-38, AC-39). */
+export const EvalPromoteResult = z.object({
+  agent: Agent,
+  /** False when the promoted config already equalled the live one (A10) — no
+   *  new version was created. */
+  promoted: z.boolean(),
+  version: z.number().int(),
+});
+export type EvalPromoteResult = z.infer<typeof EvalPromoteResult>;
 
 // ===========================================================================
 // Compose Review

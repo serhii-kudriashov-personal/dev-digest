@@ -36,6 +36,46 @@ describe('structured-output helpers', () => {
     expect((js.schema as { additionalProperties?: boolean }).additionalProperties).toBe(false);
   });
 
+  it('a NULLISH ENUM survives toJsonSchema — the shape `Finding.scope` needs', () => {
+    // Risks 10 of specs/l03-intent-layer.md asked whether a nullish z.enum
+    // survives the strict-schema conversion, since `Finding.skill` only proves
+    // it for nullish STRINGS (which convert to `nullable: true`). It does — and
+    // `Finding.kind` was already a nullish enum shipping in this very schema.
+    // A nullish enum converts to `anyOf: [{enum}, {type: 'null'}]`.
+    const js = toJsonSchema(Review, 'Review');
+    const props = (
+      js.schema as {
+        properties: { findings: { items: { properties: Record<string, unknown> } } };
+      }
+    ).properties.findings.items.properties;
+    expect(props.scope).toEqual({
+      anyOf: [{ type: 'string', enum: ['in_scope', 'out_of_scope'] }, { type: 'null' }],
+      description: expect.stringContaining('PR intent (derived)'),
+    });
+    // And the round trip: a MISSING key, an explicit null and a valid value all
+    // parse; a bogus value does not.
+    const one = {
+      id: 'f1',
+      severity: 'WARNING',
+      category: 'bug',
+      title: 't',
+      file: 'a.ts',
+      start_line: 1,
+      end_line: 1,
+      rationale: 'r',
+      confidence: 0.5,
+    };
+    const base = { verdict: 'comment', summary: 's', score: 80 };
+    expect(Review.safeParse({ ...base, findings: [one] }).success).toBe(true);
+    expect(Review.safeParse({ ...base, findings: [{ ...one, scope: null }] }).success).toBe(true);
+    expect(
+      Review.safeParse({ ...base, findings: [{ ...one, scope: 'out_of_scope' }] }).success,
+    ).toBe(true);
+    expect(Review.safeParse({ ...base, findings: [{ ...one, scope: 'nope' }] }).success).toBe(
+      false,
+    );
+  });
+
   it('extractJson pulls JSON out of fenced / prose-wrapped output', () => {
     expect(extractJson('```json\n{"a":1}\n```')).toBe('{"a":1}');
     expect(extractJson('Here is the result: {"a":1} done')).toBe('{"a":1}');

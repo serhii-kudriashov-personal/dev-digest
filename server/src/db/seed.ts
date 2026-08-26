@@ -6,7 +6,22 @@ import {
   GENERAL_REVIEWER_PROMPT,
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
+  TEST_QUALITY_REVIEWER_PROMPT,
+  API_CONTRACT_REVIEWER_PROMPT,
 } from './seed-prompts.js';
+import { SEED_SKILLS } from './seed-skills.js';
+
+/**
+ * Which skills each seeded agent links, in prompt order. Names resolve against
+ * `SEED_SKILLS`; the order of each array becomes `agent_skills.order`, which is
+ * the order of the blocks in the assembled prompt.
+ */
+const AGENT_SKILL_LINKS: Record<string, string[]> = {
+  'Security Reviewer': ['secret-leakage-gate', 'lethal-trifecta', 'phantom-api-gate'],
+  'Performance Reviewer': ['pr-quality-rubric', 'no-then-chains'],
+  'Test Quality Reviewer': ['test-coverage-nudge', 'pr-quality-rubric'],
+  'API Contract Reviewer': ['api-contract-gate', 'phantom-api-gate'],
+};
 
 /** Default provider/model for the built-in reviewer agents. */
 const DEFAULT_PROVIDER = 'openrouter' as const;
@@ -18,11 +33,13 @@ const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
  *
  * Seeds: default workspace + system user + membership, default settings,
  * demo repo (acme/payments-api), PR #482 with files/commits, a sample review
- * with a few findings, and the three built-in agents (General + Security +
- * Performance), all on the default openrouter/deepseek-v4-flash provider+model.
+ * with a few findings, five built-in agents (General + Security + Performance,
+ * plus L02's Test Quality + API Contract), all on the default
+ * openrouter/deepseek-v4-flash provider+model, and L02's skill library linked to
+ * those agents in prompt order.
  *
- * Course lessons populate the other tables (skills, conventions, memory, eval,
- * …) once their features are built — they start empty here.
+ * Later course lessons populate the remaining tables (conventions, memory, eval,
+ * …) once their features are built — those start empty here.
  */
 
 export const DEFAULT_WORKSPACE_NAME = 'default';
@@ -211,6 +228,29 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       version: 1,
       createdBy: userId,
     },
+    {
+      workspaceId,
+      name: 'Test Quality Reviewer',
+      description:
+        'Checks test quality: uncovered branches, missed corner cases, over-mocking, flakes.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: TEST_QUALITY_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
+    {
+      workspaceId,
+      name: 'API Contract Reviewer',
+      description: 'Catches breaking changes to routes, signatures, schemas and shared contracts.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: API_CONTRACT_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
   ];
   for (const a of seedAgents) {
     const [existing] = await db
@@ -220,8 +260,122 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     if (!existing) await db.insert(t.agents).values(a);
   }
 
+  // ---- skill library (L02) ----
+  // Bodies live in ./seed-skills.ts. Idempotent by name, like the agents above.
+  const skillIdByName = new Map<string, string>();
+  for (const sk of SEED_SKILLS) {
+    const [existing] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, sk.name)));
+    if (existing) {
+      skillIdByName.set(sk.name, existing.id);
+      continue;
+    }
+    const [row] = await db
+      .insert(t.skills)
+      .values({
+        workspaceId,
+        name: sk.name,
+        description: sk.description,
+        type: sk.type,
+        source: sk.source,
+        body: sk.body,
+        enabled: true,
+        version: 1,
+      })
+      .returning();
+    if (!row) continue;
+    skillIdByName.set(sk.name, row.id);
+    // Record version 1 of the body, matching what the skills repository does.
+    await db
+      .insert(t.skillVersions)
+      .values({ skillId: row.id, version: 1, body: sk.body, message: sk.versionMessage })
+      .onConflictDoNothing();
+  }
+
+  // ---- link skills to agents (order = prompt order) ----
+  // Only for an agent that has NO links yet, so a re-seed never overwrites an
+  // ordering the user arranged in the editor.
+  for (const [agentName, skillNames] of Object.entries(AGENT_SKILL_LINKS)) {
+    const [agent] = await db
+      .select()
+      .from(t.agents)
+      .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, agentName)));
+    if (!agent) continue;
+
+    const existingLinks = await db
+      .select({ skillId: t.agentSkills.skillId })
+      .from(t.agentSkills)
+      .where(eq(t.agentSkills.agentId, agent.id));
+    if (existingLinks.length > 0) continue;
+
+    const values = skillNames
+      .map((name, order) => ({ skillId: skillIdByName.get(name), order }))
+      .filter((v): v is { skillId: string; order: number } => v.skillId !== undefined)
+      .map((v) => ({ agentId: agent.id, skillId: v.skillId, order: v.order }));
+    if (values.length > 0) await db.insert(t.agentSkills).values(values);
+  }
+
+  // ---- extracted convention candidates (L02) ----
+  // Seeded so the Conventions screen and its e2e flow have something to judge
+  // WITHOUT firing a model call. The evidence line ranges are the ones the gate
+  // would have computed; nothing here is a model claim.
+  const existingConventions = await db
+    .select({ id: t.conventions.id })
+    .from(t.conventions)
+    .where(and(eq(t.conventions.workspaceId, workspaceId), eq(t.conventions.repoId, repoId)));
+  if (existingConventions.length === 0) {
+    await db.insert(t.conventionScans).values({
+      workspaceId,
+      repoId,
+      filesSampled: 14,
+      candidates: SEED_CONVENTIONS.length,
+      dropped: 2,
+      provider: 'openai',
+      model: 'gpt-5.4',
+    });
+    await db
+      .insert(t.conventions)
+      .values(SEED_CONVENTIONS.map((c) => ({ workspaceId, repoId, ...c })));
+  }
+
   return { workspaceId, userId };
 }
+
+/**
+ * Demo candidates for `acme/payments-api`. All `pending` on purpose — the screen's
+ * whole point is the accept/reject decision, so seeding them judged would hide it.
+ */
+const SEED_CONVENTIONS = [
+  {
+    rule: 'Always use async/await instead of .then() chains.',
+    category: 'structure' as const,
+    evidencePath: 'src/api/users.ts',
+    evidenceSnippet: 'const user = await db.users.find(id);\nconst posts = await db.posts.findMany({ userId });',
+    evidenceLineStart: 23,
+    evidenceLineEnd: 31,
+    confidence: 0.91,
+  },
+  {
+    rule: 'All public route handlers return a typed Result<T, ApiError>.',
+    category: 'api-shape' as const,
+    evidencePath: 'src/api/public/index.ts',
+    evidenceSnippet: 'function handler(): Result<Item[], ApiError> {\n  return ok(items);\n}',
+    evidenceLineStart: 14,
+    evidenceLineEnd: 20,
+    confidence: 0.78,
+  },
+  {
+    rule: 'Redis access goes through the src/lib/redis.ts singleton.',
+    category: 'structure' as const,
+    evidencePath: 'src/lib/redis.ts',
+    evidenceSnippet: 'export const redis = new Redis(config.redisUrl);',
+    evidenceLineStart: 1,
+    evidenceLineEnd: 9,
+    confidence: 0.85,
+  },
+];
 
 // CLI entrypoint
 if (import.meta.url === `file://${process.argv[1]}`) {

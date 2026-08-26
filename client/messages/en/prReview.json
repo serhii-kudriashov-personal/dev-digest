@@ -9,7 +9,12 @@
     "replyToAuthor": "Reply to author",
     "replyPlaceholder": "Reply to the author about this finding…",
     "sendReply": "Send reply",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "addToEvals": "Add to eval cases",
+    "addToEvalsDisabledReason": "Accept or dismiss this finding first",
+    "evalCaseCreated": "Added as an eval case: {name}",
+    "viewEvalCase": "View eval case",
+    "secretRetainedWarning": "This diff may contain a secret-shaped literal. It is stored as-is, never redacted."
   },
   "trifecta": {
     "lethal": "LETHAL TRIFECTA — ALL 3 PRESENT",
@@ -26,10 +31,26 @@
     "blockers": " · {count} blockers",
     "prScore": "PR SCORE"
   },
+  "findings": {
+    "none": "None",
+    "summary": "Findings breakdown",
+    "blockers": "{count, plural, one {# blocker} other {# blockers}}",
+    "popover": {
+      "heading": "{count, plural, one {# finding} other {# findings}}",
+      "loading": "Loading findings…",
+      "empty": "No findings to show."
+    }
+  },
   "panel": {
     "hideLowConfidence": "Hide low confidence",
     "noMatchTitle": "No findings match",
-    "noMatchBody": "Adjust the filters above, or run a review to generate findings."
+    "noMatchBody": "Adjust the filters above, or run a review to generate findings.",
+    "severityFilter": "Filter findings by severity",
+    "severity": {
+      "CRITICAL": "Critical",
+      "WARNING": "Warning",
+      "SUGGESTION": "Suggestion"
+    }
   },
   "runReview": {
     "runAll": "Run all enabled agents",
@@ -91,7 +112,9 @@
       "author": "Author",
       "size": "Size",
       "score": "Score",
+      "findings": "Findings",
       "status": "Status",
+      "cost": "Cost",
       "updated": "Updated"
     },
     "filesCount": "{count} files",
@@ -105,5 +128,9 @@
     "goToReview": "Jump to this run’s findings below",
     "openTrace": "Open run trace & logs",
     "deleteRun": "Delete run"
+  },
+  "brief": {
+    "title": "PR Brief",
+    "viewRun": "View run details"
   }
 }

@@ -8,8 +8,9 @@ import type {
   Provider,
   ReviewStrategy,
 } from '@devdigest/shared';
+import { StoredAgentVersionConfig } from '@devdigest/shared';
 import { AgentsRepository } from './repository.js';
-import { toAgentDto, toAgentVersionDto } from './helpers.js';
+import { toAgentDto, toAgentVersionDto, toAgentVersionDtoSafe } from './helpers.js';
 
 /**
  * A2 — agents service. Business logic for the Agents tab + Agent Editor.
@@ -55,9 +56,15 @@ export class AgentsService {
     this.repo = new AgentsRepository(container.db);
   }
 
+  /**
+   * All agents in the workspace, each carrying its linked-skill count for the
+   * card chip. `skills_count` is LIST-only (see the contract) — the counts come
+   * from one grouped query rather than a per-agent lookup.
+   */
   async list(workspaceId: string): Promise<Agent[]> {
     const rows = await this.repo.list(workspaceId);
-    return rows.map(toAgentDto);
+    const counts = await this.repo.skillCountsByAgent(workspaceId);
+    return rows.map((row) => ({ ...toAgentDto(row), skills_count: counts.get(row.id) ?? 0 }));
   }
 
   async get(workspaceId: string, id: string): Promise<Agent | undefined> {
@@ -117,7 +124,8 @@ export class AgentsService {
     const agent = await this.repo.getById(workspaceId, agentId);
     if (!agent) return undefined;
     const rows = await this.repo.listVersions(agentId);
-    return rows.map(toAgentVersionDto);
+    // Skip rather than throw: see `toAgentVersionDtoSafe`.
+    return rows.map(toAgentVersionDtoSafe).filter((v): v is AgentVersion => v !== null);
   }
 
   /**
@@ -133,6 +141,50 @@ export class AgentsService {
     if (!agent) return undefined;
     const row = await this.repo.getVersion(agentId, version);
     return row ? toAgentVersionDto(row) : undefined;
+  }
+
+  /**
+   * L06, SPEC-04 — AC-38, AC-39: promote a historical config snapshot
+   * forward. Reuses the existing immutable-snapshot convention already in
+   * `AgentsRepository.update()` (bumps `version`, writes a NEW
+   * `agent_versions` row) — no existing version row is touched and no run
+   * record changes. Returns `undefined` when the agent or that version isn't
+   * in this workspace (route → 404).
+   */
+  async promoteVersion(
+    workspaceId: string,
+    agentId: string,
+    version: number,
+  ): Promise<{ agent: Agent; promoted: boolean; version: number } | undefined> {
+    const before = await this.repo.getById(workspaceId, agentId);
+    if (!before) return undefined;
+
+    const snapshot = await this.repo.getVersion(agentId, version);
+    if (!snapshot) return undefined;
+    const stored = StoredAgentVersionConfig.parse(snapshot.configJson);
+
+    const row = await this.repo.update(workspaceId, agentId, {
+      provider: stored.provider,
+      model: stored.model,
+      systemPrompt: stored.system_prompt,
+      outputSchema: stored.output_schema,
+      strategy: stored.strategy ?? 'single-pass',
+      ciFailOn: stored.ci_fail_on ?? 'critical',
+      repoIntel: stored.repo_intel ?? true,
+    });
+    if (!row) return undefined;
+
+    // Restore the ordered skill set regardless of whether the config fields
+    // above actually changed — "promoted" must be genuinely equal to the
+    // historical version, including skill order (AC-39). `setSkills` bumps no
+    // version on its own (`isConfigChange` never looks at skills).
+    await this.repo.setSkills(agentId, stored.skills ?? []);
+
+    // A10: no new version was created when the promoted config already
+    // equalled the live one — `update()` only bumps `version` when
+    // `isConfigChange` reports a real change.
+    const promoted = row.version !== before.version;
+    return { agent: toAgentDto(row), promoted, version: row.version };
   }
 
   /** Linked skills for an agent as AgentSkillLink[] (ordered). */

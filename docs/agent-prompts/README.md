@@ -9,6 +9,14 @@ in the DB). The canonical, reviewable copies live next to this file:
 - [`general-reviewer.md`](./general-reviewer.md)
 - [`security-reviewer.md`](./security-reviewer.md)
 - [`performance-reviewer.md`](./performance-reviewer.md)
+- [`test-quality-reviewer.md`](./test-quality-reviewer.md) (L02)
+- [`api-contract-reviewer.md`](./api-contract-reviewer.md) (L02)
+
+> The two L02 prompts are deliberately GENERIC about what to examine. The specific
+> rubrics — which branches to count, what counts as a breaking change — live in the
+> **skills** those agents link, so attaching a skill visibly changes what the agent
+> catches. Moving a rubric into one of these prompts would defeat the L02 control
+> experiment (`docs/l02-experiment.md`).
 
 > The DB is the source of truth at run time. These files are the human-readable
 > originals — when you change a prompt, edit the file here **and** push it to the

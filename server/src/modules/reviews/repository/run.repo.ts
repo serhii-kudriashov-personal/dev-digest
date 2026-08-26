@@ -59,6 +59,7 @@ export async function listRunsForPull(
     duration_ms: run.durationMs,
     tokens_in: run.tokensIn,
     tokens_out: run.tokensOut,
+    cost_usd: run.costUsd,
     findings_count: run.findingsCount,
     grounding: run.grounding,
     ran_at: run.ranAt ? run.ranAt.toISOString() : null,
@@ -79,14 +80,19 @@ export async function deleteAgentRun(
   workspaceId: string,
   runId: string,
 ): Promise<boolean> {
-  await db
-    .delete(t.reviews)
-    .where(and(eq(t.reviews.runId, runId), eq(t.reviews.workspaceId, workspaceId)));
-  const rows = await db
-    .delete(t.agentRuns)
-    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.workspaceId, workspaceId)))
-    .returning({ id: t.agentRuns.id });
-  return rows.length > 0;
+  // Both deletes or neither: a failure between them would drop the review and
+  // its findings while leaving the run row in the timeline, which is the exact
+  // half-deleted state this function exists to avoid.
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(t.reviews)
+      .where(and(eq(t.reviews.runId, runId), eq(t.reviews.workspaceId, workspaceId)));
+    const rows = await tx
+      .delete(t.agentRuns)
+      .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.workspaceId, workspaceId)))
+      .returning({ id: t.agentRuns.id });
+    return rows.length > 0;
+  });
 }
 
 /** Mark a still-running run as cancelled (no-op if it already finished). */
@@ -146,6 +152,11 @@ export async function completeAgentRun(
     durationMs: number;
     tokensIn: number;
     tokensOut: number;
+    /**
+     * Attributed USD cost. Pass `null` (not 0) when unknown — a failed run that
+     * never billed anything is "—" in the UI, whereas 0 reads as "free".
+     */
+    costUsd?: number | null;
     findingsCount: number;
     grounding: string;
     /** Review score (0-100); null on failed/cancelled runs. */
@@ -163,6 +174,7 @@ export async function completeAgentRun(
       durationMs: values.durationMs,
       tokensIn: values.tokensIn,
       tokensOut: values.tokensOut,
+      costUsd: values.costUsd ?? null,
       findingsCount: values.findingsCount,
       grounding: values.grounding,
       score: values.score ?? null,
@@ -170,6 +182,25 @@ export async function completeAgentRun(
       error: values.error ?? null,
     })
     .where(eq(t.agentRuns.id, runId));
+}
+
+/**
+ * Record which skills this run injected, with the version and prompt order.
+ *
+ * The deterministic half of skill provenance — the executor knows exactly what it
+ * put in the prompt, so nothing here is inferred. Idempotent on (run_id, skill_id)
+ * so a retried write cannot duplicate a run's history.
+ */
+export async function saveRunSkills(
+  db: Db,
+  runId: string,
+  skills: { id: string; version: number; order: number }[],
+): Promise<void> {
+  if (skills.length === 0) return;
+  await db
+    .insert(t.runSkills)
+    .values(skills.map((s) => ({ runId, skillId: s.id, version: s.version, order: s.order })))
+    .onConflictDoNothing();
 }
 
 /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */

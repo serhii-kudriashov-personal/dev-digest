@@ -11,6 +11,19 @@ import { z } from 'zod';
 export const Severity = z.enum(['CRITICAL', 'WARNING', 'SUGGESTION']);
 export type Severity = z.infer<typeof Severity>;
 
+/**
+ * A tally of findings per severity. One definition for every aggregate that
+ * reports a breakdown — the PR list column, `AgentStats`, `AgentPerfRow`, and
+ * the server-side `rollupSeverities` helper. Keys match the `Severity` enum.
+ * See specs/findings-by-severity.md.
+ */
+export const SeverityCounts = z.object({
+  CRITICAL: z.number().int(),
+  WARNING: z.number().int(),
+  SUGGESTION: z.number().int(),
+});
+export type SeverityCounts = z.infer<typeof SeverityCounts>;
+
 export const FindingCategory = z.enum(['bug', 'security', 'perf', 'style', 'test']);
 export type FindingCategory = z.infer<typeof FindingCategory>;
 
@@ -59,6 +72,52 @@ export const Finding = z.object({
   // Lethal-trifecta variant fields (present only when kind === 'lethal_trifecta')
   trifecta_components: z.array(TrifectaComponent).nullish(),
   evidence: z.array(TrifectaEvidence).nullish(),
+  /**
+   * Skill attribution. This schema IS the LLM's structured-output contract
+   * (`reviewer-core` passes `Review` straight to `completeStructured`), so the
+   * `.describe()` below is the instruction the model actually reads — which is
+   * why the attribution needs no change to `prompt.ts` or `INJECTION_GUARD`.
+   *
+   * NULLISH, not nullable: `Finding` is embedded in `eval_cases.expected_output`
+   * and `eval_runs.actual_output`, both jsonb, where a missing key must parse.
+   *
+   * The value is UNVERIFIED on arrival. The server keeps it only when the slug
+   * names a skill that was really injected into that run, and stores NULL
+   * otherwise — see `resolveSkillAttribution`.
+   */
+  skill: z
+    .string()
+    .nullish()
+    .describe(
+      'The exact slug of the skill from the "## Skills / rules" section whose rule ' +
+        'this finding applies, copied verbatim. Set null when the finding came from ' +
+        'your own analysis rather than one of those listed skills. Never guess and ' +
+        'never invent a slug — an unrecognised value is discarded.',
+    ),
+  /**
+   * Scope label, relative to the derived PR intent (L03). Asked for through the
+   * schema for the same reason as `skill` above: this object IS the model's
+   * structured-output contract, so the `.describe()` is the instruction, and no
+   * edit to `prompt.ts` or `INJECTION_GUARD` is needed.
+   *
+   * NULLISH, not nullable — same jsonb reason as `skill`.
+   *
+   * A nullish ENUM is safe here: `kind` (`FindingKind.nullish()`, above) is
+   * already one and already ships inside the schema handed to
+   * `completeStructured`. It converts to `anyOf: [{enum}, {type: 'null'}]`.
+   *
+   * The label is METADATA. The suppression decision is made server-side by the
+   * deterministic `applyScopeGate`, never by the model withholding a finding.
+   */
+  scope: z
+    .enum(['in_scope', 'out_of_scope'])
+    .nullish()
+    .describe(
+      'Whether this finding falls inside the PR intent stated in the "## PR intent (derived)" ' +
+        'section. Set "out_of_scope" ONLY when the issue is unrelated to that stated scope. ' +
+        'Label honestly and NEVER omit or downgrade a finding because it is out of scope — ' +
+        'the label is metadata, not permission to withhold. Set null when no intent was given.',
+    ),
 });
 export type Finding = z.infer<typeof Finding>;
 

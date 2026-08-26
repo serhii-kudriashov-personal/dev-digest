@@ -12,7 +12,8 @@
     "metrics": {
       "recall": "RECALL",
       "precision": "PRECISION",
-      "citationAccuracy": "CITATION ACCURACY"
+      "citationAccuracy": "CITATION ACCURACY",
+      "tracesPassed": "TRACES PASSED"
     },
     "legend": {
       "recall": "Recall",
@@ -28,10 +29,44 @@
       "cost": "Cost"
     },
     "pass": "pass",
-    "fail": "fail"
+    "fail": "fail",
+    "unknown": "—",
+    "agentsHeading": "Agents",
+    "agentColumns": {
+      "agent": "Agent",
+      "cases": "Cases",
+      "lastRun": "Last run",
+      "recall": "Recall",
+      "precision": "Precision",
+      "citation": "Citation",
+      "passed": "Passed",
+      "direction": "Trend"
+    },
+    "neverRun": "never run",
+    "runAll": "Run all agents",
+    "runningAll": "Running all agents…",
+    "direction": {
+      "up": "improved",
+      "down": "declined",
+      "flat": "unchanged"
+    },
+    "recentRunsHeading": "Recent runs across agents",
+    "recentRunsColumns": {
+      "agent": "Agent",
+      "ranAt": "Ran at",
+      "version": "Version",
+      "recall": "Recall",
+      "precision": "Precision",
+      "citation": "Citation",
+      "passed": "Passed"
+    },
+    "noAgentsTitle": "No eval cases yet",
+    "noAgentsBody": "Open a finding on a reviewed pull request and choose “Add to eval cases” to create the first one.",
+    "incomplete": "incomplete",
+    "engineError": "The engine returned an error."
   },
   "caseEditor": {
-    "newCase": "New eval case",
+    "newCase": "+ New eval case",
     "caseTitle": "Eval case · {name}",
     "runCase": "Run case",
     "running": "Running…",
@@ -42,8 +77,10 @@
     "inputLabel": "Input",
     "tabs": {
       "diff": "Diff",
+      "files": "Files",
       "prMeta": "PR meta"
     },
+    "filesEmpty": "No files in the stored diff.",
     "diffPlaceholder": "--- a/src/config.ts\n+++ b/src/config.ts\n@@ -10,6 +10,7 @@\n+  stripeKey: \"sk_live_...\"",
     "titleLabel": "Title",
     "titlePlaceholder": "Add Stripe integration",
@@ -55,13 +92,24 @@
     "invalidJson": "invalid JSON",
     "lastRunPassed": "Last run passed",
     "lastRunFailed": "Last run failed",
-    "resultSummary": "recall {recall}% · precision {precision}% · citation {citation}% · {duration}s"
+    "lastRunNever": "Never run",
+    "resultSummary": "recall {recall}% · precision {precision}% · citation {citation}% · {duration}s",
+    "expectation": {
+      "mustFind": "Must find",
+      "mustNotFlag": "Must not flag"
+    },
+    "needsRepair": "Needs repair — no expectation set",
+    "runOnSave": "Run automatically on save",
+    "capDiffBytes": "Diff is {actual} bytes; the limit is {cap} bytes.",
+    "capExpectations": "Expected output holds {actual} entries; the limit is {cap}.",
+    "capCases": "This agent already has the maximum of {cap} eval cases.",
+    "saveError": "Could not save this case."
   },
   "evalsTab": {
     "metricsTitle": "Eval metrics",
     "metricsSubtitle": "Recall / Precision / Citation for this agent's eval cases",
     "casesHeading": "Eval cases",
-    "newCase": "New case",
+    "newCase": "+ New eval case",
     "loadingCases": "Loading cases…",
     "emptyCases": "No eval cases yet. Create one to assert this agent's expected findings on a sample diff.",
     "neverRun": "never run",
@@ -71,7 +119,63 @@
     "run": "Run",
     "running": "Running…",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "unknown": "—",
+    "neverRunAgent": "This agent has never been run.",
+    "incomplete": "incomplete",
+    "incompleteTooltip": "One or more cases did not finish; this run's numbers cover only the cases that completed.",
+    "progress": "{done} of {total}",
+    "stop": "Stop",
+    "cancelling": "Stopping…",
+    "runSet": "Run all cases ({count})",
+    "runSetConfirmCostKnown": "Run {count, plural, one {# case} other {# cases}}? The previous run cost {cost}.",
+    "runSetConfirmCostUnknown": "Run {count, plural, one {# case} other {# cases}}? No previous cost is recorded.",
+    "confirmRunCta": "Run",
+    "cancelRunCta": "Cancel",
+    "historyHeading": "Run history",
+    "historyColumns": {
+      "ranAt": "Ran at",
+      "version": "Version",
+      "recall": "Recall",
+      "precision": "Precision",
+      "citation": "Citation",
+      "passed": "Passed",
+      "cost": "Cost",
+      "status": "Status"
+    },
+    "deltaPoints": "{delta}pt",
+    "compare": "Compare",
+    "compareNeedsTwo": "Select exactly two runs to compare.",
+    "compareTooMany": "Select exactly two runs to compare — {count} selected.",
+    "promote": "Promote this version",
+    "alreadyLive": "This version is already live.",
+    "promoted": "Promoted to the live configuration.",
+    "caseSetChanged": "The case set changed between these two runs.",
+    "modelChanged": "The model changed between these two runs.",
+    "notAttributable": "A metric change here may not be caused by the prompt alone.",
+    "closeCompare": "Close comparison",
+    "viewDetails": "View details",
+    "hideDetails": "Hide details",
+    "caseDetail": {
+      "loading": "Loading case detail…",
+      "empty": "No per-case detail recorded for this run.",
+      "notExecuted": "not executed",
+      "columns": {
+        "case": "Case",
+        "expectation": "Expectation",
+        "result": "Result",
+        "error": "Error"
+      }
+    }
+  },
+  "compare": {
+    "title": "Compare runs",
+    "before": "Before",
+    "after": "After",
+    "promptBefore": "System prompt (before)",
+    "promptAfter": "System prompt (after)",
+    "delta": "Δ",
+    "detailExpired": "Per-case detail has expired for one of these runs; only the recorded totals are shown."
   },
   "page": {
     "crumbSkillsLab": "Skills Lab",

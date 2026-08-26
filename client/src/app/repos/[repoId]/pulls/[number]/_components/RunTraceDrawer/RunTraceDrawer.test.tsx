@@ -47,6 +47,22 @@ describe("A5 Run Trace drawer (smoke)", () => {
     expect(screen.getByText("Tool calls")).toBeInTheDocument();
   });
 
+  it('shows "—" for a trace persisted before cost was recorded', () => {
+    // TRACE deliberately has no `cost_usd` key — that is the on-disk shape of
+    // every trace written before L01. It must render, not blow up or show $0.00.
+    renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />);
+    expect(screen.getByText("COST")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+  });
+
+  it("shows the cost when the trace carries one", () => {
+    TRACE.stats.cost_usd = 0.06;
+    renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />);
+    expect(screen.getByText("$0.060")).toBeInTheDocument();
+    delete TRACE.stats.cost_usd;
+  });
+
   it("switches to the live log tab", () => {
     renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />);
     fireEvent.click(screen.getByText("log"));

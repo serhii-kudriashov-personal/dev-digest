@@ -22,8 +22,11 @@ export const FEATURE_MODELS: FeatureModelDef[] = [
     id: "review_intent",
     label: "PR Review · Intent",
     description: "Derives a PR’s intent and scope before review.",
-    defaultProvider: "openai",
-    defaultModel: "gpt-4.1",
+    defaultProvider: "openrouter",
+    // The DATED snapshot, deliberately, not the `-latest` alias — see the
+    // matching comment in the shared registry. A different, cheaper model than
+    // the bare `deepseek/deepseek-v4-flash` above.
+    defaultModel: "deepseek/deepseek-v4-flash-0731",
   },
   {
     id: "risk_brief",

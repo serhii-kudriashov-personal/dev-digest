@@ -1,0 +1,45 @@
+# Shared-contract guard.
+#
+# `@devdigest/shared` is vendored TWICE — server/src/vendor/shared is the canon,
+# client/src/vendor/shared is a manual copy. Nothing forces them to agree: each
+# package typechecks in isolation, so both pass while the contracts diverge, and
+# the divergence only surfaces at runtime as a missing field.
+#
+# This job does not require the two trees to be identical (they already carry
+# ~120 lines of documented historical drift). It requires the drift not to GROW.
+# See scripts/check-shared-sync.sh for the mechanism and how to re-record.
+name: contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/src/vendor/shared/**'
+      - 'client/src/vendor/shared/**'
+      - 'scripts/check-shared-sync.sh'
+      - 'scripts/shared-sync.baseline'
+      - '.github/workflows/contracts.yml'
+  pull_request:
+    paths:
+      - 'server/src/vendor/shared/**'
+      - 'client/src/vendor/shared/**'
+      - 'scripts/check-shared-sync.sh'
+      - 'scripts/shared-sync.baseline'
+      - '.github/workflows/contracts.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared-sync:
+    name: shared contract drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No toolchain needed — the check is bash + diff.
+      - run: ./scripts/check-shared-sync.sh

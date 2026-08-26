@@ -6,11 +6,15 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 import { Icon, Badge } from "@devdigest/ui";
-import type { ReviewRecord, Verdict } from "@devdigest/shared";
+import type { ReviewRecord, Severity, Verdict } from "@devdigest/shared";
 import { FindingsPanel } from "../FindingsPanel";
+import { countBySeverity } from "../FindingsPanel/helpers";
 import { VerdictBanner } from "../VerdictBanner";
-import { useDeleteReview } from "../../../../../../../lib/hooks/reviews";
+import { FindingsHoverCard, SeverityBadges } from "@/components/findings-hover-card";
+import { useDeleteReview } from "@/lib/hooks/reviews";
+import { formatCost } from "@/lib/format";
 
 const VERDICT_COLOR: Record<string, string> = {
   request_changes: "var(--crit)",
@@ -27,20 +31,40 @@ export function ReviewRunAccordion({
   review,
   prId,
   defaultOpen = false,
+  costUsd = null,
   repoFullName,
   headSha,
   targetRunId = null,
   targetNonce = 0,
+  targetFindingId = null,
+  targetFindingNonce = 0,
+  severities = [],
+  onToggleSeverity,
 }: {
   review: ReviewRecord;
   prId: string;
   defaultOpen?: boolean;
+  /** Cost of the agent_run behind this review (joined by run_id upstream);
+   *  null when unknown — renders "—". */
+  costUsd?: number | null;
   repoFullName?: string | null;
   headSha?: string | null;
   /** When this matches review.run_id, the accordion opens and scrolls into view
    *  (driven from the Timeline: clicking an agent name navigates here). */
   targetRunId?: string | null;
   targetNonce?: number;
+  /**
+   * A finding to navigate to, from `?finding=<id>` (a severity chip in the diff
+   * opens the page in a new browser tab pointed at it). Only the run that
+   * actually produced it reacts; the rest ignore it. This accordion only OPENS —
+   * the scrolling is `FindingsPanel`'s, which knows where the card is, and two
+   * smooth scrolls racing each other look broken.
+   */
+  targetFindingId?: string | null;
+  targetFindingNonce?: number;
+  /** Page-wide severity selection (`?severity=`); the counts stay per-run. */
+  severities?: Severity[];
+  onToggleSeverity?: (sev: Severity) => void;
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -49,11 +73,20 @@ export function ReviewRunAccordion({
       setOpen(true);
       rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetRunId, targetNonce, review.run_id]);
+  const t = useTranslations("prReview");
   const del = useDeleteReview(prId);
   const findings = review.findings;
+  const holdsTargetFinding =
+    targetFindingId != null && findings.some((f) => f.id === targetFindingId);
+  React.useEffect(() => {
+    if (holdsTargetFinding) setOpen(true);
+  }, [holdsTargetFinding, targetFindingNonce]);
   const blockers = findings.filter((f) => f.severity === "CRITICAL" && !f.dismissed_at).length;
+  // The header's breakdown counts everything this run found, dismissed included
+  // — same rule as the PR list column. `blockers` deliberately does not (it
+  // drives the verdict), which is why both are shown.
+  const counts = React.useMemo(() => countBySeverity(findings), [findings]);
   const verdictColor = review.verdict ? VERDICT_COLOR[review.verdict] ?? "var(--text-muted)" : "var(--text-muted)";
 
   return (
@@ -93,16 +126,34 @@ export function ReviewRunAccordion({
             {review.verdict.replace("_", " ")}
           </Badge>
         )}
-        <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-          {findings.length} finding{findings.length === 1 ? "" : "s"}
-          {blockers > 0 ? ` · ${blockers} blocker${blockers === 1 ? "" : "s"}` : ""}
-        </span>
+        {/* The findings this run produced, read the same way as in the PR list:
+            one badge per severity, and a hover card listing them. Unlike the
+            list, the findings are already in memory, so nothing is fetched. */}
+        <FindingsHoverCard
+          findings={findings}
+          total={findings.length}
+          disabled={findings.length === 0}
+          anchorStyle={{ gap: 6, alignSelf: "center" }}
+        >
+          <SeverityBadges
+            counts={counts}
+            noneStyle={{ fontSize: 12.5, color: "var(--text-muted)" }}
+          />
+        </FindingsHoverCard>
+        {blockers > 0 && (
+          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+            {t("findings.blockers", { count: blockers })}
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         {review.score != null && (
           <Badge mono color="var(--text-secondary)">
             {review.score}
           </Badge>
         )}
+        <span className="mono tnum" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          {formatCost(costUsd)}
+        </span>
         <span className="mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
           {formatWhen(review.created_at)}
         </span>
@@ -152,6 +203,10 @@ export function ReviewRunAccordion({
             prId={prId}
             repoFullName={repoFullName}
             headSha={headSha}
+            severities={severities}
+            onToggleSeverity={onToggleSeverity}
+            targetFindingId={holdsTargetFinding ? targetFindingId : null}
+            targetFindingNonce={targetFindingNonce}
           />
         </div>
       )}

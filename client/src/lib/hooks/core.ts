@@ -1,6 +1,6 @@
 /* hooks/core.ts — typed React Query hooks over the F1 API (contracts):
-   settings, secrets, repos, pulls, and project context. Scaffolding screens use
-   these; feature-domain hooks live in the sibling files (agents/reviews/trace/…)
+   settings, secrets, repos and pulls. Scaffolding screens use these;
+   feature-domain hooks live in the sibling files (agents/reviews/trace/context/…)
    and are re-exported alongside these from hooks/index.ts. */
 "use client";
 
@@ -15,8 +15,6 @@ import type {
   Repo,
   PrMeta,
   PrDetail,
-  SpecFile,
-  IndexStatus,
 } from "../types";
 
 // ---- Settings (F1: GET/PUT /settings, POST /settings/test-connection) ----
@@ -119,19 +117,7 @@ export function usePullDetail(prId: string | number | null | undefined) {
   });
 }
 
-// ---- Project Context (A3 contract; safe to call once API exposes it) ----
-export function useContextFiles(repoId: string | null | undefined) {
-  return useQuery({
-    queryKey: ["context", repoId],
-    queryFn: () => api.get<SpecFile[]>(`/repos/${repoId}/context`),
-    enabled: !!repoId,
-  });
-}
-
-export function useReindexContext() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (repoId: string) => api.post<IndexStatus>(`/repos/${repoId}/context/reindex`),
-    onSuccess: (_d, repoId) => qc.invalidateQueries({ queryKey: ["context", repoId] }),
-  });
-}
+// Project Context lives in hooks/context.ts. The two scaffolding hooks that used
+// to sit here are gone: the listing has a different response shape now, and the
+// re-index mutation had no endpoint to call — there is no Markdown index to
+// rebuild, so the refresh is a re-scan of the mirror.

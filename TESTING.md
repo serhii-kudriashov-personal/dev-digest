@@ -1,9 +1,10 @@
 # Testing & CI strategy
 
-DevDigest is four independent packages (no workspace), so testing is organised
+DevDigest is five independent packages (no workspace), so testing is organised
 as **one suite per package**, each with its own CI workflow, runner, and path
 filter. A package's suite runs only when that package (or a package it depends
-on at type-check time) changes.
+on at type-check time) changes. The one exception is `mcp/`, which has a suite
+but no workflow yet — run it by hand (see §Suite map).
 
 ## Philosophy — typological, not exhaustive
 
@@ -31,6 +32,7 @@ If a test wouldn't catch a class of regression we care about, we don't write it.
 | server-integration | `server/` | integration (real Postgres) | vitest | `server-integration.yml` | **yes** |
 | reviewer-core | `reviewer-core/` | unit (engine) | vitest | `reviewer-core.yml` | no |
 | e2e web | `e2e/` | browser e2e (deterministic) | agent-browser + `run.ts` | `e2e-web.yml` | yes (stack) |
+| mcp | `mcp/` | unit (hermetic) | vitest | — none yet, run `cd mcp && pnpm test` by hand | no |
 
 ## What each suite covers
 
@@ -51,6 +53,13 @@ Docker is unavailable.
 
 **reviewer-core** — the pure engine: `toReview` selection, prompt construction,
 and a `run` with a stubbed model → grounded findings. No DB / GitHub / FS.
+
+**mcp** — the stdio MCP server: tool definitions, response shaping, and the
+blocking-run deadline, against stubs and a local fake HTTP server. No DB, no
+key, no real network — so nothing here is `*.it.test.ts`. Nothing runs it
+automatically yet (no workflow, and `scripts/pr-self-review.sh` does not select
+an `mcp` gate), so run `cd mcp && pnpm typecheck && pnpm test` by hand before
+opening a PR that touches `mcp/**`.
 
 **e2e web** — see `e2e/README.md`. Deterministic agent-browser flows over the
 main journeys (boot → PR list → PR detail; agents) against a real seeded stack.

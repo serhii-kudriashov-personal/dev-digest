@@ -46,4 +46,9 @@ jobs:
 
       - run: pnpm typecheck
 
+      # Architecture gate — module boundaries and hook rules
+      # (see .claude/skills/frontend-ui-architecture/SKILL.md §3).
+      # Warnings are tolerated; only `error`-level rules fail the build.
+      - run: pnpm lint
+
       - run: pnpm test

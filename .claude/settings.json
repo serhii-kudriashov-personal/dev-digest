@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/pr-self-review.sh state)",
+      "Bash(./scripts/pr-self-review.sh files)",
+      "Bash(./scripts/pr-self-review.sh gates)"
+    ]
+  }
+}

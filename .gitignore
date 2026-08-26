@@ -17,6 +17,13 @@ coverage/
 .pnpm-store/
 *.log
 .devdigest/cache/
+# pr-self-review verdict + gate logs — local state, and excluded from the tree
+# hash the gate verifies (scripts/pr-self-review.sh)
+.devdigest/pr-self-review.json
+.devdigest/pr-self-review-logs/
+# /impl run state — one file per run, so the loop survives a context compaction
+# or a /clear. Same directory for the same reason: excluded from that tree hash.
+.devdigest/impl/
 clones/
 playwright-report/
 test-results/

@@ -34,11 +34,23 @@
       "memoryPulled": "Memory pulled",
       "specsRead": "Specs read",
       "items": "{count, plural, one {# item} other {# items}}",
-      "none": "none"
+      "none": "none",
+      "notRecorded": "not recorded",
+      "skipped": "Documents skipped",
+      "skippedEntry": "{path} — {reason}",
+      "skipReason": {
+        "missing": "no longer in the mirror",
+        "unreadable": "could not be read",
+        "out_of_bounds": "path outside the repository",
+        "over_limit": "past the per-agent document limit",
+        "deadline": "read budget spent",
+        "not_markdown": "not a Markdown document"
+      }
     },
     "stat": {
       "duration": "DURATION",
       "tokens": "TOKENS",
+      "cost": "COST",
       "findings": "FINDINGS"
     },
     "prompt": {
@@ -49,6 +61,7 @@
       "specs": "Project context (dynamic)",
       "callers": "Callers of changed symbols — repo-intel (dynamic)",
       "user": "User / diff (dynamic)",
+      "tokens": "{count, number} tok",
       "copy": "Copy",
       "fullscreen": "Open fullscreen",
       "search": "Search in this block…",

@@ -15,12 +15,59 @@
       "body": "Scan the repo to surface house-rules — naming, error handling, structure — each backed by evidence you can turn into a Skill.",
       "cta": "Run extraction"
     },
-    "candidateCount": "{count, plural, one {# candidate} other {# candidates}} · grounded against sampled files"
+    "candidateCount": "{count, plural, one {# candidate} other {# candidates}} · grounded against sampled files",
+    "scanMeta": "Detected from {files, plural, one {# sample file} other {# sample files}} · last scan {age}",
+    "scanDropped": " · {count, plural, one {# unproven claim discarded} other {# unproven claims discarded}}",
+    "age": {
+      "justNow": "just now",
+      "minutes": "{count}m ago",
+      "hours": "{count}h ago",
+      "days": "{count}d ago"
+    },
+    "acceptedCount": "{accepted} of {total} accepted",
+    "deselectAll": "Deselect all",
+    "createSkill": "Create skill"
   },
   "card": {
     "confidence": "Confidence",
+    "accept": "Accept",
     "accepted": "Accepted",
-    "accepting": "Accepting…",
-    "acceptAsSkill": "Accept as Skill"
+    "reject": "Reject",
+    "rejected": "Rejected",
+    "edit": "Edit rule",
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "copySnippet": "Copy snippet",
+    "category": {
+      "naming": "naming",
+      "error-handling": "error handling",
+      "structure": "structure",
+      "testing": "testing",
+      "api-shape": "API shape",
+      "tooling": "tooling",
+      "other": "other"
+    }
+  },
+  "modal": {
+    "title": "Create skill from conventions",
+    "mergedFrom": "Merged from {count, plural, one {# accepted convention} other {# accepted conventions}} in {repo}. Everything below is editable before you save.",
+    "draftFailed": "Could not build the draft.",
+    "nameLabel": "Name",
+    "descriptionLabel": "Description",
+    "typeLabel": "Type",
+    "enabledLabel": "Enabled",
+    "enabledHint": "Whether this block is added to agents' prompts.",
+    "attachLabel": "Attach to agent",
+    "attachHint": "A skill only reaches a review through an agent that links it. Unlinked, it has no effect.",
+    "attachNone": "Don't attach yet",
+    "bodyLabel": "Skill body",
+    "bodyHint": "Added to the agent's prompt as instructions. Each rule states its own severity so it cannot flip the verdict.",
+    "cancel": "Cancel",
+    "create": "Create skill",
+    "creating": "Creating…",
+    "createdToast": "Skill created and attached to {agent}.",
+    "createdUnlinkedToast": "Skill created. Attach it to an agent to use it in reviews.",
+    "linkFailedToast": "Skill created, but attaching it to {agent} failed. Link it from the agent's Skills tab."
   }
 }

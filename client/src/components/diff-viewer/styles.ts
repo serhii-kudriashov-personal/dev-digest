@@ -1,4 +1,6 @@
 import type { CSSProperties } from "react";
+import type { Severity } from "@devdigest/shared";
+import { SEVERITY_BORDER_COLOR } from "./constants";
 import type { Line } from "./helpers";
 
 /** Co-located styles for the DiffViewer (extracted from inline styles). */
@@ -64,7 +66,42 @@ export const s = {
     color: "var(--text-primary)",
     paddingRight: 12,
   } satisfies CSSProperties,
+  /** Right-aligned rail holding a line's severity chips. */
+  lineFindings: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    paddingRight: 12,
+    flexShrink: 0,
+  } satisfies CSSProperties,
+  /** A chip that is also a control — the badge inside supplies the visuals. */
+  findingChipBtn: {
+    background: "none",
+    borderStyle: "none",
+    padding: 0,
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+  } satisfies CSSProperties,
 } as const;
+
+/**
+ * Tint a line's left border by the severity covering it.
+ *
+ * All-longhand on purpose: `borderColor` and `borderWidth` are shorthands that
+ * expand to four sides each, so setting either alongside a `borderLeft*`
+ * longhand is exactly the collision React warns about
+ * (`client/INSIGHTS.md` 2026-08-02).
+ */
+export function findingRowFor(row: CSSProperties, severity: Severity | null): CSSProperties {
+  if (!severity) return row;
+  return {
+    ...row,
+    borderLeftStyle: "solid",
+    borderLeftWidth: 3,
+    borderLeftColor: SEVERITY_BORDER_COLOR[severity],
+  };
+}
 
 /** Chevron rotates 90deg when the file card is open. */
 export function chevronFor(open: boolean): CSSProperties {

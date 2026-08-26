@@ -1,0 +1,28 @@
+{
+  "name": "@devdigest/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DevDigest MCP server (stdio) — exposes five fixed tools over the local DevDigest API. Thin HTTP client: no DB, no server/src imports.",
+  "scripts": {
+    "shared-dts": "tsc -p tsconfig.shared-dts.json",
+    "dev": "pnpm run shared-dts && tsx watch src/index.ts",
+    "build": "pnpm run shared-dts && tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "pnpm run shared-dts && tsc --noEmit -p tsconfig.json",
+    "test": "pnpm run shared-dts && vitest run",
+    "inspect": "pnpm run build && mcp-inspector node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "^2.1.0",
+    "@types/node": "^22.10.0",
+    "js-tiktoken": "^1.0.21",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "zod": "^3.24.1"
+  }
+}

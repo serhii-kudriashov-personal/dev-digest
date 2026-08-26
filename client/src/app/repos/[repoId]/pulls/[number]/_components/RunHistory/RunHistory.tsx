@@ -3,7 +3,10 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Icon, CircularScore, type IconName } from "@devdigest/ui";
-import type { RunSummary, PrCommit } from "@devdigest/shared";
+import type { RunSummary, PrCommit, FindingRecord } from "@devdigest/shared";
+import { FindingsHoverCard, SeverityBadges } from "@/components/findings-hover-card";
+import { countBySeverity } from "../FindingsPanel/helpers";
+import { formatCost, formatTokenCount } from "@/lib/format";
 
 /**
  * PR timeline — every agent run interleaved with the PR's commits, newest-first
@@ -87,12 +90,18 @@ function tsOf(s: string | null | undefined): number {
 export function RunHistory({
   runs,
   commits = [],
+  findingsByRun,
   onOpenTrace,
   onGoToReview,
   onDelete,
 }: {
   runs: RunSummary[];
   commits?: PrCommit[];
+  /** This PR's findings indexed by run, for the per-severity badges and their
+   *  hover card. `RunSummary` carries only a total, so the breakdown is joined
+   *  on the client (see FindingsTab). A run missing from the map keeps the
+   *  plain-text count. */
+  findingsByRun?: Map<string, FindingRecord[]>;
   /** Open the trace + log drawer for a run (the logs icon). */
   onOpenTrace: (runId: string) => void;
   /** Jump to this run's inline review accordion below (clicking the agent name). */
@@ -149,6 +158,7 @@ export function RunHistory({
         const r = item.run;
         const o = outcomeOf(r);
         const settled = r.status === "done";
+        const runFindings = findingsByRun?.get(r.run_id);
         return (
           <div key={`run:${r.run_id}`} style={rowStyle}>
             <Badge color={o.color} bg={o.bg} icon={o.icon}>
@@ -188,15 +198,48 @@ export function RunHistory({
                   {r.error}
                 </div>
               )}
-              {settled && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {t("runStatus.findings", { count: r.findings_count ?? 0 })}
-                  {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
-                </div>
-              )}
+              {settled &&
+                (runFindings ? (
+                  // Same reading as the PR list and the run header: a badge per
+                  // severity, hover for the findings themselves. Nothing is
+                  // fetched — these came off the reviews already on this page.
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <FindingsHoverCard
+                      findings={runFindings}
+                      total={runFindings.length}
+                      disabled={runFindings.length === 0}
+                      anchorStyle={{ gap: 6, alignSelf: "center" }}
+                    >
+                      <SeverityBadges
+                        counts={countBySeverity(runFindings)}
+                        noneStyle={{ fontSize: 12, color: "var(--text-muted)" }}
+                      />
+                    </FindingsHoverCard>
+                    {(r.blockers ?? 0) > 0 && (
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        {t("runStatus.blockers", { count: r.blockers ?? 0 })}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  // No review row for this run — its review was deleted, or the
+                  // caller passed no map. The run's own denormalized count is
+                  // all there is, and it is still true.
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    {t("runStatus.findings", { count: r.findings_count ?? 0 })}
+                    {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
+                  </div>
+                ))}
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
               {r.ran_at && <span>{new Date(r.ran_at).toLocaleTimeString()}</span>}
+              {settled && (
+                <span className="tnum" style={{ whiteSpace: "nowrap" }}>
+                  {[formatTokenCount(r.tokens_in), formatCost(r.cost_usd)]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              )}
             </div>
             <button
               type="button"

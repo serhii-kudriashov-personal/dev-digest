@@ -31,7 +31,11 @@ import type {
   AuthWorkspace,
   SecretsProvider,
   SecretKey,
+  ContextListing,
+  ContextDocContent,
+  ContextAttachment,
 } from '@devdigest/shared';
+import type { ProjectContext, ResolvedRunContext } from '../modules/context/types.js';
 import { parseUnifiedDiff } from './git/diff-parser.js';
 
 /**
@@ -46,9 +50,10 @@ export interface MockLLMOptions {
   /** Fixture returned by completeStructured (validated against the schema). */
   structured?: unknown;
   /**
-   * Per-schemaName fixtures for multi-call flows (e.g. the conventions 2-step
-   * dialogue: 'ConventionFileSelection' then 'ConventionExtraction'). Looked up
-   * by req.schemaName; falls back to `structured` when no entry matches.
+   * Per-schemaName fixtures, looked up by `req.schemaName`; falls back to
+   * `structured` when no entry matches. Useful for keying a fixture to one call in
+   * a flow that makes several, and for naming the schema under test explicitly —
+   * e.g. 'ConventionExtraction' in the conventions tests.
    */
   structuredBySchema?: Record<string, unknown>;
   completionText?: string;
@@ -326,5 +331,62 @@ export class MockSecretsProvider implements SecretsProvider {
   constructor(private secrets: Partial<Record<string, string>> = {}) {}
   async get(key: SecretKey): Promise<string | undefined> {
     return this.secrets[key as string];
+  }
+}
+
+// ---------- Mock ProjectContext (SPEC-01) ----------
+/**
+ * The project-context facade with no filesystem and no database, so ring-2 and
+ * ring-5 tests can exercise the listing states, the attachment lists and the
+ * run-time injection hermetically. Every option defaults to the empty answer,
+ * which is also the "feature attached to nothing" path a pre-SPEC-01 run takes.
+ *
+ * It mirrors the real degraded contract: `resolveForRun` never throws.
+ */
+export interface MockProjectContextOptions {
+  listing?: ContextListing;
+  /** Keyed by path — anything absent reads as an unknown document. */
+  docs?: Record<string, string>;
+  agentDocs?: ContextAttachment[];
+  skillDocs?: ContextAttachment[];
+  run?: ResolvedRunContext;
+}
+
+export class MockProjectContext implements ProjectContext {
+  constructor(private opts: MockProjectContextOptions = {}) {}
+
+  async list(): Promise<ContextListing> {
+    return this.opts.listing ?? { state: 'not_synced' };
+  }
+  async read(_ws: string, _repoId: string, path: string): Promise<ContextDocContent | null> {
+    const content = this.opts.docs?.[path];
+    if (content === undefined) return null;
+    return { path, content, truncated: false };
+  }
+  async setRoots(_ws: string, _repoId: string, roots: string[]): Promise<string[] | null> {
+    return roots;
+  }
+  async agentDocs(): Promise<ContextAttachment[] | null> {
+    return this.opts.agentDocs ?? [];
+  }
+  async skillDocs(): Promise<ContextAttachment[] | null> {
+    return this.opts.skillDocs ?? [];
+  }
+  async replaceAgentDocs(
+    _ws: string,
+    _agentId: string,
+    paths: string[],
+  ): Promise<ContextAttachment[] | null> {
+    return paths.map((path, order) => ({ path, order, missing: false }));
+  }
+  async replaceSkillDocs(
+    _ws: string,
+    _skillId: string,
+    paths: string[],
+  ): Promise<ContextAttachment[] | null> {
+    return paths.map((path, order) => ({ path, order, missing: false }));
+  }
+  async resolveForRun(): Promise<ResolvedRunContext> {
+    return this.opts.run ?? { texts: [], read: [], skipped: [] };
   }
 }

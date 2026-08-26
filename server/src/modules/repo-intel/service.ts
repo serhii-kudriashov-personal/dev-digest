@@ -311,6 +311,12 @@ export class RepoIntelService implements RepoIntel {
    * Callers are PRECISE: only references whose `decl_file` resolved to a changed
    * file count. That favours precision over recall — an ambiguous
    * (NULL decl_file) reference is not asserted as a caller.
+   *
+   * `MAX_CALLERS_PER_SYMBOL` is applied **per changed symbol**, matching the
+   * constant's name — not to the flattened list. A combined cap would hand later
+   * symbols zero callers, which a consumer cannot tell apart from "this symbol
+   * has no callers". So the returned `callers` array is bounded by
+   * `MAX_CALLERS_PER_SYMBOL × changedSymbols.length`, not by 20.
    */
   private async tryPersistentBlast(
     repoId: string,
@@ -369,7 +375,23 @@ export class RepoIntelService implements RepoIntel {
         rank: c.rank,
       });
     }
-    callers.sort((a, b) => b.rank - a.rank);
+    // A TOTAL order, so the clamp below is reproducible. `rank` alone is not
+    // enough: every rank is 0 whenever the hotness-free PageRank collapses, and
+    // symmetric files tie exactly.
+    callers.sort(
+      (a, b) => b.rank - a.rank || a.file.localeCompare(b.file) || a.line - b.line,
+    );
+
+    // Clamp PER changed symbol (see the docblock), preserving the rank-descending
+    // order the sort above established.
+    const keptPerSymbol = new Map<string, number>();
+    const clampedCallers: BlastCallerRow[] = [];
+    for (const c of callers) {
+      const kept = keptPerSymbol.get(c.viaSymbol) ?? 0;
+      if (kept >= MAX_CALLERS_PER_SYMBOL) continue;
+      keptPerSymbol.set(c.viaSymbol, kept + 1);
+      clampedCallers.push(c);
+    }
 
     // Precomputed facts per caller file (endpoints + crons), so consumers can
     // attribute them to the changed symbol whose callers live in that file.
@@ -383,7 +405,7 @@ export class RepoIntelService implements RepoIntel {
 
     return {
       changedSymbols,
-      callers: callers.slice(0, MAX_CALLERS_PER_SYMBOL),
+      callers: clampedCallers,
       impactedEndpoints: [...endpoints],
       factsByFile,
       degraded: false,

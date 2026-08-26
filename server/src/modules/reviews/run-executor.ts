@@ -6,7 +6,13 @@ import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
 import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './repository.js';
 import { REVIEW_STRATEGY } from './constants.js';
-import { taskLine } from './helpers.js';
+import {
+  labelSkillBodies,
+  promptTokenCounts,
+  resolveSkillAttribution,
+  taskLine,
+  type InjectedSkill,
+} from './helpers.js';
 import { loadDiff } from './diff-loader.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
@@ -80,6 +86,9 @@ export class ReviewRunExecutor {
             durationMs: 0,
             tokensIn: 0,
             tokensOut: 0,
+            // null, not 0 — pre-work died before any LLM call, so the cost is
+            // UNKNOWN rather than zero. The UI renders "—" for null.
+            costUsd: null,
             findingsCount: 0,
             grounding: '0/0 passed',
             error: msg,
@@ -104,6 +113,38 @@ export class ReviewRunExecutor {
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
+    // Derived PR intent (L03) — shared pre-work, done ONCE for every queued
+    // agent. Best-effort in the same shape as the callers digest: a `null` here
+    // simply means the prompt below stays byte-identical to a pre-L03 one.
+    //
+    // The `.catch` is NOT redundant with the facade's never-throw contract, and
+    // it is not belt-and-braces. Unlike the diff load above, this step sits
+    // OUTSIDE the try/catch that calls `failAll`, and `executeRuns` runs in the
+    // background un-awaited by the route — so a throw escaping here would be an
+    // unhandled rejection that leaves every queued run with no status and no
+    // trace. It is a containment boundary, not a duplicate guarantee.
+    //
+    // Because it would also mask a regression in `ensure`, the contract is
+    // enforced where it belongs: a direct test that the service returns `null`
+    // on each failure path, rather than relying on this call site to notice.
+    const intent = await runLog.step(
+      'Deriving PR intent',
+      () =>
+        this.container.intent
+          .ensure(workspaceId, pull.id, { sink: { info: (m) => runLog.info(m) } })
+          .catch(() => null),
+      { kind: 'tool' },
+    );
+    if (intent) {
+      runLog.info(
+        `Intent: ${intent.record.confidence ?? 'unknown'} confidence` +
+          (intent.stale ? ' (STALE — the PR moved since it was derived)' : ''),
+      );
+    } else {
+      runLog.info('No PR intent available — reviewing without it');
+    }
+    const intentBlock = intent?.promptBlock ?? null;
+
     for (const { agent, runId } of jobs) {
       const agentStart = Date.now();
       logger?.info(
@@ -111,7 +152,16 @@ export class ReviewRunExecutor {
         `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
       );
       try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog);
+        const outcome = await this.runOneAgent(
+          workspaceId,
+          pull,
+          repo,
+          diff,
+          agent,
+          runId,
+          runLog,
+          intentBlock,
+        );
         logger?.info(
           {
             runId,
@@ -143,6 +193,8 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     runId: string,
     parentLog: RunLogger,
+    /** Pre-rendered `## PR intent (derived)` block, or null when none. */
+    intentBlock: string | null,
   ): Promise<RunOutcome> {
     const start = Date.now();
     // Narrow the fanned-out pre-work logger to THIS run; the shared diff/intent
@@ -183,6 +235,55 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote;
 
+      // Skills linked to this agent, in `agent_skills.order` — that order is the
+      // order of the blocks in the prompt, which is why the editor lets the user
+      // drag it. `skills.enabled` is the gate: a disabled skill stays linked and
+      // keeps its position but contributes nothing to the prompt.
+      const linkedSkills = await this.container.agentsRepo.linkedSkills(agent.id);
+      const injectedSkills: InjectedSkill[] = linkedSkills
+        .filter((l) => l.skill.enabled)
+        .map((l) => ({
+          id: l.skill.id,
+          name: l.skill.name,
+          version: l.skill.version,
+          order: l.order,
+          body: l.skill.body,
+        }));
+      // Each body is labelled with its slug so the model has something to cite in
+      // `Finding.skill`; the slug is validated against THIS list after the run.
+      const skillBodies = labelSkillBodies(injectedSkills);
+      if (linkedSkills.length > 0) {
+        runLog.info(
+          `Skills: ${injectedSkills.length} of ${linkedSkills.length} linked skill(s) enabled`,
+        );
+      }
+      // Project context (SPEC-01) — the agent's attached Markdown, plus what it
+      // inherits from its enabled skills, read from the mirror right now. The
+      // facade NEVER throws, so this needs no guard: a repository with no
+      // mirror, a deleted file or a blown read budget all come back as `skipped`
+      // entries and the review proceeds without them (NFR-3).
+      //
+      // Cross-slice access goes through the container, never an import — a
+      // `modules/context/*` import from here would fire `no-cross-slice-import`.
+      const projectContext = await this.container.projectContext.resolveForRun(
+        agent.id,
+        pull.repoId,
+      );
+      if (projectContext.read.length > 0 || projectContext.skipped.length > 0) {
+        // Counts only. A document's TEXT never reaches a log line (AC-41).
+        runLog.info(
+          `Project context: ${projectContext.read.length} document(s) read, ` +
+            `${projectContext.skipped.length} skipped`,
+        );
+      }
+
+      // Written before the LLM call so a run that fails mid-review still records
+      // what it was given — that is the input to the review, not its outcome.
+      await this.repo.saveRunSkills(
+        runId,
+        injectedSkills.map((s) => ({ id: s.id, version: s.version, order: s.order })),
+      );
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -203,6 +304,19 @@ export class ReviewRunExecutor {
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
+        // Same omit-when-empty contract as callers/repoMap above: with no
+        // enabled skills the assembled prompt is byte-identical to a pre-L02 run.
+        ...(skillBodies.length > 0 ? { skills: skillBodies } : {}),
+        // SPEC-01 — project-context documents, on the SAME omit-when-empty
+        // contract. This one spread is the entire injection change: the engine
+        // already routes `specs` into `## Project context` and already wraps
+        // each document `wrapUntrusted('spec-N', …)`, so with zero documents
+        // the assembled prompt is identical to a pre-SPEC-01 run (AC-31).
+        ...(projectContext.texts.length > 0 ? { specs: projectContext.texts } : {}),
+        // L03 — the derived intent, on the same contract: no intent means the
+        // section is omitted AND the engine's scope gate is a no-op, so the run
+        // is byte-identical to a pre-L03 one.
+        ...(intentBlock ? { intent: intentBlock } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
@@ -210,23 +324,57 @@ export class ReviewRunExecutor {
           if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();
         },
       });
-      const { tokensIn, tokensOut, grounding } = outcome;
+      const { tokensIn, tokensOut, costUsd, grounding } = outcome;
+
+      // A scope suppression is never silent: the engine already emitted a
+      // per-finding `info` event, and this is the run-level tally.
+      if (outcome.scopeDropped.length > 0) {
+        runLog.info(
+          `Scope gate suppressed ${outcome.scopeDropped.length} out-of-scope finding(s); ` +
+            'every CRITICAL is always kept',
+        );
+      }
 
       const keptFindings = outcome.review.findings;
 
+      // Skill attribution: the model names a slug per finding, and only a slug
+      // naming a skill actually injected into THIS run survives. Same discipline
+      // as grounding's citation gate — a self-reported field is checked against
+      // something the server knows, or it is not stored.
+      const attribution = resolveSkillAttribution(keptFindings, injectedSkills);
+      if (attribution.rejected.length > 0) {
+        // Logged rather than swallowed: a model that mis-attributes systematically
+        // must not look like a model that simply never attributes.
+        runLog.info(
+          `Skills: discarded ${attribution.rejected.length} attribution(s) naming a ` +
+            `skill not in this run's prompt (${[...new Set(attribution.rejected)].join(', ')})`,
+        );
+      }
+      if (injectedSkills.length > 0) {
+        const attributed = attribution.byIndex.filter(Boolean).length;
+        runLog.info(
+          `Skills: ${attributed}/${keptFindings.length} finding(s) attributed to a skill`,
+        );
+      }
+
       // ---- Persist review + findings ----------------------------------------
-      const review = await this.repo.insertReview({
-        workspaceId,
-        prId: pull.id,
-        agentId: agent.id,
-        runId,
-        kind: 'review',
-        verdict: outcome.review.verdict,
-        summary: outcome.review.summary,
-        score: outcome.review.score,
-        model: agent.model,
-      });
-      const findingRows = await this.repo.insertFindings(review.id, keptFindings);
+      // One transaction: a review persisted without its findings reads as a
+      // clean review, so the two must land together or not at all.
+      const { review, findingRows } = await this.repo.insertReviewWithFindings(
+        {
+          workspaceId,
+          prId: pull.id,
+          agentId: agent.id,
+          runId,
+          kind: 'review',
+          verdict: outcome.review.verdict,
+          summary: outcome.review.summary,
+          score: outcome.review.score,
+          model: agent.model,
+        },
+        keptFindings,
+        attribution.byIndex,
+      );
       runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
 
       // Mark the commit this review ran against so the PR list can tell
@@ -245,6 +393,7 @@ export class ReviewRunExecutor {
         durationMs,
         tokensIn,
         tokensOut,
+        costUsd,
         findingsCount: findingRows.length,
         grounding,
         score: outcome.review.score,
@@ -265,10 +414,18 @@ export class ReviewRunExecutor {
           duration_ms: durationMs,
           tokens_in: tokensIn,
           tokens_out: tokensOut,
+          cost_usd: costUsd,
           findings: findingRows.length,
           grounding,
         },
-        prompt_assembly: outcome.assembly,
+        // Per-section token attribution is added here rather than in the engine:
+        // `reviewer-core` is zero-I/O and must not depend on a tokenizer adapter.
+        prompt_assembly: {
+          ...outcome.assembly,
+          token_counts: promptTokenCounts(outcome.assembly, (text) =>
+            this.container.tokenizer.count(text),
+          ),
+        },
         tool_calls: outcome.chunks.map((c) => ({
           tool: 'review_file',
           args: c.label,
@@ -277,7 +434,14 @@ export class ReviewRunExecutor {
         })),
         raw_output: outcome.raw,
         memory_pulled: [],
-        specs_read: [],
+        // Both fields are written HERE, from one variable, and neither is ever
+        // written without the other: `specs_read` is the legacy required mirror
+        // and `project_context` is the field AC-38 actually reads. Written on
+        // EVERY successful run, including one that read nothing — that is what
+        // keeps "recorded nothing" (`{ read: [], skipped: [] }`) distinct from
+        // "never recorded" (the key absent, on every trace predating SPEC-01).
+        specs_read: projectContext.read,
+        project_context: { read: projectContext.read, skipped: projectContext.skipped },
         // Persisted log = the run's FULL event buffer (incl. shared pre-work:
         // diff load + intent), not just events recorded inside this method.
         log: runLog.logFor(runId),
@@ -300,6 +464,8 @@ export class ReviewRunExecutor {
           durationMs: Date.now() - start,
           tokensIn: 0,
           tokensOut: 0,
+          // See failAll above: unknown cost is null, never 0.
+          costUsd: null,
           findingsCount: 0,
           grounding: '0/0 passed',
           error: msg,
@@ -421,12 +587,23 @@ export class ReviewRunExecutor {
         pr: pull.number,
         source: 'local',
       },
-      stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, findings: 0, grounding },
+      stats: {
+        duration_ms: durationMs,
+        tokens_in: 0,
+        tokens_out: 0,
+        cost_usd: null,
+        findings: 0,
+        grounding,
+      },
       prompt_assembly: { system: agent.systemPrompt, skills: null, memory: null, specs: null, user: '' },
       tool_calls: [],
       raw_output: '',
       memory_pulled: [],
       specs_read: [],
+      // `project_context` is deliberately ABSENT on the failed/cancelled path: a
+      // run that never reached resolution genuinely has no record, and the
+      // drawer's "not recorded" rendering is then correct by construction rather
+      // than by a placeholder that claims the run read nothing (AC-38).
       log: this.container.runBus.buffer(runId).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg })),
     };
   }

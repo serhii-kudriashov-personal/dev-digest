@@ -1,0 +1,24 @@
+{
+  "name": "Extracted conventions can be judged and merged into a skill",
+  "description": "Reach Skills Lab → Conventions for acme/payments-api, confirm the three seeded candidates render with their evidence (file:line) and confidence, then accept one and confirm the toolbar counter moves to '1 of 3 accepted' and 'Create skill' becomes usable. Opens the create-skill modal and confirms the merged draft carries the mandatory severity line ('Report a **WARNING**') and an 'Attach to agent' field — the step without which a created skill reaches no review — then cancels rather than saving, so the flow stays read-only. Exercises ConventionsView / ConventionCard / CreateSkillFromConventionsModal plus the skill-draft endpoint, which persists nothing. NO model call: the candidates and the scan row are seeded (see server/src/db/seed.ts SEED_CONVENTIONS), and the draft is built from rows already in the DB. Assumes a freshly-seeded DB where acme/payments-api is the first repo — guaranteed by e2e-web.yml; run locally via the hermetic stack (see e2e/README.md).",
+  "steps": [
+    { "cmd": ["open", "{BASE}/"], "label": "load the app root" },
+    { "cmd": ["wait", "--url", "/pulls"], "label": "land on the PR list so a repo is active" },
+    { "cmd": ["find", "text", "Conventions", "click"], "label": "open Conventions from the sidebar" },
+    { "cmd": ["wait", "--url", "/conventions"], "label": "navigate to the conventions route" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "candidates and the last scan settle" },
+    { "cmd": ["wait", "--text", "Always use async/await instead of .then() chains."], "label": "the first seeded candidate rendered" },
+    { "cmd": ["wait", "--text", "src/api/users.ts:23-31"], "label": "evidence is cited as file:line" },
+    { "cmd": ["wait", "--text", "sample files"], "label": "the scan metadata line rendered" },
+    { "cmd": ["wait", "--text", "0 of 3 accepted"], "label": "nothing is accepted yet" },
+    { "cmd": ["find", "role", "button", "click", "--name", "Accept"], "label": "accept the first candidate" },
+    { "cmd": ["wait", "--text", "1 of 3 accepted"], "label": "the counter reflects the accepted candidate" },
+    { "cmd": ["find", "role", "button", "click", "--name", "Create skill"], "label": "open the create-skill modal" },
+    { "cmd": ["wait", "--text", "Create skill from conventions"], "label": "the modal opened" },
+    { "cmd": ["wait", "--text", "payments-api-conventions"], "label": "the draft is named for the repo" },
+    { "cmd": ["wait", "--text", "Attach to agent"], "label": "the attach step is present — without it the skill affects no review" },
+    { "cmd": ["wait", "--text", "Report a **WARNING**"], "label": "the generated body states its own severity" },
+    { "cmd": ["find", "role", "button", "click", "--name", "Cancel"], "label": "close without saving — the flow stays read-only" },
+    { "cmd": ["wait", "--text", "1 of 3 accepted"], "label": "back on the list with the verdict intact" }
+  ]
+}

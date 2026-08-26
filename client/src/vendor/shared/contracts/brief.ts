@@ -30,6 +30,8 @@ export type BlastCaller = z.infer<typeof BlastCaller>;
 
 export const DownstreamImpact = z.object({
   symbol: z.string(),
+  /** The changed symbol's own declaring file — disambiguates two symbols that share a name. */
+  file: z.string(),
   callers: z.array(BlastCaller),
   endpoints_affected: z.array(z.string()),
   crons_affected: z.array(z.string()),

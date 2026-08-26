@@ -47,7 +47,21 @@ export const PromptAssembly = z.object({
   repo_map: z.string().nullish(),
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
+  /** Derived PR intent block (L03); null when no intent was available. */
+  intent: z.string().nullish(),
   user: z.string(),
+  /**
+   * Per-section token attribution, keyed by the section names above (plus
+   * `user`) — what each slot actually cost, so "the skills block added N
+   * tokens" is a number rather than a guess.
+   *
+   * NULLISH, not nullable: RunTrace is persisted as a SINGLE jsonb document,
+   * and every trace written before L02 has no `token_counts` key at all.
+   * `.nullable()` accepts an explicit null but REJECTS a missing key, which
+   * would make the entire run history unparseable — the same trap
+   * `RunStats.cost_usd` documents below.
+   */
+  token_counts: z.record(z.string(), z.number().int()).nullish(),
 });
 export type PromptAssembly = z.infer<typeof PromptAssembly>;
 
@@ -63,8 +77,34 @@ export const RunStats = z.object({
   tokens_out: z.number().int(),
   findings: z.number().int(),
   grounding: z.string(),
+  /**
+   * Attributed USD cost of the run. NULLISH, not nullable: RunTrace is
+   * persisted as a single jsonb document, and every trace written before the
+   * L01 cost restore has no `cost_usd` key at all — `.nullable()` would reject
+   * a MISSING key and break parsing of the entire history.
+   */
+  cost_usd: z.number().nullish(),
 });
 export type RunStats = z.infer<typeof RunStats>;
+
+/** Why a document attached to the agent was NOT injected into the run. */
+export const ContextSkipReason = z.enum([
+  'missing',
+  'unreadable',
+  'out_of_bounds',
+  'over_limit',
+  'deadline',
+  'not_markdown',
+]);
+export type ContextSkipReason = z.infer<typeof ContextSkipReason>;
+
+/** What the run-time project-context read actually did: read these, skipped those. */
+export const ProjectContextRecord = z.object({
+  /** Injected document paths, in injection order. */
+  read: z.array(z.string()),
+  skipped: z.array(z.object({ path: z.string(), reason: ContextSkipReason })),
+});
+export type ProjectContextRecord = z.infer<typeof ProjectContextRecord>;
 
 /** The single-document trace stored in `run_traces.trace`. */
 export const RunTrace = z.object({
@@ -81,7 +121,31 @@ export const RunTrace = z.object({
   tool_calls: z.array(ToolCall),
   raw_output: z.string(),
   memory_pulled: z.array(MemoryPulled),
+  /**
+   * LEGACY MIRROR of `project_context.read`. Required, and it always was — every
+   * trace already on disk holds a literal `[]` written by the unwired scaffold,
+   * so this field can never distinguish "read nothing" from "never recorded".
+   * It is kept because dropping a required key would make the stored history
+   * unparseable, and it is written from the SAME variable as `project_context`
+   * in one place (`modules/reviews/run-executor.ts`) so the two cannot diverge.
+   */
   specs_read: z.array(z.string()),
+  /**
+   * What the project-context read did (L07). NULLISH, not nullable: RunTrace is
+   * persisted as a SINGLE jsonb document, and every trace written before this
+   * feature has no `project_context` key at all. `.nullable()` accepts an
+   * explicit null but REJECTS a missing key, which would make the entire run
+   * history unparseable — root `INSIGHTS.md` 2026-08-02, the same trap
+   * `RunStats.cost_usd` and `PromptAssembly.token_counts` document.
+   *
+   * This is deliberately NOT the 2026-08-11 sibling-response-schema case:
+   * ABSENCE IS THE MEANING here. A missing key means "this run predates the
+   * feature and recorded nothing", which the drawer renders as "not recorded";
+   * a present `{ read: [], skipped: [] }` means "this run read nothing", which
+   * renders as "none". Every new run writes the key, including one that read
+   * nothing — otherwise the two states collapse again.
+   */
+  project_context: ProjectContextRecord.nullish(),
   log: z.array(RunLogLine),
 });
 export type RunTrace = z.infer<typeof RunTrace>;
@@ -101,6 +165,9 @@ export const RunSummary = z.object({
   duration_ms: z.number().int().nullable(),
   tokens_in: z.number().int().nullable(),
   tokens_out: z.number().int().nullable(),
+  /** Attributed USD cost; null = unknown (failed run, or pre-L01 row) — the
+   *  UI renders "—" for it, never "$0.00". */
+  cost_usd: z.number().nullable(),
   findings_count: z.number().int().nullable(),
   grounding: z.string().nullable(),
   ran_at: z.string().nullable(),

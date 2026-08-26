@@ -4,6 +4,7 @@ import {
   Finding,
   Intent,
   BlastRadius,
+  BlastRadiusResponse,
   Risks,
   PrHistory,
   SmartDiff,
@@ -15,6 +16,8 @@ import {
   Settings,
   Repo,
   PrDetail,
+  SkillVersion,
+  SkillStats,
 } from '@devdigest/shared';
 
 /**
@@ -45,6 +48,57 @@ describe('AI contracts parse fixtures', () => {
     });
     expect(review.findings).toHaveLength(1);
     expect(review.score).toBe(61);
+    // The fixture carries no `skill` — the shape of every finding the model
+    // returned before L02's attribution field existed, and of every finding
+    // stored in an `eval_cases.expected_output` jsonb document. `Finding.skill`
+    // MUST stay nullish: `.nullable()` rejects a MISSING key.
+    expect(review.findings[0]!.skill).toBeUndefined();
+  });
+
+  it('Finding carries a skill attribution when the model supplied one', () => {
+    const f = Finding.parse({
+      id: 'f9',
+      severity: 'WARNING',
+      category: 'test',
+      title: 'Uncovered branch',
+      file: 'src/discount.ts',
+      start_line: 14,
+      end_line: 14,
+      rationale: 'The cap branch is never exercised.',
+      confidence: 0.6,
+      skill: 'test-coverage-nudge',
+    });
+    // Unvalidated at this layer by design — the server checks the slug against
+    // the skills actually injected into the run before storing a `skill_id`.
+    expect(f.skill).toBe('test-coverage-nudge');
+  });
+
+  it('SkillVersion parses without a message (versions predating the field)', () => {
+    const v = SkillVersion.parse({
+      skill_id: 's1',
+      version: 1,
+      body: '## Rule',
+      created_at: '2026-08-05T00:00:00.000Z',
+    });
+    expect(v.message).toBeUndefined();
+  });
+
+  it('SkillStats keeps unknown rates NULL rather than zero', () => {
+    const stats = SkillStats.parse({
+      used_by_count: 2,
+      agents: [{ id: 'a1', name: 'Test Quality Reviewer' }],
+      version_count: 1,
+      runs_count: 0,
+      pull_rate: null,
+      accept_rate: null,
+      findings_last_30d: 0,
+      findings_by_category: {},
+      unattributed_count: 0,
+    });
+    // A skill nobody has judged has no accept rate; 0 would claim every finding
+    // was dismissed. Same rule the cost badge follows for unknown vs free.
+    expect(stats.accept_rate).toBeNull();
+    expect(stats.pull_rate).toBeNull();
   });
 
   it('lethal-trifecta Finding variant', () => {
@@ -69,20 +123,30 @@ describe('AI contracts parse fixtures', () => {
     expect(() =>
       Intent.parse({ intent: 'x', in_scope: ['a'], out_of_scope: ['b'] }),
     ).not.toThrow();
+    const blast = {
+      changed_symbols: [{ name: 'rateLimit', file: 'a.ts', kind: 'function' }],
+      downstream: [
+        {
+          symbol: 'rateLimit',
+          file: 'a.ts',
+          callers: [{ name: 'publicRouter', file: 'b.ts', line: 23 }],
+          endpoints_affected: ['GET /x'],
+          crons_affected: ['c'],
+        },
+      ],
+      summary: 's',
+    };
+    // The PERSISTED shape stays byte-identical: `BlastRadius` is embedded in
+    // `PrBrief` (the `pr_brief.json` jsonb column), so it must keep parsing a
+    // document that has no `state` key at all.
+    expect(() => BlastRadius.parse(blast)).not.toThrow();
+    // `state` lives on the non-persisted RESPONSE wrapper, where it is required…
     expect(() =>
-      BlastRadius.parse({
-        changed_symbols: [{ name: 'rateLimit', file: 'a.ts', kind: 'function' }],
-        downstream: [
-          {
-            symbol: 'rateLimit',
-            callers: [{ name: 'publicRouter', file: 'b.ts', line: 23 }],
-            endpoints_affected: ['GET /x'],
-            crons_affected: ['c'],
-          },
-        ],
-        summary: 's',
-      }),
+      BlastRadiusResponse.parse({ ...blast, state: 'degraded', reason: 'no_rank_graph' }),
     ).not.toThrow();
+    expect(BlastRadiusResponse.safeParse(blast).success).toBe(false);
+    // …and `reason` is `.nullish()`, so the 'full' path may omit it entirely.
+    expect(() => BlastRadiusResponse.parse({ ...blast, state: 'full' })).not.toThrow();
     expect(() =>
       Risks.parse({
         risks: [{ kind: 'security', title: 't', explanation: 'e', severity: 'high', file_refs: [] }],
@@ -166,6 +230,83 @@ describe('AI contracts parse fixtures', () => {
       log: [{ t: '00.00', kind: 'info', msg: 'started' }],
     });
     expect(trace.tool_calls).toHaveLength(1);
+    // The fixture above carries no `cost_usd` — the on-disk shape of every
+    // trace written before the L01 cost restore. RunStats.cost_usd MUST stay
+    // nullish (not nullable): `.nullable()` rejects a MISSING key and would
+    // make every historical run_traces document unparseable.
+    expect(trace.stats.cost_usd).toBeUndefined();
+    // Same rule, same reason, for L02's per-section token attribution: the
+    // fixture has no `token_counts`, so PromptAssembly.token_counts MUST stay
+    // nullish or the whole run history stops parsing.
+    expect(trace.prompt_assembly.token_counts).toBeUndefined();
+  });
+
+  it('RunTrace carries per-section token_counts when the run recorded them', () => {
+    const trace = RunTrace.parse({
+      config: { agent: 'Test Quality Reviewer', model: 'gpt-4.1', source: 'local' },
+      stats: {
+        duration_ms: 4100,
+        tokens_in: 4949,
+        tokens_out: 810,
+        cost_usd: 0.002,
+        findings: 2,
+        grounding: '2/2 passed',
+      },
+      prompt_assembly: {
+        system: 's',
+        skills: '## rubric',
+        user: 'u',
+        token_counts: { system: 412, skills: 1240, user: 8707 },
+      },
+      tool_calls: [],
+      raw_output: '{}',
+      memory_pulled: [],
+      specs_read: [],
+      log: [],
+    });
+    expect(trace.prompt_assembly.token_counts?.skills).toBe(1240);
+  });
+
+  it('RunTrace carries cost_usd when the run recorded one', () => {
+    const trace = RunTrace.parse({
+      config: { agent: 'Security Reviewer', model: 'gpt-4.1', source: 'local' },
+      stats: {
+        duration_ms: 8200,
+        tokens_in: 14820,
+        tokens_out: 1240,
+        cost_usd: 0.06,
+        findings: 3,
+        grounding: '3/3 passed',
+      },
+      prompt_assembly: { system: 's', user: 'u' },
+      tool_calls: [],
+      raw_output: '{}',
+      memory_pulled: [],
+      specs_read: [],
+      log: [],
+    });
+    expect(trace.stats.cost_usd).toBe(0.06);
+  });
+
+  it('RunTrace accepts an explicitly null cost (failed run)', () => {
+    const trace = RunTrace.parse({
+      config: { agent: 'Security Reviewer', model: 'gpt-4.1', source: 'local' },
+      stats: {
+        duration_ms: 0,
+        tokens_in: 0,
+        tokens_out: 0,
+        cost_usd: null,
+        findings: 0,
+        grounding: '0/0 passed',
+      },
+      prompt_assembly: { system: 's', user: '' },
+      tool_calls: [],
+      raw_output: '',
+      memory_pulled: [],
+      specs_read: [],
+      log: [],
+    });
+    expect(trace.stats.cost_usd).toBeNull();
   });
 });
 
