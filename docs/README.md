@@ -11,3 +11,4 @@ Do NOT put here: setup instructions (that's the README), rules for the agent
 
 One file per topic, kebab-case names. Added a file? Add a row to the
 `Read when` table of the matching AGENTS.md — otherwise nobody will read it.
+Test
