@@ -19447,6 +19447,13 @@ const FindingRecord = Finding.extend({
     review_id: stringType(),
     accepted_at: stringType().nullable(),
     dismissed_at: stringType().nullable(),
+    /**
+     * AC-43 "Learn" intent. `.nullish()`, not `.nullable()` — `FindingRecord` is
+     * reproduced inside documents already on disk (e.g. eval fixtures) that
+     * predate this column and lack the key outright (root `INSIGHTS.md`
+     * 2026-08-02, `server/INSIGHTS.md` 2026-08-03).
+     */
+    learned_at: stringType().nullish(),
 });
 /** A persisted review with its kept findings + grounding summary. */
 const ReviewRecord = objectType({
@@ -20849,77 +20856,151 @@ const HookScanResult = objectType({
 ;// CONCATENATED MODULE: ../server/src/vendor/shared/contracts/observability.ts
 
 
+
 /**
- * A5 — Observability / Multi-agent contracts (L07).
+ * A5 — Observability / Multi-agent contracts (SPEC-05, L07).
  *
  * These are NEW contracts (A5 owns this file; the barrel re-exports it). They
  * sit alongside A2's `review-api.ts`:
- *   - MultiAgentRun        the response of POST /pulls/:id/multi-agent-run
- *   - AgentColumn          one agent's column in the multi-agent view
- *   - Conflict / ConflictTake  where agents disagree on the same file:line
- *   - AgentStats           per-agent quality aggregates (GET /agents/:id/stats)
- *   - CuratorResult        the cross-session memory curator outcome
+ *   - MultiAgentStartRequest  body of POST /pulls/:id/multi-agent-runs
+ *   - MultiAgentRunSummary    that route's response, and each element of
+ *                             GET /pulls/:id/multi-agent-runs
+ *   - AgentLane               one member run's lane, as returned inside
+ *                             GET /multi-agent-runs/:id
+ *   - LocationStance / GroupedLocation   where agents agree or disagree on a
+ *                             file:line range, computed from persisted
+ *                             findings — never stored
+ *   - MultiAgentRunResult     response of GET /multi-agent-runs/:id
+ *   - AgentHistoryRow         response element of GET /multi-agent/agent-history
+ *   - AgentStats              per-agent quality aggregates (GET /agents/:id/stats)
+ *   - CuratorResult           the cross-session memory curator outcome
  *
  * The single-document run trace itself stays in `contracts/trace.ts` (RunTrace).
  */
 // ---------------------------------------------------------------------------
-// Multi-Agent Review
+// Multi-Agent Review (SPEC-05)
 // ---------------------------------------------------------------------------
-/** A finding as surfaced in a multi-agent column (subset of FindingRecord). */
-const AgentColumnFinding = objectType({
-    id: stringType(),
-    severity: Severity,
-    category: stringType(),
-    title: stringType(),
-    file: stringType(),
-    start_line: numberType().int(),
-    kind: stringType().nullish(),
-});
-/** One agent's result column in the multi-agent review. */
-const AgentColumn = objectType({
-    run_id: stringType(),
-    agent_id: stringType(),
-    agent_name: stringType(),
-    provider: stringType().nullable(),
-    model: stringType().nullable(),
-    status: enumType(['done', 'failed', 'running']),
-    verdict: stringType().nullable(),
-    score: numberType().int().nullable(),
-    summary: stringType().nullable(),
-    duration_ms: numberType().int().nullable(),
-    cost_usd: numberType().nullable(),
-    findings: arrayType(AgentColumnFinding),
-});
-/** One agent's stance on a contended file:line. */
-const ConflictTake = objectType({
-    agent_id: stringType(),
-    persona: stringType(),
-    /** Severity if the agent flagged it, or 'ignored' when it did not. */
-    verdict: unionType([Severity, literalType('ignored')]),
-    note: stringType(),
+/**
+ * Body of `POST /pulls/:id/multi-agent-runs`. The `8` cap is NFR-3's hard
+ * limit; it is a literal here (ring 0 imports only `zod` — `shared-is-a-leaf`)
+ * and is re-declared as `MAX_AGENTS_PER_RUN` in `modules/multi-agent/constants.ts`.
+ */
+const MultiAgentStartRequest = objectType({
+    agent_ids: arrayType(stringType().uuid()).min(1).max(8),
 });
 /**
- * A conflict = a file:line that at least one agent flagged and at least one
- * other agent (that also reviewed) did NOT, OR where agents assigned divergent
- * severities. Computed from persisted findings; not stored.
+ * The start response (AC-16) and each element of the run-history list
+ * (AC-17, AC-18). The record exists — with every member id — before any
+ * member run completes.
  */
-const Conflict = objectType({
-    file: stringType(),
-    line: numberType().int(),
-    title: stringType(),
-    takes: arrayType(ConflictTake),
-});
-/** Response of POST /pulls/:id/multi-agent-run and GET /pulls/:id/multi-agent. */
-const MultiAgentRun = objectType({
+const MultiAgentRunSummary = objectType({
     id: stringType(),
     pr_id: stringType(),
     pr_number: numberType().int().nullish(),
     ran_at: stringType(),
     agent_count: numberType().int(),
-    total_duration_ms: numberType().int(),
+    member_run_ids: arrayType(stringType()),
+});
+/**
+ * One member run's lane, inside `MultiAgentRunResult`. `agent_name` is the
+ * name recorded at run time so it survives the agent's later deletion (spec
+ * §Edge cases). `findings` is the FULL `FindingRecord`, not a reduced shape —
+ * AC-36 needs `rationale`/`suggestion`, AC-37 `confidence`, AC-40/41
+ * `accepted_at`/`dismissed_at`, and AC-49 needs exactly what
+ * `RunTraceDrawer`'s `findings?: FindingRecord[]` prop takes.
+ */
+const AgentLane = objectType({
+    run_id: stringType(),
+    agent_id: stringType().nullable(),
+    agent_name: stringType(),
+    provider: stringType().nullable(),
+    model: stringType().nullable(),
+    status: enumType(['queued', 'running', 'done', 'failed', 'cancelled']),
+    /** Failure reason when status='failed' (AC-19, AC-33). */
+    error: stringType().nullable(),
+    verdict: stringType().nullable(),
+    score: numberType().int().nullable(),
+    summary: stringType().nullable(),
+    duration_ms: numberType().int().nullable(),
+    cost_usd: numberType().nullable(),
+    findings: arrayType(FindingRecord),
+    /** True count behind `findings`, which is capped (NFR-3's "shown of total"). */
+    findings_total: numberType().int(),
+});
+/**
+ * One agent's stance on a `GroupedLocation`. Deliberately carries NO free-text
+ * field — a did-not-flag entry must be reconstructible from `flagged` alone
+ * (AC-25), never from a model-authored "note" that could smuggle a rationale
+ * for silence.
+ */
+const LocationStance = objectType({
+    agent_id: stringType().nullable(),
+    agent_name: stringType(),
+    run_id: stringType(),
+    flagged: booleanType(),
+    severity: Severity.nullable(),
+    finding_ids: arrayType(stringType()),
+});
+/**
+ * A file:line RANGE (not a single line — AC-21) that at least one completed
+ * agent flagged, with one stance per completed lane. `conflict` is the
+ * server's deterministic verdict (AC-26, NFR-5), computed from the stances,
+ * never from the model's own `confidence`.
+ */
+const GroupedLocation = objectType({
+    file: stringType(),
+    start_line: numberType().int(),
+    end_line: numberType().int(),
+    stances: arrayType(LocationStance),
+    conflict: booleanType(),
+});
+/**
+ * Response of `GET /multi-agent-runs/:id`. Wire-only: computed fresh on every
+ * read and persisted nowhere, which is why every new field here is
+ * `.nullable()` rather than `.nullish()` — "present, value unknown" is the
+ * right semantic for a DTO with no jsonb document behind it.
+ *
+ * `total_duration_ms` is null until every member has settled (AC-31);
+ * `total_cost_usd` sums the known costs and is null only when every one is
+ * unknown (AC-32, NFR-4) — unknown cost is never `0`.
+ */
+const MultiAgentRunResult = objectType({
+    id: stringType(),
+    pr_id: stringType(),
+    pr_number: numberType().int().nullable(),
+    repo_id: stringType(),
+    ran_at: stringType(),
+    /** `multi_agent_runs.head_sha` !== the pull's CURRENT head_sha, computed at
+     *  read time (AC-46) — never stored, same pattern as `PrIntentRecord.stale`. */
+    stale: booleanType(),
+    lanes: arrayType(AgentLane),
+    locations: arrayType(GroupedLocation),
+    /** True count behind `locations`, which is capped (NFR-3). */
+    locations_total: numberType().int(),
+    completed_lane_count: numberType().int(),
+    total_duration_ms: numberType().int().nullable(),
     total_cost_usd: numberType().nullable(),
-    columns: arrayType(AgentColumn),
-    conflicts: arrayType(Conflict),
+});
+/**
+ * One row of `GET /multi-agent/agent-history` — every agent in the
+ * workspace (enabled or not), with its last COMPLETED run if it has one.
+ * Feeds the Configure-run screen's pre-run estimate and per-agent history
+ * card (AC-10, AC-11, Open question 6).
+ */
+const AgentHistoryRow = objectType({
+    agent_id: stringType(),
+    agent_name: stringType(),
+    enabled: booleanType(),
+    model: stringType().nullable(),
+    last_run: objectType({
+        run_id: stringType(),
+        ran_at: stringType(),
+        duration_ms: numberType().int().nullable(),
+        cost_usd: numberType().nullable(),
+        summary: stringType().nullable(),
+        pr_number: numberType().int().nullish(),
+    })
+        .nullable(),
 });
 // ---------------------------------------------------------------------------
 // Per-agent Stats (GET /agents/:id/stats)
