@@ -179,6 +179,21 @@ export async function setFindingDismissed(
   return row;
 }
 
+/** AC-43 "Learn" — records the intent only; the memory mechanics behind it
+ *  are a later feature (spec §Non-goals). */
+export async function setFindingLearned(
+  db: Db,
+  findingId: string,
+  at: Date | null,
+): Promise<FindingRow | undefined> {
+  const [row] = await db
+    .update(t.findings)
+    .set({ learnedAt: at })
+    .where(eq(t.findings.id, findingId))
+    .returning();
+  return row;
+}
+
 // ---- eval-case creation (L06, SPEC-04) — a finding's full source context --
 
 export interface FindingSourceRow {

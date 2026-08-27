@@ -1,0 +1,1 @@
+ALTER TABLE "multi_agent_run_members" ADD COLUMN "agent_name" text;

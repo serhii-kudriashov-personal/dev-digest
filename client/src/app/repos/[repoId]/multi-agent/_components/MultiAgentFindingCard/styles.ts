@@ -1,0 +1,90 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for MultiAgentFindingCard (same shape as
+ *  `FindingCard/styles.ts`, this route's own copy). */
+export const s = {
+  card: (sevColor: string, muted: boolean): CSSProperties => ({
+    borderRadius: 8,
+    borderStyle: "solid",
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderLeftWidth: 3,
+    borderTopColor: "var(--border)",
+    borderRightColor: "var(--border)",
+    borderBottomColor: "var(--border)",
+    borderLeftColor: sevColor,
+    background: "var(--bg-elevated)",
+    overflow: "hidden",
+    opacity: muted ? 0.6 : 1,
+  }),
+  header: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: "12px 14px",
+    cursor: "pointer",
+  } satisfies CSSProperties,
+  badgeWrap: { paddingTop: 1 } satisfies CSSProperties,
+  headerMain: { flex: 1, minWidth: 0 } satisfies CSSProperties,
+  titleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  } satisfies CSSProperties,
+  title: (muted: boolean, dismissed: boolean): CSSProperties => ({
+    fontSize: 13.5,
+    fontWeight: 600,
+    color: muted ? "var(--text-muted)" : "var(--text-primary)",
+    textDecoration: dismissed ? "line-through" : "none",
+  }),
+  metaRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 5,
+  } satisfies CSSProperties,
+  attribution: {
+    fontSize: 11.5,
+    color: "var(--text-muted)",
+    fontStyle: "italic",
+  } satisfies CSSProperties,
+  chevron: (expanded: boolean): CSSProperties => ({
+    color: "var(--text-muted)",
+    transform: expanded ? "rotate(180deg)" : "none",
+    transition: "transform .15s",
+    marginTop: 2,
+    flexShrink: 0,
+  }),
+  body: { padding: "12px 14px 14px", borderTop: "1px solid var(--border)" } satisfies CSSProperties,
+  prose: {
+    fontSize: 13.5,
+    lineHeight: 1.6,
+    color: "var(--text-secondary)",
+  } satisfies CSSProperties,
+  suggestionWrap: { marginTop: 12 } satisfies CSSProperties,
+  suggestionLabel: {
+    fontSize: 11.5,
+    fontWeight: 700,
+    letterSpacing: "0.05em",
+    color: "var(--text-muted)",
+    marginBottom: 6,
+    textTransform: "uppercase",
+  } satisfies CSSProperties,
+  actions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 12,
+    flexWrap: "wrap",
+  } satisfies CSSProperties,
+  evalCaseBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    fontSize: 12.5,
+    color: "var(--text-secondary)",
+  } satisfies CSSProperties,
+} as const;

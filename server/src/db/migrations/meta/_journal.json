@@ -134,6 +134,27 @@
       "when": 1787158288049,
       "tag": "0018_sudden_metal_master",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787602622081,
+      "tag": "0019_marvelous_miracleman",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787646800265,
+      "tag": "0020_simple_black_cat",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787691868592,
+      "tag": "0021_ambiguous_blur",
+      "breakpoints": true
     }
   ]
 }

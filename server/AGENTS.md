@@ -60,3 +60,4 @@ Tests: `pnpm test` (all) · `pnpm exec vitest run --exclude '**/*.it.test.ts'`
 | `docs/` | asking why a module is shaped the way it is |
 | `specs/` | implementing a new server feature |
 | `INSIGHTS.md` | before changing the review pipeline, DB schema, or adapters |
+| — | Exporting an agent to CI (SPEC-05) — `agent-runner/dist/index.js` must exist first: `cd agent-runner && pnpm install && pnpm build`. It is git-ignored by `agent-runner/.gitignore`, so a fresh clone has none, and the export throws `ConfigError` until it is built. Override the location with `RUNNER_BUNDLE_PATH`. |

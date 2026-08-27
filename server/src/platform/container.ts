@@ -31,6 +31,7 @@ import { RepoIntelService } from '../modules/repo-intel/service.js';
 import type { IntentFacade } from '../modules/intent/types.js';
 import { IntentService } from '../modules/intent/service.js';
 import { BlastService } from '../modules/blast/service.js';
+import { ReviewService } from '../modules/reviews/service.js';
 import type { ProjectContext } from '../modules/context/types.js';
 import { ContextService } from '../modules/context/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
@@ -60,6 +61,8 @@ export interface ContainerOverrides {
   blast?: BlastService;
   /** project-context facade (SPEC-01) — tests inject a stub ProjectContext. */
   projectContext?: ProjectContext;
+  /** reviews service (SPEC-05) — tests inject a stub to stand in for the executor. */
+  reviews?: ReviewService;
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
@@ -89,6 +92,7 @@ export class Container {
   private _intent?: IntentFacade;
   private _blast?: BlastService;
   private _projectContext?: ProjectContext;
+  private _reviews?: ReviewService;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
@@ -180,6 +184,23 @@ export class Container {
     if (this.overrides.projectContext) return this.overrides.projectContext;
     this._projectContext ??= new ContextService(this);
     return this._projectContext;
+  }
+
+  /**
+   * The reviews service (SPEC-05) — this is the sanctioned cross-slice
+   * channel for the multi-agent slice's `start()` to reach the reviews
+   * slice's UNCHANGED `runReview`/executor: `no-cross-slice-import` scopes
+   * its `from` to `^src/modules/`, so `modules/multi-agent/service.ts`
+   * importing `reviews/service.js` directly would fire the rule while this
+   * file importing it does not (`server/INSIGHTS.md` 2026-08-08), same
+   * shape as `intent`/`blast`/`projectContext` above.
+   *
+   * Tests inject a stub via `ContainerOverrides.reviews`.
+   */
+  get reviews(): ReviewService {
+    if (this.overrides.reviews) return this.overrides.reviews;
+    this._reviews ??= new ReviewService(this);
+    return this._reviews;
   }
 
   /** Import-graph builder (dependency-cruiser). T3 indexer pipeline only. */

@@ -1,32 +1,35 @@
 {
   "runs": {
-    "emptyTitle": "No CI runs yet",
-    "emptyBody": "Once you export an agent to CI, every automated review shows up here.",
     "title": "CI Runs",
     "subtitle": "Agent reviews executed inside CI · not local runs",
-    "autoRefresh": "auto-refresh on",
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
-    "filters": {
-      "last7Days": "Last 7 days",
-      "allAgents": "All agents",
-      "allRepos": "All repos",
-      "allStatuses": "All statuses"
-    },
+    "emptyTitle": "No CI runs yet",
+    "emptyBody": "Once you export an agent to CI, every automated review shows up here.",
+    "noResultYet": "No result yet",
+    "unknownCost": "Unknown",
+    "viewPr": "View pull request",
+    "viewJob": "View job",
     "table": {
-      "timestamp": "Timestamp",
+      "repository": "Repository",
       "pullRequest": "Pull request",
-      "source": "Source",
+      "agent": "Agent",
+      "status": "Status",
       "findings": "Findings",
       "cost": "Cost",
-      "status": "Status"
+      "duration": "Duration",
+      "source": "Source",
+      "jobLink": "Job"
     },
-    "view": "View",
     "status": {
       "succeeded": "Succeeded",
       "noFindings": "No findings",
       "failed": "Failed",
       "running": "Running"
+    },
+    "source": {
+      "ci": "CI",
+      "local": "Local"
     }
   },
   "exportWizard": {
@@ -43,62 +46,59 @@
       "configure": "Configure",
       "install": "Install"
     },
-    "targets": {
-      "gha": "GitHub Actions",
-      "circle": "CircleCI",
-      "jenkins": "Jenkins",
-      "cli": "Generic CLI",
-      "ghaDesc": "Runs on pull_request events",
-      "circleDesc": "config.yml job",
-      "jenkinsDesc": "Pipeline stage",
-      "cliDesc": "devdigest review --pr"
-    },
-    "recommended": "recommended",
+    "target": "GitHub Actions",
+    "targetNote": "GitHub Actions is the only supported CI platform in this version.",
     "repoLabel": "Target repository",
     "repoHint": "owner/name — the repo to add the workflow to",
     "repoPlaceholder": "acme/payments-api",
     "filesToCreate": "FILES TO CREATE",
     "generating": "Generating…",
+    "generatingBody": "DevDigest is building the agent manifest, skill files, memory file, workflow and runner bundle for this export.",
     "editable": "editable",
-    "triggerLabel": "Trigger",
+    "workflowPreviewTitle": "Generated workflow",
+    "triggers": {
+      "label": "Trigger events",
+      "opened": "Opened",
+      "synchronize": "New commits pushed (synchronize)",
+      "reopened": "Reopened",
+      "hint": "At least one trigger must stay selected."
+    },
     "postResultsLabel": "Post results as",
     "postAs": {
       "githubReview": "GitHub review",
       "prComment": "PR comment",
       "none": "None (exit code only)"
     },
-    "blockMergeTitle": "Block merge on findings",
-    "blockMergeDesc": "Requires a GitHub App — not available with PAT in local mode",
-    "installCardTitle": "Open a PR with these files",
-    "installCardBody": "DevDigest opens a PR in {repo} titled “Add DevDigest CI review” with the {count} generated files.",
-    "ownerRepo": "owner/repo",
-    "secretNote": "Add {key} to the repo's Actions secrets before the workflow runs."
+    "secrets": {
+      "label": "Required secrets",
+      "openrouterNote": "Add {key} to the repository's Actions secrets before the workflow runs.",
+      "githubTokenNote": "{key} is provided automatically by GitHub Actions."
+    },
+    "branchProtection": {
+      "title": "Blocking a merge",
+      "requiresCheck": "Blocking a merge on this check additionally requires marking it as required in the repository's own branch protection settings.",
+      "notConfigured": "DevDigest does not configure branch protection for you."
+    },
+    "error": {
+      "title": "Export failed",
+      "body": "{reason}",
+      "unknownReason": "The request could not be completed.",
+      "retry": "Retry"
+    },
+    "confirm": {
+      "title": "Installed",
+      "body": "Opened a pull request in {repo} with the generated files.",
+      "done": "Done"
+    }
   },
   "ciTab": {
     "heading": "Continuous Integration",
     "subtitle": "Run this agent automatically on pull requests in a target repo.",
     "exportToCi": "Export to CI",
-    "publish": "Publish to CI",
     "update": "Update CI",
-    "noRepo": "Connect a repository first",
-    "empty": "Not deployed to CI yet. Use “Publish to CI” to open a PR that adds the workflow + agent config.",
-    "installed": "installed {date}"
-  },
-  "publishDialog": {
-    "title": "Publish to CI",
-    "subtitle": "Run {agentName} on every pull request in {repo}",
-    "intro": "Opens a pull request in {repo} adding a GitHub Actions workflow + this agent's config under .devdigest/. On every PR the agent reviews the diff.",
-    "filesLabel": "FILES",
-    "generating": "Generating…",
-    "secretNote": "Add {key} to the repo's Actions secrets before the workflow runs. GITHUB_TOKEN is provided automatically.",
-    "cancel": "Cancel",
-    "publish": "Publish",
-    "publishing": "Publishing…",
-    "republish": "Re-publish (update)",
-    "doneTitle": "Published",
-    "doneBody": "Opened/updated a pull request in {repo} with the workflow + agent config.",
-    "openPr": "View pull request",
-    "close": "Close"
+    "empty": "This agent has not been exported to CI yet. Use Export to CI to open a pull request that adds the workflow and agent config to a repository.",
+    "installed": "installed {date}",
+    "count": "{count, plural, one {# repository} other {# repositories}}"
   },
   "page": {
     "crumb": "CI Runs"

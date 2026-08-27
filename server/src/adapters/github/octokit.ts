@@ -10,6 +10,7 @@ import type {
   PrReviewComment,
   OpenPrPayload,
   CommitFilesPayload,
+  WorkflowRunSummary,
   IssueMeta,
 } from '@devdigest/shared';
 import { withRetry, withTimeout } from '../../platform/resilience.js';
@@ -369,4 +370,83 @@ export class OctokitGitHubClient implements GitHubClient {
     );
     return res.data.login;
   }
+
+  async listWorkflowRuns(
+    repo: RepoRef,
+    opts: { workflowFile: string; perPage: number },
+  ): Promise<WorkflowRunSummary[]> {
+    try {
+      const res = await withRetry(() =>
+        withTimeout(
+          this.octokit.rest.actions.listWorkflowRuns({
+            owner: repo.owner,
+            repo: repo.name,
+            workflow_id: opts.workflowFile,
+            per_page: opts.perPage,
+          }),
+          TIMEOUT,
+        ),
+      );
+      return res.data.workflow_runs.map((run) => ({
+        id: run.id,
+        htmlUrl: run.html_url,
+        headSha: run.head_sha,
+        status: run.status ?? 'queued',
+        conclusion: run.conclusion,
+        createdAt: run.created_at,
+        pullRequestNumbers: (run.pull_requests ?? []).map((pr) => pr.number),
+      }));
+    } catch (err) {
+      // A repository where the setup PR has not been merged yet has no such
+      // workflow file — that is a normal state, not an error.
+      if (isNotFound(err)) return [];
+      throw err;
+    }
+  }
+
+  async downloadRunArtifact(
+    repo: RepoRef,
+    runId: number,
+    name: string,
+  ): Promise<Uint8Array | null> {
+    const artifacts = await withRetry(() =>
+      withTimeout(
+        this.octokit.rest.actions.listWorkflowRunArtifacts({
+          owner: repo.owner,
+          repo: repo.name,
+          run_id: runId,
+          per_page: 100,
+        }),
+        TIMEOUT,
+      ),
+    );
+    const artifact = artifacts.data.artifacts.find((a) => a.name === name);
+    if (!artifact) return null;
+    try {
+      const res = await withRetry(() =>
+        withTimeout(
+          this.octokit.rest.actions.downloadArtifact({
+            owner: repo.owner,
+            repo: repo.name,
+            artifact_id: artifact.id,
+            archive_format: 'zip',
+          }),
+          TIMEOUT,
+        ),
+      );
+      return new Uint8Array(res.data as ArrayBuffer);
+    } catch (err) {
+      // 410 Gone — the artifact has expired past its retention window.
+      if (isGone(err)) return null;
+      throw err;
+    }
+  }
+}
+
+function isNotFound(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { status?: number }).status === 404;
+}
+
+function isGone(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { status?: number }).status === 410;
 }
