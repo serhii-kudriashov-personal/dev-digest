@@ -12,6 +12,17 @@ export const s = {
     display: "flex",
     flexDirection: "column",
     gap: 6,
+    minWidth: 0,
+  } satisfies CSSProperties,
+  /** Wraps the vendored `SelectInput` — it has no `overflow`/`min-width`
+   *  guard of its own, so a long PR title flexes the native `<select>` past
+   *  its box instead of clipping (`client/INSIGHTS.md` 2026-08-26). This
+   *  wrapper is the clipping boundary since `SelectInput.tsx` is vendored and
+   *  not ours to edit. */
+  selectWrap: {
+    minWidth: 0,
+    overflow: "hidden",
+    borderRadius: 7,
   } satisfies CSSProperties,
   label: {
     fontSize: 12.5,

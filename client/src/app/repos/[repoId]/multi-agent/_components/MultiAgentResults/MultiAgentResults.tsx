@@ -15,6 +15,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Icon, Skeleton, Tabs, type TabDef } from "@devdigest/ui";
 import type { MultiAgentRunResult } from "@devdigest/shared";
@@ -38,6 +39,12 @@ export interface MultiAgentResultsProps {
   selectedRunId?: string | null;
   onSelectAgent?: (runId: string) => void;
   onOpenTrace: (runId: string) => void;
+  /** The pull's title, when the shell's already-fetched `pulls` list happens
+   *  to have it (`MultiAgentRunResult` itself carries only `pr_number`) —
+   *  without it the badge above just falls back to "PR #{number}". This
+   *  screen otherwise gives no indication of WHICH pull request a run's
+   *  results belong to. */
+  prTitle?: string | null;
 }
 
 export function MultiAgentResults({
@@ -47,6 +54,7 @@ export function MultiAgentResults({
   selectedRunId,
   onSelectAgent,
   onOpenTrace,
+  prTitle,
 }: MultiAgentResultsProps) {
   const t = useTranslations("runs");
 
@@ -69,8 +77,20 @@ export function MultiAgentResults({
 
   return (
     <div style={s.root}>
+      {result.pr_number != null && (
+        <div style={s.prBadgeRow}>
+          <Icon.GitPullRequest size={14} style={s.metaIcon} />
+          <Link href={`/repos/${result.repo_id}/pulls/${result.pr_number}`} style={s.prBadgeLink}>
+            {prTitle
+              ? t("page.prItem", { number: result.pr_number, title: prTitle })
+              : t("drawer.pr", { number: result.pr_number })}
+          </Link>
+        </div>
+      )}
+
       <div style={s.header}>
         <span style={s.meta}>
+          <Icon.Boxes size={13} style={s.metaIcon} />
           {t("page.meta", {
             count: lanes.length,
             duration: formatDurationSeconds(result.total_duration_ms),
@@ -102,15 +122,16 @@ export function MultiAgentResults({
       {mode === "columns" ? (
         <div style={s.grid}>
           {lanes.map((lane) => (
-            <AgentLane
-              key={lane.run_id}
-              lane={lane}
-              prId={result.pr_id}
-              repoId={result.repo_id}
-              prNumber={result.pr_number}
-              multiAgentRunId={result.id}
-              onOpenTrace={onOpenTrace}
-            />
+            <div key={lane.run_id} style={s.laneWrap}>
+              <AgentLane
+                lane={lane}
+                prId={result.pr_id}
+                repoId={result.repo_id}
+                prNumber={result.pr_number}
+                multiAgentRunId={result.id}
+                onOpenTrace={onOpenTrace}
+              />
+            </div>
           ))}
         </div>
       ) : (

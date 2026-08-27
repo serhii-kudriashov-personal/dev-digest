@@ -2,15 +2,23 @@ import type { CSSProperties } from "react";
 
 /** Co-located styles for AgentLane. */
 export const s = {
-  lane: {
-    border: "1px solid var(--border)",
+  lane: (accent: string): CSSProperties => ({
+    borderStyle: "solid",
+    borderTopWidth: 3,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderLeftWidth: 1,
+    borderTopColor: accent,
+    borderRightColor: "var(--border)",
+    borderBottomColor: "var(--border)",
+    borderLeftColor: "var(--border)",
     borderRadius: 10,
     background: "var(--bg-surface)",
     overflow: "hidden",
     display: "flex",
     flexDirection: "column",
     minWidth: 0,
-  } satisfies CSSProperties,
+  }),
   header: {
     display: "flex",
     alignItems: "center",
@@ -35,6 +43,21 @@ export const s = {
   } satisfies CSSProperties,
   findingsList: { display: "flex", flexDirection: "column", gap: 8 } satisfies CSSProperties,
   capsNote: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  scoreRing: {
+    position: "relative",
+    width: 28,
+    height: 28,
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  } satisfies CSSProperties,
+  scoreRingNum: {
+    position: "absolute",
+    fontSize: 10.5,
+    fontWeight: 700,
+    color: "var(--text-primary)",
+  } satisfies CSSProperties,
   /** Visually hidden but present in the accessibility tree — the live region
    *  that announces a lane's status change (AC-47). Content mirrors what the
    *  status badge already shows sighted users. */

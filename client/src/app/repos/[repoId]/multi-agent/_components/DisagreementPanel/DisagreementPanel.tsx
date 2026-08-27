@@ -101,16 +101,21 @@ function DisagreementList({
                 </span>
               )}
             </div>
-            {loc.stances.map((stance) => (
-              <div key={stance.run_id} style={s.stanceRow}>
-                <span style={s.stanceAgent}>{stance.agent_name}</span>
-                {stance.flagged ? (
-                  <SeverityBadge severity={stance.severity as Severity} compact />
-                ) : (
-                  <span style={s.didNotFlag}>{t("conflicts.didNotFlag")}</span>
-                )}
-              </div>
-            ))}
+            <div style={s.stancesGrid}>
+              {loc.stances.map((stance) => (
+                <div key={stance.run_id} style={s.stanceCol}>
+                  <span style={s.stanceAgent}>{stance.agent_name}</span>
+                  {stance.flagged ? (
+                    <SeverityBadge severity={stance.severity as Severity} />
+                  ) : (
+                    <span style={s.didNotFlagRow}>
+                      <span style={s.didNotFlagDot} />
+                      <span style={s.didNotFlag}>{t("conflicts.didNotFlag")}</span>
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         );
       })}

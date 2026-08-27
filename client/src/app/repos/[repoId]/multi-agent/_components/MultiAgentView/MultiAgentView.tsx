@@ -77,6 +77,10 @@ export function MultiAgentView() {
   // is missing otherwise).
   const activeRunId = forceNew ? null : runId ?? runs?.[0]?.id ?? null;
   const { data: result, isLoading: resultLoading } = useMultiAgentRun(activeRunId);
+  // `MultiAgentRunResult` itself carries only `pr_number` — the title comes
+  // from whichever `PrMeta` this shell already fetched for the PR picker, so
+  // `MultiAgentResults` can show WHICH pull request a run's results are for.
+  const resultPrTitle = pulls?.find((p) => p.id === result?.pr_id)?.title ?? null;
 
   // Reopening this screen with no `?pr=` (the left-nav entry point has none)
   // restores the last PR this browser looked at here, so "go to Multi-Agent
@@ -200,6 +204,7 @@ export function MultiAgentView() {
               selectedRunId={selectedAgentRunId}
               onSelectAgent={(id) => setParams({ [AGENT_PARAM]: id })}
               onOpenTrace={(id) => setParams({ [TRACE_PARAM]: id })}
+              prTitle={resultPrTitle}
             />
           </>
         )}

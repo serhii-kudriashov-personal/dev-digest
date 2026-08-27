@@ -18,7 +18,21 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Button, Checkbox, EmptyState, Icon } from "@devdigest/ui";
+import { formatCost } from "@/lib/format";
+import { agentAccent } from "./constants";
 import { s } from "./styles";
+
+/** Seconds-formatted duration, or an em dash for "not yet known" — never `0`
+ *  (root `INSIGHTS.md` 2026-08-02), duplicated from `ConfigureRunPanel.tsx`
+ *  rather than shared across this cross-route boundary (`frontend-ui-architecture` §2). */
+function formatSeconds(ms: number | null | undefined): string {
+  if (ms == null) return "—";
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
 
 /** The minimal shape AgentPicker needs — deliberately narrower than the full
  *  `Agent` contract so either caller can build it from whatever it already
@@ -27,6 +41,10 @@ export interface AgentPickerAgent {
   id: string;
   name: string;
   enabled: boolean;
+  /** Last run's summary, when the caller already has one (Configure-run's
+   *  history). Omitted callers just get a plainer card. */
+  summary?: string | null;
+  lastRun?: { durationMs: number | null; costUsd: number | null } | null;
 }
 
 export interface AgentPickerProps {
@@ -89,20 +107,38 @@ export function AgentPicker({
         </button>
       </div>
       <ul role="group" aria-label={t("picker.listLabel")} style={s.list}>
-        {agents.map((a) => (
-          <li key={a.id}>
-            <Checkbox
-              checked={selected.includes(a.id)}
-              onChange={() => onToggle(a.id)}
-              label={
-                <span>
-                  {a.name}
-                  {!a.enabled && <span style={s.disabledTag}> · {t("picker.agentDisabled")}</span>}
-                </span>
-              }
-            />
-          </li>
-        ))}
+        {agents.map((a) => {
+          const checked = selected.includes(a.id);
+          const accent = agentAccent(a.id);
+          const I = Icon[accent.icon];
+          const stats =
+            a.lastRun && (a.lastRun.durationMs != null || a.lastRun.costUsd != null)
+              ? `${formatSeconds(a.lastRun.durationMs)} · ${formatCost(a.lastRun.costUsd)}`
+              : null;
+          return (
+            <li key={a.id} style={s.card(accent.color, checked)}>
+              <Checkbox
+                checked={checked}
+                onChange={() => onToggle(a.id)}
+                label={
+                  <span style={s.labelRow}>
+                    <span style={s.iconBadge(accent.color)}>
+                      <I size={14} />
+                    </span>
+                    <span style={s.cardBody}>
+                      <span style={s.cardNameRow}>
+                        <span style={s.cardName}>{a.name}</span>
+                        {!a.enabled && <span style={s.disabledTag}>· {t("picker.agentDisabled")}</span>}
+                      </span>
+                      {a.summary && <span style={s.cardSummary}>{truncate(a.summary, 110)}</span>}
+                    </span>
+                    {stats && <span style={s.cardStats}>{stats}</span>}
+                  </span>
+                }
+              />
+            </li>
+          );
+        })}
       </ul>
       <div style={s.footer}>
         {configureHref && (

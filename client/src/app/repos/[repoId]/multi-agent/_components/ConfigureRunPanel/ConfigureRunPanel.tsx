@@ -60,7 +60,16 @@ export function ConfigureRunPanel({
   const start = useStartMultiAgentRun();
 
   const agents: AgentPickerAgent[] = React.useMemo(
-    () => history.map((h) => ({ id: h.agent_id, name: h.agent_name, enabled: h.enabled })),
+    () =>
+      history.map((h) => ({
+        id: h.agent_id,
+        name: h.agent_name,
+        enabled: h.enabled,
+        summary: h.last_run?.summary ?? null,
+        lastRun: h.last_run
+          ? { durationMs: h.last_run.duration_ms, costUsd: h.last_run.cost_usd }
+          : null,
+      })),
     [history],
   );
 
@@ -84,11 +93,13 @@ export function ConfigureRunPanel({
     <div style={s.root}>
       <div style={s.prField}>
         <label style={s.label}>{t("page.selectPr")}</label>
-        <SelectInput
-          value={prId ?? ""}
-          onChange={(v) => v && onSelectPr(v)}
-          options={[{ value: "", label: t("page.selectPr") }, ...prOptions]}
-        />
+        <div style={s.selectWrap}>
+          <SelectInput
+            value={prId ?? ""}
+            onChange={(v) => v && onSelectPr(v)}
+            options={[{ value: "", label: t("page.selectPr") }, ...prOptions]}
+          />
+        </div>
       </div>
 
       <div style={s.agentBlock}>

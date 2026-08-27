@@ -28,3 +28,18 @@ const VERDICT_COLOR: Record<string, string> = {
 export function verdictColor(verdict: string | null): string {
   return verdict ? (VERDICT_COLOR[verdict] ?? "var(--text-muted)") : "var(--text-muted)";
 }
+
+/** Fixed palette a lane's accent is drawn from — reuses existing severity/
+ *  status tokens rather than introducing new colours, so a lane's accent
+ *  always matches the theme (light/dark) automatically. Purely decorative:
+ *  it carries no meaning about the agent (AC-47 only binds status). */
+const LANE_ACCENT_PALETTE = ["var(--crit)", "var(--warn)", "var(--accent)", "var(--ok)"] as const;
+
+/** Deterministic accent colour for a lane, keyed on the agent's identity so
+ *  the same agent gets the same colour across renders and reloads. */
+export function laneAccentColor(agentId: string | null, agentName: string): string {
+  const key = agentId ?? agentName;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return LANE_ACCENT_PALETTE[hash % LANE_ACCENT_PALETTE.length] ?? LANE_ACCENT_PALETTE[0];
+}

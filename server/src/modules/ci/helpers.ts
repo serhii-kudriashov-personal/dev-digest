@@ -172,7 +172,7 @@ jobs:
 
       - name: Skip forked pull request
         if: \${{ ${FORKED_GUARD} }}
-        run: echo "DevDigest review skipped: this pull request comes from a fork and cannot access repository secrets."
+        run: 'echo "DevDigest review skipped: this pull request comes from a fork and cannot access repository secrets."'
 
       - name: Run DevDigest review
         if: \${{ ${SAME_REPO_GUARD} }}

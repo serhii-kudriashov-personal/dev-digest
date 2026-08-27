@@ -7,6 +7,7 @@ export const s = {
     flexDirection: "column",
     gap: 20,
     minWidth: 0,
+    padding: "20px 24px",
   } satisfies CSSProperties,
   stepRail: { padding: "4px 0" } satisfies CSSProperties,
   body: { display: "flex", flexDirection: "column", gap: 16, minHeight: 220 } satisfies CSSProperties,

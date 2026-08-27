@@ -18,6 +18,10 @@ appending its row here in the same edit.**
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-26 | Patterns | `client/src/vendor/shared/contracts/observability.ts`, `client/.../MultiAgentView/**`, `client/.../MultiAgentResults/**` | `MultiAgentRunResult` has no PR title — the results screen needed one joined in from the shell's `usePulls` fetch |
+| 2026-08-26 | Patterns | `client/src/vendor/ui/kit/Checkbox.tsx`, `client/src/components/agent-picker/**` | `AgentPicker`'s vendored `Checkbox` label already forwards a click from anywhere in it — a wrapper `onClick` double-toggles |
+| 2026-08-26 | Patterns | `client/src/vendor/shared/contracts/observability.ts`, `client/.../DisagreementPanel/**` | `LocationStance` deliberately has no free-text field — a design mock's per-agent rationale note can't be rendered as real data |
+| 2026-08-26 | Patterns | `client/src/vendor/ui/kit/Modal.tsx`, any `<Modal>` children | The vendored `Modal`'s children slot ships with zero padding — only its header and footer get one |
 | 2026-08-25 | Patterns | `client/src/app/repos/[repoId]/multi-agent/**`, `client/src/vendor/ui/nav.ts` | `runs?.[0]` as the "last run" fallback makes Configure unreachable once a PR has history, and the PR-less nav entry has nothing to feed that fallback in the first place |
 | 2026-08-17 | Patterns | `client/.../VerdictBanner/**`, `client/.../PrBriefSection/**`, `client/.../ReviewRunAccordion/**` | `VerdictBanner` gained three opt-in props only `PrBriefSection` ever passes — next one-caller prop should split the components instead |
 | 2026-08-17 | Patterns | `client/.../PrBriefSection/**`, `client/.../ReviewRunAccordion/**`, `review.summary` vs `brief.what`/`why` | `PrBriefSection`'s text is `brief.what + brief.why`, NEVER `review.summary` — two summary-shaped strings answer different questions |
@@ -184,6 +188,88 @@ lines were in
 shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
+
+### 2026-08-26 — `MultiAgentRunResult` carries `pr_number` but no PR title — the results screen needed to be handed one from the shell's already-fetched `pulls` list
+
+**Rule:** `MultiAgentRunResult` (`client/src/vendor/shared/contracts/observability.ts:124`)
+has `pr_id`/`pr_number` but no `title` — the results view (`MultiAgentResults.tsx`)
+had NOTHING telling a user which pull request the run on screen belongs to,
+easy to miss since switching the `?pr=` query param silently swaps in a
+different PR's last run underneath the exact same screen. Fixed by having
+`MultiAgentView.tsx` (which already calls `usePulls(repoId)` for the PR
+picker) look up `pulls?.find((p) => p.id === result?.pr_id)?.title` and pass
+it down as `MultiAgentResults`'s new optional `prTitle` prop, rendered as a
+linked badge above the run meta line — falls back to a plain "PR #{number}"
+(`t("drawer.pr")`, already existed) when the title lookup misses.
+
+**Why:** the run result and the PR list are two different fetches
+(`useMultiAgentRun` vs `usePulls`) that happen to share `pr_id`/`id` — no
+single query returns both, so this has to be a cross-hook join in the shell,
+not something `MultiAgentResults` (which stays a pure props component,
+`client/INSIGHTS.md` 2026-08-02) can compute itself.
+
+**Where:** `client/src/vendor/shared/contracts/observability.ts:124-140`,
+`client/.../MultiAgentView/MultiAgentView.tsx`,
+`client/.../MultiAgentResults/MultiAgentResults.tsx`.
+
+### 2026-08-26 — `AgentPicker`'s vendored `<Checkbox label={...}>` already forwards a click from ANY of its label content to the checkbox — no wrapper `onClick` needed, and adding one would double-toggle
+
+**Rule:** `Checkbox` (`client/src/vendor/ui/kit/Checkbox.tsx:15`) renders a
+native `<label>` wrapping its `role="checkbox"` `<button>` plus whatever node
+is passed as `label`. Because `<button>` is a labelable HTML element, clicking
+*anywhere* inside that `<label>` — including deep inside a rich `label` node
+(icon badge, multi-line text, a stats string) — already forwards a single
+click to the inner button via native label semantics; this is NOT something
+the vendor component implements itself. So building a bigger clickable "card"
+row (`AgentPicker.tsx`'s per-agent card, SPEC-05) only needs richer content
+passed through the existing `label` prop — do not add your own `onClick` to
+an outer wrapper around a `<Checkbox>`, that fires a second toggle on top of
+the native forward and cancels the click out (looks like clicking the row
+does nothing).
+
+**Why:** cost real time working out why a naive `<li onClick={...}><Checkbox .../></li>`
+wrapper would have silently no-op'd on click before writing it.
+
+**Where:** `client/src/vendor/ui/kit/Checkbox.tsx:15`,
+`client/src/components/agent-picker/AgentPicker.tsx`.
+
+### 2026-08-26 — `LocationStance` deliberately has no free-text field — a design mock's per-agent rationale note in "Where agents disagree" cannot be rendered as real data
+
+**Rule:** `LocationStance` (`client/src/vendor/shared/contracts/observability.ts:89`)
+carries only `agent_name`, `flagged`, `severity` and `finding_ids` — no note or
+rationale string, by deliberate design (its own doc comment: "a did-not-flag
+entry must be reconstructible from `flagged` alone (AC-25), never from a
+model-authored 'note' that could smuggle a rationale for silence"). A design
+mock that shows a short explanatory line under each agent's column in the
+disagreement panel (e.g. "Not a security concern.") has nothing behind it in
+the wire shape — restyle `DisagreementPanel` around what the type actually
+carries (agent name + severity badge or "did not flag"), do not invent the
+text client-side.
+
+**Why:** that omission is a safety property (AC-25), not an oversight — adding
+the field back would need a deliberate spec change, not a styling pass.
+
+**Where:** `client/src/vendor/shared/contracts/observability.ts:83-97`,
+`client/src/app/repos/[repoId]/multi-agent/_components/DisagreementPanel/DisagreementPanel.tsx`.
+
+### 2026-08-26 — The vendored `Modal`'s children slot ships with ZERO padding — only its header and footer get one
+
+**Rule:** `Modal` (`client/src/vendor/ui/kit/Modal.tsx:60`) wraps `children` in
+a bare `<div style={{ flex: 1, overflow: "auto" }}>` — no padding at all —
+while its header gets `18px 24px` and its optional `footer` prop gets
+`16px 24px`. Any component mounted as `<Modal>{...}</Modal>` children must add
+its own horizontal (and usually vertical) padding in its own root style, or its
+content renders flush against the modal's edges while the title above it does
+not. `ExportToCiWizard` was missing this (`styles.ts`'s `outer` had no
+`padding`) — fixed by adding `padding: "20px 24px"` to `outer`, matching the
+header's horizontal padding.
+
+**Why:** `Modal.tsx` is vendored (`*/src/vendor/**`) and not to be refactored,
+so the padding has to be added by every child that renders inside it, not by
+the modal itself.
+
+**Where:** `client/src/vendor/ui/kit/Modal.tsx:60`,
+`client/src/app/agents/[id]/_components/ExportToCiWizard/styles.ts:4-10`.
 
 ### 2026-08-25 — `activeRunId = runId ?? runs?.[0]?.id ?? null` made Configure permanently unreachable once a PR had one run, and the nav entry with no `?pr=` had no way back to it either
 

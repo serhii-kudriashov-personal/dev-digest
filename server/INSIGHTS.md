@@ -64,6 +64,7 @@ appending its row here in the same edit.**
 | 2026-08-03 | Tools | `server/src/modules/**/repository.ts`, transactions | A Drizzle transaction handle is NOT a `Db` — compose with `DbOrTx` |
 | 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | `octokit` and `p-queue` are UNRESOLVABLE to dependency-cruiser |
 | 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | The depcruise config must be `.cjs`, and `--init` writes the wrong extension |
+| 2026-08-26 | Errors | `server/src/modules/ci/helpers.ts#buildWorkflowYaml`, generated `.github/workflows/devdigest-review.yml` | An unquoted `run:` sentence containing `: ` broke the generated workflow's YAML — quote any human-readable `run:` string |
 | 2026-08-21 | Errors | `server/src/modules/reviews/repository/review.repo.ts`, list queries feeding a mutated list | Accept/Dismiss reshuffled the findings list because its fetch query had no `ORDER BY` |
 | 2026-08-11 | Errors | `server/src/modules/repo-intel/**`, blast contracts | `DownstreamImpact.symbol` is not unique across `blast.downstream` |
 | 2026-08-09 | Errors | `server/src/modules/reviews/**`, `agent_runs` | Deleting an `agent_runs` row does NOT stop the run — it keeps spending |
@@ -1471,6 +1472,35 @@ than relying on config auto-discovery. Same trap applies to any future
 (`"arch"`); `"type": "module"` at `server/package.json:4`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-26 — `buildWorkflowYaml`'s "Skip forked pull request" step generated an invalid `.github/workflows/devdigest-review.yml`
+
+**Symptom:** installing CI via the Export to CI wizard produced a workflow
+file GitHub Actions rejected outright — "Invalid workflow file... You have an
+error in your yaml syntax on line 22" — reported after a fresh install on
+`serhii-kudriashov-personal/dev-digest`.
+
+**Cause:** `buildWorkflowYaml` (`server/src/modules/ci/helpers.ts:175`) emitted
+the step as an unquoted plain YAML scalar: `` run: echo "DevDigest review
+skipped: this pull request comes from a fork and cannot access repository
+secrets." ``. The double quotes are shell syntax, not YAML string delimiters —
+to the YAML parser this is a bare plain scalar, and it contains `skipped: `
+(colon immediately followed by a space) mid-string. YAML reads any `: ` inside
+a block-context plain scalar as the start of a nested mapping key, so the
+parser throws "Nested mappings are not allowed in compact mappings." None of
+the file's other `run:` lines have a colon-space pair, which is why only this
+one step broke.
+
+**Takeaway:** this workflow file is built as a hand-written template literal
+(`server/src/modules/ci/helpers.ts:149-192`), never passed through the `yaml`
+stringifier — nothing catches an unquoted `: ` automatically. Any `run:` value
+embedded here that is a human-readable sentence (as opposed to a bare command)
+must be wrapped in explicit YAML quotes; fixed by single-quoting the whole
+command (it already contains double quotes internally, so single quotes were
+the only option without escaping). There is still no test asserting
+`buildWorkflowYaml`'s output parses via `yaml.parse` — this class of bug is
+invisible to `pnpm typecheck` and to any test that doesn't feed the generated
+string back through a real YAML parser.
 
 ### 2026-08-21 — Accept/Dismiss on a finding visually reshuffles the whole findings list, because its fetch query has no `ORDER BY`
 
