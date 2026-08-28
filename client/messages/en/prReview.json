@@ -52,11 +52,18 @@
       "SUGGESTION": "Suggestion"
     }
   },
-  "runReview": {
-    "runAll": "Run all enabled agents",
-    "configureAgents": "Configure agents…",
+  "picker": {
+    "trigger": "Run Review",
+    "selectedCount": "{count, plural, =0 {No agents selected} one {# agent selected} other {# agents selected}}",
+    "selectAll": "Select all",
+    "listLabel": "Agents",
+    "confirm": "{count, plural, =0 {Run agents} one {Run # agent} other {Run # agents}}",
     "running": "Running…",
-    "runReview": "Run Review",
+    "configureRun": "Configure run…",
+    "agentDisabled": "disabled",
+    "noAgentsTitle": "No agents yet",
+    "noAgentsBody": "Create an agent to start reviewing pull requests.",
+    "noAgentsCta": "Go to Agents",
     "mergedWarning": "Already merged — review is informational",
     "mergedTooltip": "This PR is already merged; running a review won’t affect the merged code."
   },

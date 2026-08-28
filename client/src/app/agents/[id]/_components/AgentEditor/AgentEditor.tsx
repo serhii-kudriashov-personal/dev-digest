@@ -11,6 +11,7 @@ import { ConfigTab } from "./_components/ConfigTab";
 import { ContextTab } from "./_components/ContextTab";
 import { SkillsTab } from "./_components/SkillsTab";
 import { EvalsTab } from "./_components/EvalsTab";
+import { CiTab } from "../CiTab";
 import { TABS } from "./constants";
 import { s } from "./styles";
 
@@ -39,6 +40,10 @@ export function AgentEditor({ agent, tab, onTab }: { agent: Agent; tab: string; 
           // Same reason as SkillsTab/ContextTab: renders straight from the
           // query cache; the `?case=` modal is its own concern.
           <EvalsTab agentId={agent.id} />
+        ) : tab === "ci" ? (
+          // Same reason as SkillsTab/ContextTab/EvalsTab: renders straight
+          // from the query cache, no local copy of server state.
+          <CiTab agentId={agent.id} agentName={agent.name} />
         ) : (
           <ConfigTab key={agent.id} agent={agent} />
         )}

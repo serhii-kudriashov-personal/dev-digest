@@ -352,6 +352,7 @@ export const CiRun = z.object({
   cost_usd: z.number().nullable(),
   github_url: z.string().nullable(),
   source: z.string().nullable(),
+  repo: z.string().nullish(),
   agent: z.string().nullish(),
   duration_s: z.number().nullish(),
 });

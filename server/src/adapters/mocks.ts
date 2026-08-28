@@ -16,6 +16,7 @@ import type {
   PrReviewComment,
   OpenPrPayload,
   CommitFilesPayload,
+  WorkflowRunSummary,
   IssueMeta,
   GitClient,
   CloneOptions,
@@ -130,6 +131,10 @@ export interface MockGitHubOptions {
   login?: string;
   /** Existing inline review comments returned by listReviewComments. */
   comments?: PrReviewComment[];
+  /** Seeds `listWorkflowRuns`; defaults to no runs. */
+  workflowRuns?: WorkflowRunSummary[];
+  /** Seeds `downloadRunArtifact`; defaults to no artifact. */
+  runArtifact?: Uint8Array;
 }
 
 export class MockGitHubClient implements GitHubClient {
@@ -241,6 +246,21 @@ export class MockGitHubClient implements GitHubClient {
 
   async currentLogin(): Promise<string> {
     return this.opts.login ?? 'mock-user';
+  }
+
+  async listWorkflowRuns(
+    _repo: RepoRef,
+    _opts: { workflowFile: string; perPage: number },
+  ): Promise<WorkflowRunSummary[]> {
+    return this.opts.workflowRuns ?? [];
+  }
+
+  async downloadRunArtifact(
+    _repo: RepoRef,
+    _runId: number,
+    _name: string,
+  ): Promise<Uint8Array | null> {
+    return this.opts.runArtifact ?? null;
   }
 }
 

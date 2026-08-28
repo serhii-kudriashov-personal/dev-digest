@@ -67,4 +67,20 @@ export const s = {
     fontSize: 12.5,
     color: "var(--text-muted)",
   } satisfies CSSProperties,
+  pickerWrap: {
+    position: "relative",
+    display: "inline-block",
+  } satisfies CSSProperties,
+  pickerPanel: {
+    position: "absolute",
+    top: "calc(100% + 6px)",
+    right: 0,
+    width: 300,
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-strong)",
+    borderRadius: 9,
+    boxShadow: "var(--shadow-modal)",
+    padding: 12,
+    zIndex: 40,
+  } satisfies CSSProperties,
 } as const;

@@ -1,6 +1,6 @@
 /* PR Detail screen — /repos/:repoId/pulls/:number. F2 shell extended by A2 with:
    - Findings panel (VerdictBanner + FindingCards)
-   - RunReviewDropdown (run all / a specific agent) + live SSE RunStatus
+   - AgentPicker (select agents to run) + live SSE RunStatus
    - Basic file-by-file diff viewer in the Files tab
    Tab state lives in query (?tab). */
 "use client";
@@ -27,7 +27,7 @@ import { PrDetailHeader } from "../PrDetailHeader";
 import { OverviewTab } from "../OverviewTab";
 import { FindingsTab } from "../FindingsTab";
 import { DiffTab } from "../DiffTab";
-import RunTraceDrawer from "../RunTraceDrawer";
+import RunTraceDrawer from "@/components/run-trace-drawer";
 import {
   SEVERITY_PARAM,
   parseSeverityParam,
@@ -269,6 +269,7 @@ export function PrDetailView() {
           prNumber={pr.number}
           findings={runs.find((r) => r.run_id === traceRunId)?.findings ?? []}
           agentName={runs.find((r) => r.run_id === traceRunId)?.agent_name ?? null}
+          running={liveRunIds.includes(traceRunId)}
           onClose={() => setParam("trace", null)}
         />
       )}
