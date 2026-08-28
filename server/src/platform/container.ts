@@ -23,7 +23,13 @@ import { OpenRouterProvider } from '@devdigest/reviewer-core';
 import { estimateCost } from '../adapters/llm/pricing.js';
 import { PriceBook } from './price-book.js';
 import { ConfigError } from './errors.js';
+import {
+  type GitLabInstanceClient,
+  GitLabInstanceHttpClient,
+} from '../adapters/gitlab/index.js';
+import { RateGate } from './resilience.js';
 import { AgentsRepository } from '../modules/agents/repository.js';
+import { InstancesRepository } from '../modules/instances/repository.js';
 import { SkillsRepository } from '../modules/skills/repository.js';
 import { ReviewRepository } from '../modules/reviews/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
@@ -66,6 +72,9 @@ export interface ContainerOverrides {
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
+  /** GitLab instance verification (SPEC-06) — tests inject a mock so no test
+   *  ever makes an outbound request to an operator-named host. */
+  gitlabInstanceClient?: GitLabInstanceClient;
 }
 
 export class Container {
@@ -86,6 +95,7 @@ export class Container {
   // runs). Constructed here, in the composition root, so consuming modules use
   // `container.agentsRepo` instead of reaching into another module's folder.
   private _agentsRepo?: AgentsRepository;
+  private _instancesRepo?: InstancesRepository;
   private _skillsRepo?: SkillsRepository;
   private _reviewRepo?: ReviewRepository;
   private _repoIntel?: RepoIntel;
@@ -96,6 +106,8 @@ export class Container {
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
+  private _gitlabInstanceClient?: GitLabInstanceClient;
+  private _forgeRateGate?: RateGate;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -114,6 +126,17 @@ export class Container {
 
   get agentsRepo(): AgentsRepository {
     return (this._agentsRepo ??= new AgentsRepository(this.db));
+  }
+
+  /**
+   * Registered forge instances (SPEC-06). Constructed here, in the composition
+   * root, so a consuming slice reads `container.instancesRepo` instead of
+   * importing another slice's `repository.ts` — which `no-cross-slice-import`
+   * forbids and this getter is exempt from by construction
+   * (`server/INSIGHTS.md` 2026-08-08).
+   */
+  get instancesRepo(): InstancesRepository {
+    return (this._instancesRepo ??= new InstancesRepository(this.db));
   }
 
   get skillsRepo(): SkillsRepository {
@@ -208,6 +231,31 @@ export class Container {
     if (this.overrides.depgraph) return this.overrides.depgraph;
     this._depgraph ??= new DepCruiseGraph();
     return this._depgraph;
+  }
+
+  /**
+   * Per-instance rate gate shared by every outbound forge call (NFR-10,
+   * NFR-11). One gate per container, keyed by instance, so a `429` from one
+   * registered instance defers only that instance's next request.
+   */
+  get forgeRateGate(): RateGate {
+    return (this._forgeRateGate ??= new RateGate());
+  }
+
+  /**
+   * GitLab instance verification (SPEC-06). Synchronous because it needs no
+   * secret of its own — the access token is a per-call argument, supplied by
+   * the operator on registration or read from `SecretsProvider` on a re-test.
+   *
+   * Tests inject a mock via `ContainerOverrides.gitlabInstanceClient`; that
+   * seam is the only reason no test makes a real outbound request, so nothing
+   * outside this file may `new` the implementation
+   * (`backend-onion-architecture` §4).
+   */
+  get gitlabInstanceClient(): GitLabInstanceClient {
+    if (this.overrides.gitlabInstanceClient) return this.overrides.gitlabInstanceClient;
+    this._gitlabInstanceClient ??= new GitLabInstanceHttpClient({ gate: this.forgeRateGate });
+    return this._gitlabInstanceClient;
   }
 
   /** Token counter (js-tiktoken) for the repo-map budget search. */

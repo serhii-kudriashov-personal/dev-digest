@@ -18,6 +18,7 @@ appending its row here in the same edit.**
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-28 | Patterns | `client/src/lib/github-urls.ts`, `client/.../ConventionCard/helpers.ts`, any deep-link or provider-URL sweep | `githubBlobUrl` exists TWICE under two different signatures, and only one lives in `lib/` — grepping the import path finds three of four consumers |
 | 2026-08-26 | Patterns | `client/src/vendor/shared/contracts/observability.ts`, `client/.../MultiAgentView/**`, `client/.../MultiAgentResults/**` | `MultiAgentRunResult` has no PR title — the results screen needed one joined in from the shell's `usePulls` fetch |
 | 2026-08-26 | Patterns | `client/src/vendor/ui/kit/Checkbox.tsx`, `client/src/components/agent-picker/**` | `AgentPicker`'s vendored `Checkbox` label already forwards a click from anywhere in it — a wrapper `onClick` double-toggles |
 | 2026-08-26 | Patterns | `client/src/vendor/shared/contracts/observability.ts`, `client/.../DisagreementPanel/**` | `LocationStance` deliberately has no free-text field — a design mock's per-agent rationale note can't be rendered as real data |
@@ -188,6 +189,40 @@ lines were in
 shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
+
+### 2026-08-28 — `githubBlobUrl` exists TWICE under two different signatures, and only one of them lives in `lib/` — a sweep that greps the import path finds three of four consumers
+
+**Rule:** there is no single deep-link builder in this client. Two unrelated
+functions share the name `githubBlobUrl`, take **different arguments**, and are
+imported from two different places. Changing how deep-links are built means
+finding both; grepping `@/lib/github-urls` finds only the first.
+
+**Why:** the two are easy to mistake for one, because a `rg githubBlobUrl` hit
+list reads like a single helper with five call sites:
+
+- `client/src/lib/github-urls.ts:24` — `githubBlobUrl(repoFullName, sha, file, startLine?, endLine?)`,
+  plus `githubPrUrl` at `:16`. Consumers: `FindingCard.tsx:74`,
+  `BlastRadiusCard.tsx:263`, and `PrDetailView.tsx:196` (that one for
+  `githubPrUrl`).
+- `client/src/app/repos/[repoId]/conventions/_components/ConventionCard/helpers.ts:42`
+  — `githubBlobUrl(candidate, repo)`, an entirely separate implementation
+  reading `evidence_path` / `evidence_line_start` / `evidence_line_end` off a
+  convention candidate and `default_branch` off the repo. Re-exported through
+  `ConventionCard/index.ts:2` and consumed by `ConventionsView.tsx:188`. **It
+  does not import from `lib/` at all**, and it has its own tests in
+  `ConventionCard.test.tsx:153-186`.
+
+The second one is invisible to the obvious sweep twice over: it is route-local,
+and its consumer imports it from `"../ConventionCard"`, so neither the path
+`lib/github-urls` nor the barrel name appears at the call site.
+
+**Found while** checking `specs/2026-08-28-gitlab-repositories.md`, whose design
+review states every deep-link derives from *one* constant with five consumers.
+That is the `lib/` half only.
+
+**Where:** `client/src/lib/github-urls.ts:16,24`,
+`client/src/app/repos/[repoId]/conventions/_components/ConventionCard/helpers.ts:42`,
+`client/src/app/repos/[repoId]/conventions/_components/ConventionsView/ConventionsView.tsx:188`.
 
 ### 2026-08-26 — `MultiAgentRunResult` carries `pr_number` but no PR title — the results screen needed to be handed one from the shell's already-fetched `pulls` list
 

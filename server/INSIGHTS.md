@@ -29,6 +29,11 @@ appending its row here in the same edit.**
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
 | 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
 | 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-28 | Patterns | `server/src/adapters/gitlab/http.ts`, any per-request security guard, `…Checked` flags | A guard latched on the CLIENT is skipped on 3 of 4 requests, and only the injected collaborator's CALL COUNT can see it |
+| 2026-08-28 | Patterns | `server/src/platform/resilience.ts`, `withTimeout`, third-party `Retry-After` | `withTimeout` is a `Promise.race` and cancels NOTHING — a third-party-driven sleep needs `clearTimeout`, not just a race |
+| 2026-08-28 | Patterns | `server/src/adapters/mocks.ts`, optional port methods, `SecretsProvider.set` | A mock missing an OPTIONAL port method sends the service down its fallback branch and the test passes having exercised nothing |
+| 2026-08-28 | Patterns | `server/.dependency-cruiser.cjs` `ADAPTER_IMPLS`, `server/src/adapters/**` new families | A new `src/adapters/<name>/` directory is invisible to `pnpm arch` until it is listed in `ADAPTER_IMPLS` |
+| 2026-08-28 | Patterns | `server/src/adapters/git/simple-git.ts:37-61`, `server/src/modules/repos/helpers.ts`, `server/src/db/schema/repos.ts`, any change to repository identity | The clone location is derived from two path segments and `clone()` REUSES any directory that already has a `.git` — widening repository identity silently reviews the wrong repo's code |
 | 2026-08-25 | Patterns | `server/src/modules/reviews/{routes,service,repository}.ts`, `repository/run.repo.ts`, cross-tenant auth checks | `GET /runs/:id/trace` has NO workspace predicate anywhere in its call chain — any authenticated caller who has a run id can read another workspace's trace |
 | 2026-08-25 | Patterns | `server/src/modules/ci/repository.ts#upsertRun`, `service.ts#refresh`, any upsert inside a fan-out loop | An upsert called from inside a fan-out loop should return the row, not `void` |
 | 2026-08-25 | Patterns | `server/src/modules/skills/helpers.ts#previewFromZip`, `server/src/modules/ci/helpers.ts#parseResultArtifact`, untrusted-archive validation | Throw when the caller is one request; return `null` when the caller is a fan-out loop that must not abort on one bad item |
@@ -53,6 +58,9 @@ appending its row here in the same edit.**
 | 2026-08-09 | Patterns | `server/src/db/schema/**`, migrations | `findings` and `reviews` ARE indexed now — check the schema before you owe a migration |
 | 2026-08-02 | Patterns | `server/src/db/schema/**` | The `findings` table has no indexes at all — a FK is not an index |
 | 2026-08-02 | Patterns | `agents.system_prompt`, `docs/agent-prompts/**` | The live agent prompt is the DB column, not the markdown file |
+| 2026-08-28 | Tools | `server/src/modules/_shared/forge-url.ts` `parseIpv6`, `dns.lookup` output, SSRF runtime checks | Node's resolver spells an IPv4-mapped address in DOTTED-QUAD — a hex-only IPv6 parser answers `false` on it while every URL-form test passes |
+| 2026-08-28 | Tools | `server/src/modules/_shared/forge-url.ts`, `server/src/adapters/gitlab/http.ts`, IPv6 host checks | `url.hostname` keeps the brackets on an IPv6 literal, `dns.lookup` returns it bare — a shared predicate matches on only one call site |
+| 2026-08-28 | Tools | `server/vitest.config.ts:5-10`, `server/src/app.ts`, scratch `app.inject()` probes | `pnpm exec tsx` cannot load `src/app.ts` (`ERR_PACKAGE_PATH_NOT_EXPORTED` on `@octokit/app`) — write the probe as a temporary test file |
 | 2026-08-25 | Tools | `server/src/modules/ci/constants.ts`, `PINNED_ACTIONS`, SHA-pinning third-party actions | `gh api .../git/refs/tags/<version>` resolves straight to a commit SHA for `actions/checkout`/`actions/upload-artifact` — no annotated-tag dereference needed |
 | 2026-08-25 | Tools | `server/tsconfig.json`, fresh git worktrees, `reviewer-core/**` | A fresh secondary worktree needs `pnpm install` in BOTH `server/` and `reviewer-core/` before `server`'s gates mean anything |
 | 2026-08-25 | Tools | `reviewer-core/package-lock.json`, fresh installs | `pnpm install` inside `reviewer-core/` silently creates an untracked `pnpm-lock.yaml` — that package is npm, not pnpm |
@@ -72,6 +80,7 @@ appending its row here in the same edit.**
 | 2026-08-05 | Errors | `server/test/reviews.it.test.ts` | It fails on `prompt_assembly` for reasons that have nothing to do with your change |
 | 2026-08-03 | Errors | `*/src/vendor/shared/contracts/**`, DTOs | The jsonb `.nullish()` trap, second instance — and the fix is NOT to loosen the DTO |
 | 2026-08-02 | Errors | `server/src/modules/reviews/**` | `completeAgentRun`'s parameter type is declared TWICE |
+| 2026-08-28 | Open | `server/src/adapters/gitlab/instance.ts` `APPROVAL_PROBE_PATH`, GitLab approvals, Stage E AC-36…AC-38 | Which GitLab endpoint honestly distinguishes "approvals permitted" from "not an eligible approver"? The probe path is an unverified guess |
 | 2026-08-25 | Open | `server/src/db/schema/ci.ts`, `CiInstallation`, `CiTab/**` | `CiInstallation` never persisted `triggers`/`post_as` — "Update" can't restore a repo's previous configuration |
 | 2026-08-25 | Open | `server/src/modules/ci/service.ts#refresh` | `{ ingested }`'s count has no defined semantics — new-this-call or touched-this-call? |
 | 2026-08-08 | Open | `server/src/modules/settings/**`, §12 debt | Two slices import `settings/feature-models.ts`, and the §12 fix would break both |
@@ -474,6 +483,46 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-28 — A guard latched on the CLIENT is a guard skipped on 3 of 4 requests, and no value assertion can see it — only the injected collaborator's CALL COUNT
+
+**Rule:** a security check that must run per request may not be memoised on an object whose lifetime spans more than one request. The tell is a boolean field named `…Checked` / `…Verified` on a client class. Test it by asserting the **call count** of the injected collaborator, never by asserting the outcome.
+
+**Why:** `GitLabHttp` carried `hostChecked`, set after the first `assertHostIsPublic()`. `GitLabInstanceHttpClient.verify()` constructs one `GitLabHttp` and makes three requests (`/metadata`, `/user`, the approval probe), so the SSRF host guard ran on request 1 of 3 — and the file's own docblock claimed it ran "before the first request", which was true and useless. What makes this dangerous to review is that **every behavioural assertion passes identically with the latch in place**: same statuses, same bodies, same returned codes, same rejection codes. The only observable difference is how many times the resolver was called. `server/test/gitlab-adapter.test.ts` now asserts the injected resolver is called three times for `verify()`'s three requests.
+
+**Where:** `server/src/adapters/gitlab/http.ts` (latch removed; `assertHostIsPublic()` is now the first statement of every `get()`), `server/test/gitlab-adapter.test.ts`. Found by the Stage A security review of `plans/2026-08-28-gitlab-repositories.md`.
+
+### 2026-08-28 — `withTimeout` is a `Promise.race` and cancels NOTHING — a sleep whose duration comes from a third party needs `clearTimeout`, not just a race
+
+**Rule:** any `setTimeout`-based delay reachable from third-party input must take an `AbortSignal` **and** clear its timer on abort. Racing it against a timeout returns control to the caller but leaves the timer pending for its full duration, holding the event loop.
+
+**Why:** `withTimeout` (`server/src/platform/resilience.ts:13-24`) races a promise against a deadline and abandons the loser. `RateGate.wait` sleeps for a duration taken from the instance's own `Retry-After` / `RateLimit-Reset` header, so a hostile or merely broken forge answering `Retry-After: 60` produced a clean 10 s failure for the operator and a 60 s timer still holding a socket. The clamp (`Math.min(epochMs, now + maxDeferMs)`) bounds the *value* and does nothing about the abandoned timer. Fixed with `abortableSleep(ms, signal)` that calls `clearTimeout` and removes its listener in `finally`. Two deliberate semantics, both asserted: an aborted wait **returns rather than throws**, and it **leaves the recorded reset in place** — the defer was abandoned, not served, so the next request on that key must still honour it. `vi.getTimerCount()` is the only assertion that can see the leak.
+
+**Where:** `server/src/platform/resilience.ts` (`abortableSleep`, `RateGate.wait`), `server/test/resilience-rate-gate.test.ts`. Note `RateGate` shipped in Stage A with **no test at all** — it was not among the three test files that stage deferred, so "tests are deferred" quietly covered it; `plan-verifier` caught it as a `partial`.
+
+### 2026-08-28 — A mock missing an OPTIONAL port method sends the service down its fallback branch, and the test passes having exercised nothing
+
+**Rule:** when a port declares a method optionally (`set?(…)`), the mock in `server/src/adapters/mocks.ts` implements it anyway. A missing optional method does not fail `implements`, does not fail `pnpm typecheck` and does not fail the test — it silently selects the service's "capability absent" branch, and the assertion that follows describes that branch, not the feature.
+
+**Why:** `SecretsProvider.set` is optional (`server/src/vendor/shared/adapters.ts`), and `MockSecretsProvider` had only `get`. Every service whose write path is `secrets.set(...)` therefore took its read-only fallback under test — for the `instances` slice that is the `secrets_read_only` refusal, i.e. the registration path that stores the instance credential could not be exercised at all, while a route test still returned 201-shaped data and looked green. This is the mock-side twin of `backend-onion-architecture` §9's "a port without a mock makes ring 2 untestable": here the mock exists, so nothing warns, and only the *branch coverage* is missing. Fixed by giving `MockSecretsProvider` a real `set` plus a `stored` accessor so a test can assert **what** was written, not just that no error was thrown.
+
+**Where:** `server/src/adapters/mocks.ts:350` (`MockSecretsProvider`), `server/src/modules/instances/service.ts`. Found in Stage A of `plans/2026-08-28-gitlab-repositories.md`.
+
+### 2026-08-28 — A new `src/adapters/<name>/` directory is invisible to `pnpm arch` until it is listed in `ADAPTER_IMPLS`
+
+**Rule:** adding an adapter family means two edits — the directory, and its `^src/adapters/<name>/` entry in `ADAPTER_IMPLS` in `server/.dependency-cruiser.cjs`. Without the second, the rule that forbids `modules/**` importing an adapter implementation directly cannot see the new directory, and a green `pnpm arch` says nothing about it.
+
+**Why:** the boundary rules match implementations by an explicit path list, not by "anything under `adapters/`". `server/src/adapters/gitlab/**` shipped in Stage A with no `ADAPTER_IMPLS` row: today nothing under `modules/` imports it (everything resolves through `container.gitlabInstanceClient`), so the gate has nothing to catch — but it also cannot catch the regression, and the regression is the cheap one to make in a later stage. Same failure family as 2026-08-02's "a green first run proved nothing: 8 of 9 rules were blind": this gate reports on the rules it was given, and silence is not coverage.
+
+**Where:** `server/.dependency-cruiser.cjs` (`ADAPTER_IMPLS`), `server/src/adapters/gitlab/{http,instance,index}.ts`. Still outstanding as of Stage A — the config file was outside the implementing agent's owned file set.
+
+### 2026-08-28 — The clone location is derived from two path segments and `clone()` REUSES any directory that already has a `.git` — widening repository identity silently reviews the wrong repo's code
+
+**Rule:** any change that widens repository identity beyond `owner/name` — a second provider, a second host, nested namespaces, a fork of the same project — must give the local clone a location that includes every part of the new identity, and must fail an import whose target directory already holds a clone of a different remote. Do not assume the clone layer will notice; it is built to notice nothing.
+
+**Why:** `SimpleGitClient.clonePathFor()` (`server/src/adapters/git/simple-git.ts:37-61`) builds the path as `cloneDir/owner/name`, so identity collapses to exactly two segments, and `clone()` checks whether the target directory already contains a `.git` and, if so, **reuses it instead of cloning** — a deliberate resume-a-partial-import behaviour that becomes a correctness bug the moment two distinct repositories can map to one path. Two ways that already bites without any new provider: the same `owner/name` on two hosts, and a nested GitLab namespace (`group/sub/project`) truncating to two segments. The failure is silent and confident — the UI names the right repository while the review runs against the other one's working tree — and it is not read-only: the mirror hard-resets on sync (root `INSIGHTS.md` 2026-08-16), so the wrong repository's clone gets clobbered too. Note `parseRepoUrl` (`server/src/modules/repos/helpers.ts:51`) currently enforces exactly two path segments, which is what has kept this latent; relaxing that check without fixing the clone path is the trap.
+
+**Where:** `server/src/adapters/git/simple-git.ts:37-61`, `server/src/modules/repos/helpers.ts:51`, `server/src/db/schema/repos.ts` (`repos_ws_fullname_uq` on `(workspace_id, full_name)` alone). Written while specifying GitLab support — `specs/2026-08-28-gitlab-repositories.md` AC-17 and AC-18 exist solely to close this.
 
 ### 2026-08-25 — `GET /runs/:id/trace` has NO workspace predicate anywhere in its call chain — any authenticated caller who has a run id can read another workspace's trace
 
@@ -1163,6 +1212,30 @@ the editor field is
 
 ## Tool & Library Notes
 
+### 2026-08-28 — Node's resolver spells an IPv4-mapped address in DOTTED-QUAD, so a hex-only IPv6 parser answers `false` on resolver output while every URL-form test passes
+
+**Quirk:** second instance of the entry below, and worse, because this one cannot be caught by any admission-side test. `dns.lookup(host, { family: 6, v4mapped: true })` returns `::ffff:192.0.0.170` — never the hex form — while `new URL()` canonicalises every URL-form input to hex (`https://[::ffff:127.0.0.1]` → `[::ffff:7f00:1]`). A parser whose group regex is `^[0-9a-f]{1,4}$` therefore returns `null` for the whole literal, `isPrivateAddress` answers `false`, and the **runtime** half of the SSRF gate is open on any host publishing an IPv4-mapped AAAA record. Every syntactic test is green throughout, because the URL parser hands that side a spelling the regex accepts.
+
+**Workaround:** accept a trailing dotted-quad in the IPv6 parser and fold it into the last two 16-bit groups (`:(\d{1,3}\.){3}\d{1,3}$` → two hex groups) before splitting on `::`. Slicing at the matched colon preserves the first colon of a `::`, so `64:ff9b::169.254.169.254` survives correctly. Then assert **every** address in the test corpus in both spellings — that is the only thing that makes the shared predicate's coverage honest.
+
+**Where:** `server/src/modules/_shared/forge-url.ts` (`parseIpv6`), `server/src/adapters/gitlab/http.ts` (`defaultResolver` does not pass `v4mapped`, so this bites only on a host whose own AAAA record is IPv4-mapped), `server/test/instances-admission.test.ts` §"the RESOLVER spelling".
+
+### 2026-08-28 — `url.hostname` keeps the brackets on an IPv6 literal, `dns.lookup` returns it bare — a predicate shared by both call sites matches on only one of them
+
+**Quirk:** `new URL('https://[::1]/').hostname` is `'[::1]'`, brackets included, while `dns.lookup(host, { all: true })` yields `address: '::1'`. A private-address predicate written for one call site therefore silently never fires at the other — and the side that fails is the syntactic one, `admitBaseUrl`, which is the gate that runs **before** any request goes out. The result is a check that looks symmetric in the code and is open on IPv6 literals.
+
+**Workaround:** strip a leading `[` / trailing `]` at the top of the predicate so it accepts both forms, and unit-test it with `[::1]` *and* `::1` as separate cases — one input cannot detect the bug. Same rule for `fc00::/7` unique-local and `fe80::/10` link-local inputs, which arrive bracketed from the URL and bare from DNS.
+
+**Where:** `server/src/modules/_shared/forge-url.ts` (`isPrivateAddress`), called from `admitBaseUrl` and from `server/src/adapters/gitlab/http.ts#assertHostIsPublic`.
+
+### 2026-08-28 — `pnpm exec tsx` cannot load `server/src/app.ts` (`ERR_PACKAGE_PATH_NOT_EXPORTED` on `@octokit/app`) — a throwaway `app.inject()` probe has to be a temporary test file
+
+**Quirk:** the quickest way to prove a new slice is actually mounted rather than 404ing is a scratch script that calls `buildApp()` and `app.inject()`. `pnpm exec tsx scratch.ts` cannot do it here: importing `src/app.ts` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` on `@octokit/app`, because `tsx` applies the package's `exports` map as published while vitest resolves it through its own resolver plus the aliases in `server/vitest.config.ts:5-10`. The same import works perfectly under `pnpm test`.
+
+**Workaround:** write the probe as a temporary `server/test/<name>.test.ts`, run it with `pnpm exec vitest run <name>`, and delete it — not as a `tsx` script. Worth knowing before concluding from a `tsx` failure that the app itself is broken; the error names a dependency and looks nothing like a routing problem.
+
+**Where:** `server/vitest.config.ts:5-10`, `server/src/app.ts`. Found while verifying the `instances` slice was registered in `server/src/modules/index.ts`.
+
 ### 2026-08-25 — `gh api .../git/refs/tags/<version> --jq '.object.sha'` resolves straight to a commit SHA for `actions/checkout` and `actions/upload-artifact` — no annotated-tag dereference needed
 
 **Quirk:** pinning a third-party GitHub Action to a full commit SHA (AC-18-style
@@ -1801,6 +1874,12 @@ other delegated methods there.
 _Empty so far._
 
 ## Open Questions
+
+### 2026-08-28 — Which GitLab endpoint honestly distinguishes "approvals permitted" from "not an eligible approver"? `APPROVAL_PROBE_PATH` is currently a guess
+
+**Question:** `server/src/adapters/gitlab/instance.ts` probes approval capability against `/api/v4/merge_request_approval_settings`, chosen without web access to confirm it exists at instance scope or that its status codes carry the intended meaning. Is that the right endpoint, or should the probe be dropped in favour of attempting the action and reporting the outcome (which root `INSIGHTS.md` 2026-08-28 argues is the honest design for approvals)?
+
+**Blocked:** needs a `researcher` pass over `docs.gitlab.com/api/`, or one call against a live instance. It is safe to leave as-is meanwhile — every status except 200 and 403 maps to `'unknown'`, so a wrong path degrades to the honest answer and never to a confident "cannot approve"; the constant carries a docblock saying so. Nothing else in Stage A depends on the answer, but Stage E's AC-36/AC-37/AC-38 do.
 
 ### 2026-08-25 — `CiInstallation` never persisted `triggers`/`post_as`, so the CI tab's "Update" action can't actually restore a repo's previous configuration
 

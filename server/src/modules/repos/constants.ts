@@ -29,3 +29,23 @@ export const GIT_TOKEN_USERNAME = 'x-access-token';
 
 /** Host for which a token is embedded into an https clone URL. */
 export const GITHUB_HTTPS_HOST = 'github.com';
+
+/**
+ * SPEC-06 — the built-in github.com host, which is NOT a `git_instances` row.
+ *
+ * `repos.instance_id` is NULL for it, and these three literals are what
+ * `toRepoDto` reports instead. `BUILTIN_INSTANCE_KEY` is also the value the
+ * `instance_key` column defaults to, which is what makes AC-19 need no DML
+ * backfill and keeps `clonePathFor` byte-identical for every clone already on
+ * disk (`adapters/git/simple-git.ts`).
+ */
+export const BUILTIN_INSTANCE_KEY = 'github.com';
+export const BUILTIN_INSTANCE_LABEL = 'github.com';
+export const GITHUB_WEB_BASE = 'https://github.com';
+
+/**
+ * Username embedded into an authenticated https clone URL for a registered
+ * instance. GitLab accepts any username alongside a personal access token used
+ * as the password; `oauth2` is the form its own documentation uses.
+ */
+export const INSTANCE_TOKEN_USERNAME = 'oauth2';

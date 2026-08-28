@@ -13,6 +13,7 @@
  * re-exports them so every consumer keeps importing from `db/schema` unchanged.
  */
 export * from './schema/core';
+export * from './schema/instances';
 export * from './schema/repos';
 export * from './schema/pulls';
 export * from './schema/reviews';
@@ -28,6 +29,7 @@ export * from './schema/repo-intel';
 export * from './schema/project-context';
 
 import { users, workspaces, workspaceMembers, settings } from './schema/core';
+import { gitInstances } from './schema/instances';
 import { repos } from './schema/repos';
 import { pullRequests, prFiles, prCommits } from './schema/pulls';
 import { reviews, findings, prIntent, prBrief } from './schema/reviews';
@@ -54,6 +56,8 @@ export const schema = {
   workspaces,
   workspaceMembers,
   settings,
+  // SPEC-06: operator-registered forge instances.
+  gitInstances,
   repos,
   pullRequests,
   prFiles,

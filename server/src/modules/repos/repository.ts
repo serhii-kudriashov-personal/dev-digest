@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm';
+import type { RepoProvider } from '@devdigest/shared';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 
@@ -15,17 +16,37 @@ export interface InsertRepo {
   name: string;
   fullName: string;
   createdBy: string;
+  /** SPEC-06 — identity beyond `owner/name`. */
+  provider: RepoProvider;
+  instanceId: string | null;
+  instanceKey: string;
+  namespacePath: string;
 }
 
 export class RepoRepository {
   constructor(private db: Db) {}
 
-  /** Find a repo in a workspace by its `owner/name` full name (dedupe on add). */
-  async findByFullName(workspaceId: string, fullName: string): Promise<RepoRow | undefined> {
+  /**
+   * Find a repo by the identity the unique index enforces: workspace, owning
+   * instance, and path within it (SPEC-06 AC-16). Two instances holding the
+   * same namespace path are two different repositories, which is exactly what
+   * the old `(workspace_id, full_name)` lookup could not express.
+   */
+  async findByIdentity(
+    workspaceId: string,
+    instanceKey: string,
+    fullName: string,
+  ): Promise<RepoRow | undefined> {
     const [row] = await this.db
       .select()
       .from(t.repos)
-      .where(and(eq(t.repos.workspaceId, workspaceId), eq(t.repos.fullName, fullName)));
+      .where(
+        and(
+          eq(t.repos.workspaceId, workspaceId),
+          eq(t.repos.instanceKey, instanceKey),
+          eq(t.repos.fullName, fullName),
+        ),
+      );
     return row;
   }
 
@@ -41,8 +62,19 @@ export class RepoRepository {
     return row;
   }
 
-  async insert(values: InsertRepo): Promise<RepoRow> {
-    const [row] = await this.db
+  /**
+   * Insert the repository, or hand back the row that already holds its identity.
+   *
+   * `onConflictDoNothing()` + a re-select is what makes two concurrent
+   * `POST /repos` of one URL settle on ONE row instead of one 201 and one 500
+   * (NFR-9): the loser of the race sees no returned row, reads the winner's, and
+   * reports `created: false`. The unique-violation is caught here rather than in
+   * the service because it is a property of the index, and nothing
+   * Drizzle-shaped crosses this boundary either way
+   * (`backend-onion-architecture` §5).
+   */
+  async insert(values: InsertRepo): Promise<{ row: RepoRow; created: boolean }> {
+    const [inserted] = await this.db
       .insert(t.repos)
       .values({
         workspaceId: values.workspaceId,
@@ -50,9 +82,22 @@ export class RepoRepository {
         name: values.name,
         fullName: values.fullName,
         createdBy: values.createdBy,
+        provider: values.provider,
+        instanceId: values.instanceId,
+        instanceKey: values.instanceKey,
+        namespacePath: values.namespacePath,
       })
+      .onConflictDoNothing()
       .returning();
-    return row!;
+    if (inserted) return { row: inserted, created: true };
+
+    const existing = await this.findByIdentity(
+      values.workspaceId,
+      values.instanceKey,
+      values.fullName,
+    );
+    if (!existing) throw new Error('repos insert conflicted with no matching row');
+    return { row: existing, created: false };
   }
 
   /**

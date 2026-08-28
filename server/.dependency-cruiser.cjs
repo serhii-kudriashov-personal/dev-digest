@@ -55,7 +55,7 @@ const FASTIFY = pkg('fastify');
  * module calling those is ring 2 using a library, not resolving a port.
  */
 const ADAPTER_IMPLS =
-  '^src/adapters/(secrets/|auth/|github/|git/simple-git|codeindex/ripgrep|llm/|embedder/)';
+  '^src/adapters/(secrets/|auth/|github/|gitlab/|git/simple-git|codeindex/ripgrep|llm/|embedder/)';
 
 /**
  * A slice's public surface is its `constants.ts` and its facade `types.ts` —

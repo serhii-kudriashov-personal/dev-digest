@@ -1,7 +1,8 @@
 import { simpleGit, type SimpleGit } from 'simple-git';
-import { join } from 'node:path';
+import { join, resolve, dirname, sep } from 'node:path';
 import { mkdir, readFile, access, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { AppError } from '../../platform/errors.js';
 import type {
   GitClient,
   RepoRef,
@@ -20,8 +21,19 @@ import { parseUnifiedDiff } from './diff-parser.js';
 const RESYNC_FETCH_DEPTH = 50;
 
 /**
- * GitClient over simple-git. Repos clone to
- * `<cloneDir>/<owner>/<repo>`. We NEVER execute repo code — only git ops.
+ * The instance key the built-in github.com host uses. A `RepoRef` carrying this
+ * key — or none at all — takes the pre-SPEC-06 two-segment layout, byte for
+ * byte, which is what makes every clone already on disk keep working (AC-19).
+ * Duplicated from `modules/repos/constants.ts` rather than imported: an adapter
+ * importing a slice is the direction `no-adapter-impl-outside-root` exists to
+ * keep out (`backend-onion-architecture` §4).
+ */
+const BUILTIN_INSTANCE_KEY = 'github.com';
+
+/**
+ * GitClient over simple-git. Repos clone to `<cloneDir>/<owner>/<repo>` for the
+ * built-in github.com host and `<cloneDir>/<instanceKey>/<owner>/<repo>` for a
+ * registered instance. We NEVER execute repo code — only git ops.
  */
 export class SimpleGitClient implements GitClient {
   constructor(private cloneDir: string) {
@@ -34,8 +46,49 @@ export class SimpleGitClient implements GitClient {
     process.env.GCM_INTERACTIVE ??= 'never';
   }
 
+  /**
+   * Where one repository's clone lives (SPEC-06 — AC-17).
+   *
+   * TWO THINGS THIS FUNCTION IS RESPONSIBLE FOR, and neither is cosmetic.
+   *
+   * 1. IDENTITY. Before SPEC-06 the path was two segments, so the same
+   *    `owner/name` on two hosts — and any nested GitLab namespace — collapsed
+   *    onto one directory. That is not a read-only mix-up: `sync()` runs
+   *    `reset --hard`, so the loser's working tree is clobbered
+   *    (`server/INSIGHTS.md` 2026-08-28, root `INSIGHTS.md` 2026-08-16). The
+   *    instance key is therefore part of the path for every non-github.com
+   *    repository, and ABSENT for github.com so existing clones keep their
+   *    location byte for byte.
+   * 2. CONTAINMENT. `repo.owner` is user-influenced and, for a nested
+   *    namespace, holds several path segments — so `join()` here is
+   *    `path.join()` with user input, which allows traversal (`security`
+   *    §Framework Security Quirks). `_shared/forge-url.ts` already refuses
+   *    `.`, `..` and encoded separators upstream; this check is the second
+   *    line, and it fails closed.
+   *
+   * The returned string is the JOINED form, not the resolved one: `resolve()`
+   * is used only to decide containment, because the joined form is what is
+   * already persisted in `repos.clone_path`.
+   */
   clonePathFor(repo: RepoRef): string {
-    return join(this.cloneDir, repo.owner, repo.name);
+    const key = repo.instanceKey;
+    const dest =
+      key === undefined || key === '' || key === BUILTIN_INSTANCE_KEY
+        ? join(this.cloneDir, repo.owner, repo.name)
+        : join(this.cloneDir, key, repo.owner, repo.name);
+
+    // Strictly INSIDE the root: the clone directory itself is not a valid
+    // destination either, which is what an empty owner or name would produce.
+    const root = resolve(this.cloneDir);
+    const full = resolve(dest);
+    if (!full.startsWith(root + sep)) {
+      throw new AppError(
+        'invalid_clone_path',
+        `Refusing a clone destination outside the clone directory for '${repo.owner}/${repo.name}'`,
+        400,
+      );
+    }
+    return dest;
   }
 
   private git(repo: RepoRef): SimpleGit {
@@ -53,8 +106,18 @@ export class SimpleGitClient implements GitClient {
 
   async clone(repo: RepoRef, url: string, opts?: CloneOptions): Promise<{ path: string }> {
     const dest = this.clonePathFor(repo);
-    await mkdir(join(this.cloneDir, repo.owner), { recursive: true });
+    // `dirname(dest)` rather than `<cloneDir>/<owner>`: an instance-scoped or
+    // nested-namespace destination is deeper than two segments, and for the
+    // legacy layout the two are the same string.
+    await mkdir(dirname(dest), { recursive: true });
     if (await this.exists(join(dest, '.git'))) {
+      // Reusing a directory that already holds a clone is deliberate (it
+      // resumes a partial import) — but ONLY when it holds a clone of the same
+      // remote. Reusing a foreign one would fetch into, and later
+      // `reset --hard`, an unrelated repository's mirror while the UI names
+      // this one (AC-18; `server/INSIGHTS.md` 2026-08-28, root `INSIGHTS.md`
+      // 2026-08-16). Checked BEFORE the fetch, so a collision touches nothing.
+      await this.assertSameRemote(dest, url);
       // already cloned → fetch latest
       await simpleGit(dest).fetch();
       return { path: dest };
@@ -67,6 +130,43 @@ export class SimpleGitClient implements GitClient {
     if (opts?.branch) args.push('--branch', opts.branch);
     await simpleGit(this.cloneDir).clone(url, dest, args);
     return { path: dest };
+  }
+
+  /**
+   * Refuse to reuse a destination that already holds a clone of a DIFFERENT
+   * remote (AC-18).
+   *
+   * Comparison is on host + path with the userinfo dropped, because the stored
+   * remote and the requested URL differ in exactly the ways that do not change
+   * which repository they name: an embedded credential (`withGitHubToken` /
+   * `withInstanceToken` put one in), a trailing `.git`, a trailing slash, and
+   * host case. Everything else counts as a different repository, and the
+   * comparison FAILS CLOSED — an origin that cannot be read or parsed is
+   * treated as foreign rather than assumed to match.
+   *
+   * Neither the requested URL nor the stored one appears in the message: both
+   * may carry a credential.
+   */
+  private async assertSameRemote(dest: string, url: string): Promise<void> {
+    let stored: string;
+    try {
+      stored = (await simpleGit(dest).raw(['remote', 'get-url', 'origin'])).trim();
+    } catch {
+      throw new AppError(
+        'clone_destination_conflict',
+        `The clone directory ${dest} already exists but has no 'origin' remote. Remove it and re-import.`,
+        409,
+      );
+    }
+    const want = remoteIdentity(url);
+    const have = remoteIdentity(stored);
+    if (want === null || have === null || want !== have) {
+      throw new AppError(
+        'clone_destination_conflict',
+        `The clone directory ${dest} already holds a different repository. Nothing was fetched; remove that directory or re-import under a different instance.`,
+        409,
+      );
+    }
   }
 
   async fetchPullHead(repo: RepoRef, n: number): Promise<void> {
@@ -129,6 +229,43 @@ export class SimpleGitClient implements GitClient {
   async readFile(repo: RepoRef, path: string): Promise<string> {
     return readFile(join(this.clonePathFor(repo), path), 'utf8');
   }
+}
+
+/**
+ * `host/path` for a git remote, with the credential, the trailing `.git` and
+ * any trailing slash removed — `null` when the string carries no repository at
+ * all (which callers treat as foreign).
+ *
+ * Three forms, because all three reach `clone()`:
+ *  - an https URL, which `withGitHubToken` / `withInstanceToken` may have put a
+ *    credential into — hence comparing host + path rather than the whole string;
+ *  - the scp-like SSH form (`git@github.com:owner/repo.git`), which is not a URL
+ *    and which `add` clones verbatim when the operator imports with it;
+ *  - a plain filesystem path, which is neither, and is compared literally.
+ */
+function remoteIdentity(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+
+  const scp = /^(?:[^@/]+@)?([^/:]+):(.+)$/.exec(trimmed);
+  if (scp && !trimmed.includes('://')) {
+    return normalizeRemoteParts(scp[1]!, scp[2]!);
+  }
+  try {
+    const u = new URL(trimmed);
+    return normalizeRemoteParts(u.host, u.pathname);
+  } catch {
+    // Not a URL and not the scp form — a local path. Two of them name the same
+    // repository exactly when they are the same string, so compare them as one.
+    const local = trimmed.replace(/\/+$/, '').replace(/\.git$/, '');
+    return local === '' ? null : local;
+  }
+}
+
+function normalizeRemoteParts(host: string, path: string): string | null {
+  const p = path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/, '');
+  if (p === '') return null;
+  return `${host.toLowerCase()}/${p}`;
 }
 
 function parseBlamePorcelain(raw: string): BlameLine[] {

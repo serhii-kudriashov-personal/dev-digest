@@ -37,6 +37,11 @@ import type {
   ContextAttachment,
 } from '@devdigest/shared';
 import type { ProjectContext, ResolvedRunContext } from '../modules/context/types.js';
+import type {
+  GitLabInstanceClient,
+  InstanceVerification,
+  InstanceVerifyInput,
+} from './gitlab/index.js';
 import { parseUnifiedDiff } from './git/diff-parser.js';
 
 /**
@@ -351,6 +356,65 @@ export class MockSecretsProvider implements SecretsProvider {
   constructor(private secrets: Partial<Record<string, string>> = {}) {}
   async get(key: SecretKey): Promise<string | undefined> {
     return this.secrets[key as string];
+  }
+  /**
+   * Writable, because `set` is what the SPEC-06 registration path uses to store
+   * an instance's access token — without it that path is untestable and the
+   * service's "the secrets backend cannot store" branch would be the only one a
+   * test could ever reach.
+   *
+   * `stored` is exposed so a test can assert WHERE a value went (under
+   * `GITLAB_TOKEN_<id>`) and, just as importantly, that it went nowhere else.
+   */
+  async set(key: SecretKey, value: string): Promise<void> {
+    this.secrets[key as string] = value;
+  }
+  get stored(): Partial<Record<string, string>> {
+    return this.secrets;
+  }
+}
+
+// ---------- Mock GitLab instance client (SPEC-06) ----------
+/**
+ * Instance verification with no network, no DNS and no TLS, so ring-2 and
+ * ring-5 tests can exercise every registration outcome hermetically — which is
+ * the only way to test them at all, since AC-4 forbids contacting a local
+ * instance and no test may reach a real one.
+ *
+ * Defaults to a successful verification of a modern GitLab. Override per base
+ * URL to make one instance fail while another succeeds (AC-12), or globally to
+ * exercise one rejection code.
+ *
+ * `calls` records every verification attempt, which is how a test asserts both
+ * that the access token was passed as an ARGUMENT (never read back out of a row
+ * or a response, AC-10) and that testing one instance contacted only that one.
+ */
+export interface MockGitLabInstanceOptions {
+  /** Applied to every base URL that has no entry in `byBaseUrl`. */
+  result?: Partial<InstanceVerification>;
+  byBaseUrl?: Record<string, Partial<InstanceVerification>>;
+}
+
+export class MockGitLabInstanceClient implements GitLabInstanceClient {
+  readonly calls: InstanceVerifyInput[] = [];
+  constructor(private opts: MockGitLabInstanceOptions = {}) {}
+
+  async verify(input: InstanceVerifyInput): Promise<InstanceVerification> {
+    this.calls.push(input);
+    const override = this.opts.byBaseUrl?.[input.baseUrl] ?? this.opts.result ?? {};
+    return {
+      ok: true,
+      code: null,
+      message: 'Connected to GitLab 17.4.1 as @devdigest.',
+      version: '17.4.1',
+      // The CE/EE codebase flag, never the licensed tier — no integration
+      // token can read the tier (root `INSIGHTS.md` 2026-08-28).
+      edition: 'enterprise',
+      // `unknown` is the honest default for an unprobed capability (AC-8).
+      approvalCapability: 'unknown',
+      login: 'devdigest',
+      ...override,
+    };
   }
 }
 

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Provider } from './knowledge.js';
 import { SeverityCounts } from './findings.js';
+import { RepoProvider } from './instances.js';
 
 /**
  * Platform / scaffolding DTOs owned by F1:
@@ -142,6 +143,21 @@ export const RepoInput = z.object({
 });
 export type RepoInput = z.infer<typeof RepoInput>;
 
+/**
+ * A repository as the API reports it (SPEC-06 — AC-15, AC-19).
+ *
+ * `owner`, `name` and `full_name` are UNCHANGED and stay meaningful for a
+ * GitHub repository: every pre-feature row keeps the values it already has, and
+ * no consumer of them had to move (AC-19, AC-27).
+ *
+ * The provider fields are REQUIRED rather than optional because `Repo` is a
+ * table-backed DTO built by `toRepoDto` from columns that all carry a
+ * non-volatile `NOT NULL DEFAULT` — not a jsonb document already on disk with
+ * the key missing, which is the case root `INSIGHTS.md` 2026-08-11 / 2026-08-02
+ * govern. `instance_id` is `.nullable()` and not `.nullish()` for the same
+ * reason: it is always serialized, and `null` carries a meaning — the built-in
+ * github.com host, which is not a registered instance row.
+ */
 export const Repo = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -152,6 +168,19 @@ export const Repo = z.object({
   clone_path: z.string().nullable(),
   last_polled_at: z.string().nullable(),
   created_by: z.string().nullable(),
+  /** Which forge this repository lives on. */
+  provider: RepoProvider,
+  /** The registered instance it was imported from; `null` ⇒ github.com. */
+  instance_id: z.string().nullable(),
+  /**
+   * The repository's path within its instance, at any depth —
+   * `owner/repo` on GitHub, `group/subgroup/project` on GitLab (AC-13, NFR-4).
+   */
+  namespace_path: z.string(),
+  /** Human-readable name of the owning instance; `github.com` for the built-in host. */
+  instance_label: z.string(),
+  /** Canonical browser URL for the repository on its own forge. */
+  web_url: z.string(),
 });
 export type Repo = z.infer<typeof Repo>;
 

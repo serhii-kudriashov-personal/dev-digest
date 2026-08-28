@@ -50,6 +50,7 @@ entry nobody is told to open.
 | 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
 | 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
 | 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
+| 2026-08-28 | Patterns | `server/src/vendor/shared/adapters.ts`, `server/src/adapters/github/**`, `server/src/modules/polling/**`, `client/messages/**`, `specs/**`, spec intake | A port method with a real adapter, a mock and a passing test can still have ZERO production callers — verify an "already works" premise by grepping for a CALLER |
 | 2026-08-25 | Patterns | `plans/**`, `.claude/agents/implementation-planner.md`, multi-agent dispatch design | A plan's "Files owned" cell needs cross-checking against that same dispatch's OWN "Done when" text, not just its prose description |
 | 2026-08-25 | Patterns | `plans/**`, disjoint-file-ownership hops, multi-agent execution | Splitting a plan into disjoint-file-ownership hops lets a renamed/deleted symbol's stale COMMENT survive in a file none of them own |
 | 2026-08-24 | Patterns | `*/src/vendor/shared/contracts/trace.ts`, `RunTraceDrawer/**`, spec intake, feature briefs | "Rejected grounding-gate findings with reasons" is not what the trace contract records — only a pass/fail count is |
@@ -82,6 +83,9 @@ entry nobody is told to open.
 | 2026-08-02 | Patterns | `*/src/vendor/shared/contracts/**`, jsonb columns | A field added to a persisted-jsonb contract must be `.nullish()` |
 | 2026-08-02 | Patterns | cost display, `client/src/**`, `server/**` | Unknown cost is `null`, never `0` |
 | 2026-08-01 | Patterns | `server/src/modules/reviews/**`, cost pipeline | `costUsd` reaches the server and dies there |
+| 2026-08-28 | Tools | `server/src/modules/_shared/forge-url.ts`, `server/src/adapters/gitlab/http.ts`, `client/src/lib/forge-urls.ts`, any SSRF or origin allowlist | Node's WHATWG `URL` already normalises the obfuscated-IP and `%2e%2e` evasion sets — check `u.hostname`, never the raw string |
+| 2026-08-28 | Tools | `specs/**`, `specs/README.md`, allocating a spec id | `rg '^Spec ID: SPEC-'` cannot detect a DUPLICATE spec id, only the highest one — and there is already a collision on SPEC-05 |
+| 2026-08-28 | Tools | GitLab REST API, capability gating, provider adapters, `specs/2026-08-28-gitlab-repositories.md` | GitLab's licensed TIER is unreadable by a non-admin credential, and the tier-gated probe returns the same 404 as "not permitted" |
 | 2026-08-24 | Tools | `reviewer-core/**`, fresh-worktree setup, `pnpm install` | `reviewer-core` is the one package on npm, not pnpm — `pnpm install` there creates a stray second lockfile instead of respecting the tracked one |
 | 2026-08-14 | Tools | `scripts/pr-self-review.sh`, `.claude/agents/implementer.md` | `gates` selects by path PREFIX, so touching `server/INSIGHTS.md` runs `pnpm typecheck` and `pnpm arch` |
 | 2026-08-14 | Tools | `.claude/agents/**` frontmatter | A subagent `description:` may not contain a colon-space |
@@ -94,6 +98,7 @@ entry nobody is told to open.
 | 2026-08-04 | Tools | `.claude/skills/**`, `skills-lock.json` | The lock covers only 8 of the 13 skills — four vendored-looking ones are ours |
 | 2026-08-02 | Tools | `.claude/skills/react-best-practices/**`, routing severity | A vendored skill is upstream opinion, not house policy |
 | 2026-08-02 | Tools | `findings`, any confidence display or gate | `findings.confidence` is not calibrated — never gate on it |
+| 2026-08-28 | Errors | `plans/**`, `Done when` checks, security-invariant greps, `.claude/agents/implementation-planner.md` | Third instance of the unsatisfiable `Done when` grep — first where the colliding token is a member of the contract the same step mandates |
 | 2026-08-14 | Errors | `.claude/agents/README.md` | The counted prose was ALREADY wrong before the eighth agent |
 | 2026-08-09 | Errors | `server/src/vendor/shared/**`, build residue | Untracked `.js` inside the vendored contracts that no gate can see |
 | 2026-08-01 | Errors | `*/src/vendor/shared/**` | `@devdigest/shared` drifts silently between server and client |
@@ -1048,6 +1053,49 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-28 — A port method with a real adapter, a mock and a passing test can still have ZERO production callers — verify an "already works" premise by grepping for a CALLER
+
+**Rule:** before accepting "this already works for X, just match it", grep for a
+**production caller**, not for the implementation. In this repo two capabilities
+look shipped from every angle a reader normally checks — port signature, real
+adapter, mock, green test, user-facing copy — and are wired to nothing.
+
+**Why:** this is a sharper illusion than the unwired-scaffolding entries already
+here (2026-08-16 and 2026-08-18, both scoped to `client/messages/**`, and
+`client/INSIGHTS.md` 2026-08-17 on a contract field no UI reads). Those are a
+string or a field. These are *working implementations with tests*, so reading
+the code confirms the premise instead of refuting it. Both were found only by
+counting callers while checking `specs/2026-08-28-gitlab-repositories.md`
+against the repo:
+
+- **Posting a review back does not exist, for any provider.** `postReview` is
+  declared at `server/src/vendor/shared/adapters.ts:178` (and the client copy
+  at `client/src/vendor/shared/adapters.ts:157`), implemented at
+  `server/src/adapters/github/octokit.ts:138`, mocked at
+  `server/src/adapters/mocks.ts:198`, and exercised at
+  `server/test/adapters.test.ts:24`. `rg -n "postReview" . -g '!node_modules'`
+  returns exactly those five — no route, no service. `client/messages/en/compose.json`
+  even ships the "Post review to GitHub" copy, and **no file under `client/src`
+  reads that catalogue at all.**
+- **There is no polling cycle.** `POST /repos/:id/poll`
+  (`server/src/modules/polling/routes.ts:9-20`) is a manual, single-repository
+  refresh and its own docblock says "MANUAL refresh". `polling_interval_min`
+  (`server/src/vendor/shared/contracts/platform.ts:93`) is seeded into every
+  workspace at `server/src/db/seed.ts:78` and **read by nothing** — the only
+  three hits are the two contract copies and the seed.
+
+**The consequence is worst in a spec.** A requirement phrased as "capped at the
+same limit already applied when posting to GitHub" or "during a polling cycle"
+names a baseline that is not there, and an implementer discovers it only after
+the plan is written. Both cost a full requirements round-trip on SPEC-06
+(`plans/2026-08-28-gitlab-repositories.md`, Stage E is blocked on the first).
+
+**Where:** `server/src/vendor/shared/adapters.ts:178`,
+`server/src/adapters/github/octokit.ts:138`,
+`server/src/modules/polling/routes.ts:9-20`,
+`server/src/vendor/shared/contracts/platform.ts:93`,
+`client/messages/en/compose.json`.
 
 ### 2026-08-25 — A plan's "Files owned" cell needs cross-checking against that same dispatch's OWN "Done when" text, not just its prose description
 
@@ -2054,6 +2102,30 @@ adapters and is accumulated by `reviewer-core`, so there is still nothing to
 
 ## Tool & Library Notes
 
+### 2026-08-28 — Node's WHATWG `URL` already normalises the obfuscated-IP and `%2e%2e` evasion sets — an SSRF check reading `u.hostname` gets them free, one reading the raw string does not
+
+**Quirk:** writing the private-address half of an SSRF admission gate (SPEC-06 AC-4) normally starts with a hand-rolled normaliser for the classic evasions. On Node's WHATWG `URL` that work is already done, and doing it again is dead code: `new URL('https://0177.0.0.1')` and `new URL('https://2130706433')` both yield `hostname === '127.0.0.1'`, and `https://[::ffff:127.0.0.1]` canonicalises to `[::ffff:7f00:1]`. The same parser resolves dot-segments out of the path, percent-encoded ones included — `new URL('https://x/%2e%2e/a').pathname` is `/a` — so a `.`/`..` traversal segment cannot survive parsing either. The catch is that both properties hold only **after** parsing: a check that pattern-matches the operator's raw input string, or that splits the URL by hand before `new URL()`, gets none of it and fails open on exactly the inputs the evasion set was built from.
+
+**Workaround:** parse first, then check `u.hostname` and `u.pathname` — never the raw input — and treat the post-parse `.`/`..` rejection as defence in depth rather than the load-bearing control, because by then there is nothing left to reject. Note the parser normalises but does not *decide*: it will happily return `hostname === '127.0.0.1'`, so the range predicate is still yours to write, and it must run on both the syntactic path (`admitBaseUrl`) and the runtime DNS answers (`assertHostIsPublic`) or the gate is half-open. This applies to `client/` too — SPEC-06's `safeExternalHref` (Stage D, AC-25) compares a link target's origin to a repository's registered origin and must compare **parsed** origins for the same reason.
+
+**Where:** `server/src/modules/_shared/forge-url.ts` (`normalizeBaseUrl`, `segmentsOf`, `isPrivateAddress`), `server/src/adapters/gitlab/http.ts` (`assertHostIsPublic`). Found implementing Stage A of `plans/2026-08-28-gitlab-repositories.md`.
+
+### 2026-08-28 — `rg '^Spec ID: SPEC-'` cannot detect a DUPLICATE spec id, only the highest one — and there is already a collision on SPEC-05
+
+**Quirk:** the natural way to allocate the next spec id is `rg -n '^Spec ID: SPEC-' specs/ */specs/` and take one past the highest. That reads a max, not a set, so it is blind to a duplicate that already exists below the maximum: `specs/2026-08-24-export-to-ci.md:3` and `specs/2026-08-24-multi-agent-review.md:3` **both** declare `Spec ID: SPEC-05`. Every subsequent author allocates correctly, gets a unique id, and leaves the collision in place — which is why it survived two specs and was only noticed when a third author happened to read the `rg` output row by row instead of scanning for the largest number.
+
+**Workaround:** allocate with a duplicate check, not a max — e.g. pipe the same `rg` through `sort | uniq -d` and expect no output before trusting the highest value. A cross-reference by spec id (a traceability table, a plan naming "SPEC-05") is ambiguous while the collision stands, so name the file as well as the id when referring to one. The collision itself is append-only history at this point: fixing it means renumbering a shipped spec and every reference to it, which is a deliberate decision, not a drive-by edit.
+
+**Where:** `specs/2026-08-24-export-to-ci.md:3`, `specs/2026-08-24-multi-agent-review.md:3`, `specs/README.md`. Found while allocating SPEC-06 for `specs/2026-08-28-gitlab-repositories.md`.
+
+### 2026-08-28 — GitLab's licensed TIER is unreadable by a non-admin credential, and the tier-gated probe returns the same 404 as "not permitted"
+
+**Quirk:** three GitLab facts that each invert a reasonable assumption, all verified against `docs.gitlab.com` while specifying GitLab support. (1) **Tier is undetectable.** `GET /api/v4/metadata` returns `version` and an `enterprise` boolean, but that flag distinguishes the CE from the EE *codebase* — not Free / Premium / Ultimate. The only endpoint reporting the plan, `GET /api/v4/license`, requires **administrator** access, so an ordinary integration credential can never read it. Probing a tier-gated endpoint does not substitute: GitLab deliberately answers **404 for both "not licensed" and "not permitted"** to avoid leaking existence, so the signal is ambiguous by design. (2) **MR approvals are FREE tier.** `POST .../approve` and `unapprove` work on all tiers; only *enforcement* of required approvals (approval rules, code-owner gating) has been Premium since GitLab 13.9 — so "this instance cannot approve" is a rare state, and the real failure is `403` because the credential's user is not an eligible approver (must be a project/group member, by default not the MR author). Doc mirrors disagree about the historical boundary, which is itself a reason to probe rather than infer. (3) **`#L1-2`, not `#L1-L2`.** GitLab's blob line-range anchor omits the repeated `L` that GitHub uses. One character, and the only symptom is a link that lands wrong in the user's browser — no gate in this repo can see it.
+
+**Workaround:** treat every GitLab capability as **probed, never asserted from an edition string**, and give the probe three outcomes — available, unavailable, *unknown* — with an ambiguous 404 mapping to unknown rather than to a confident "unavailable" shown to a user. For approvals specifically, the honest design is to attempt the action and report the outcome, not to predict availability at setup. Version and edition *are* readable (`/api/v4/metadata`, authenticated, `read_api`) and are worth reporting; the tier is not, and saying so is better than a guess. Also: one `api`-scope token covers reads, clone-over-HTTPS and writes, since `api` grants Git-over-HTTP too; a project or group access token, or a Service Account, can approve and consumes **no** licensed seat.
+
+**Where:** `specs/2026-08-28-gitlab-repositories.md` AC-7 through AC-9 and AC-39 exist because of this; the deep-link anchor difference is AC-29. Sources: `docs.gitlab.com/api/metadata/`, `/api/license/`, `/api/merge_request_approvals/`, `/api/rest/troubleshooting/`, `/security/tokens/access_token_scopes/`.
+
 ### 2026-08-24 — `reviewer-core` is the one package on npm, not pnpm — `pnpm install` there creates a stray second lockfile instead of respecting the tracked one
 
 **Quirk:** `CLAUDE.md`'s `## Stack` states "Node 22 · pnpm 10" for the whole repo, and every other package (`server`, `client`, `mcp`, `e2e`, `agent-runner`, `evals`) tracks a `pnpm-lock.yaml`. `reviewer-core` is the exception: it tracks `package-lock.json` and has none of the others. Nothing declares this — no `packageManager` field anywhere in the repo, no note in `reviewer-core`'s own files. Running `cd reviewer-core && pnpm install` (the reflex from every other package) does not error and does not touch `package-lock.json` — it silently creates a brand-new, untracked `pnpm-lock.yaml` beside it, resolved independently of the tracked npm lockfile.
@@ -2480,6 +2552,16 @@ diff, never that the claim about them is true.
 **Where:** `findings.confidence`; `agent_runs.grounding`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-28 — Third instance of the unsatisfiable `Done when` grep — and the first where the colliding token is a member of the contract the SAME step mandates
+
+**Symptom:** three of Stage A's `Done when` checks in `plans/2026-08-28-gitlab-repositories.md` could not pass on correct code. Step A1 asks that `rg -n "credential" server/src/vendor/shared/contracts/instances.ts` match only `GitInstanceInput`; the same step mandates `InstanceRejectionCode` with the members `'credentials_in_url'` and `'credential_rejected'`, so the grep returns three lines whatever the implementer writes. Step A2's `rg -n "credential|token|secret" server/src/db/schema/instances.ts` and Step A6's `rg -n "container.db" .../instances/service.ts` matched only **docblocks asserting the very invariant the grep exists to disprove** ("no credential column lives here", "never reads `container.db`").
+
+**Cause:** a `Done when` written as a literal-string grep encodes the invariant in the same vocabulary the code uses to *name* and to *document* that invariant. Root `INSIGHTS.md` 2026-08-16 caught this when another resolved open question in the plan introduced the token, and 2026-08-25 when a renamed symbol did. This is the first time the collision is unavoidable at plan time: the token is a value in the enum the step is required to define, so no rewording of the code can fix it.
+
+**Takeaway:** a security-invariant `Done when` is a grep for the **shape**, not the word — scope it to the declaration (`rg -n "credential\s*:" `), exclude comments, or state the check as "`GitInstance` has no credential field" and let the reviewer settle it. When executing, a colliding grep is not a failure and not a licence to reword the contract: report the collision, show the matches, and state which of them are the mandated members. Two of the three above were legitimately fixed by rewording a docblock; the first was not, and must not be.
+
+**Where:** `plans/2026-08-28-gitlab-repositories.md` Steps A1/A2/A6 `Done when`; `server/src/vendor/shared/contracts/instances.ts:43,53,90`. Supersedes nothing — extends root `INSIGHTS.md` 2026-08-16 and 2026-08-25.
 
 ### 2026-08-16 — A superseded entry whose INDEX ROW still states the stale claim keeps propagating it — the index is the part agents actually read
 

@@ -329,6 +329,14 @@ describe('platform DTOs', () => {
         clone_path: null,
         last_polled_at: null,
         created_by: null,
+        // SPEC-06 Stage B: required on a table-backed DTO. `instance_id: null`
+        // is the built-in github.com host, which is what lets AC-19 hold with
+        // no DML backfill.
+        provider: 'github',
+        instance_id: null,
+        namespace_path: 'acme/payments-api',
+        instance_label: 'github.com',
+        web_url: 'https://github.com/acme/payments-api',
       }),
     ).not.toThrow();
     expect(() =>

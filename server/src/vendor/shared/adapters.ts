@@ -108,9 +108,26 @@ export interface Embedder {
 }
 
 // ---------- GitHub (Octokit REST, thin) ----------
+/**
+ * How a repository is named to an adapter.
+ *
+ * `instanceKey` is OPTIONAL on purpose (SPEC-06 — AC-17, AC-19). Making it
+ * required would break every caller that legitimately constructs a bare
+ * `{ owner, name }` literal — `CodeIndex`, `repo-intel`'s service and both
+ * pipelines, `conventions/extract-pipeline`, `intent/pipeline` and
+ * `brief/pipeline` — none of which knows or needs to know which forge the
+ * repository came from. Absent (or `'github.com'`) therefore means the built-in
+ * GitHub host, and keeps the legacy clone location byte-identical.
+ */
 export interface RepoRef {
   owner: string;
   name: string;
+  /**
+   * Filesystem-safe slug of the owning forge instance (`git_instances.instance_key`).
+   * Present only for a repository imported from a registered instance; absent or
+   * `'github.com'` selects the legacy `<cloneDir>/<owner>/<name>` layout.
+   */
+  instanceKey?: string;
 }
 
 /** One GitHub Actions workflow run, as GitHub itself describes it. This is

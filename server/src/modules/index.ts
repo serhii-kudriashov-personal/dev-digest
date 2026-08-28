@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import settings from './settings/routes.js';
+import instances from './instances/routes.js';
 import repos from './repos/routes.js';
 import pulls from './pulls/routes.js';
 import polling from './polling/routes.js';
@@ -33,6 +34,7 @@ import multiAgent from './multi-agent/routes.js';
  */
 export const modules: Record<string, FastifyPluginAsync> = {
   settings,
+  instances,
   repos,
   pulls,
   polling,
