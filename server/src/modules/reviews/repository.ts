@@ -19,6 +19,14 @@ export type { FindingRow, PullRow };
 export type ReviewRow = typeof t.reviews.$inferSelect;
 
 import * as reviewRepo from './repository/review.repo.js';
+/**
+ * A recorded post-back outcome (SPEC-06). RE-EXPORTED from the query module
+ * rather than re-derived here — a type declared twice is the duplication §3
+ * forbids, and `ReviewRow` above already shows what it costs. Sourced from this
+ * slice's own repository rather than `db/rows.ts` because nothing outside the
+ * slice reads it (`server/INSIGHTS.md` 2026-08-25).
+ */
+export type { ReviewPostbackRow } from './repository/review.repo.js';
 import * as runRepo from './repository/run.repo.js';
 import * as pullRepo from './repository/pull.repo.js';
 
@@ -82,6 +90,28 @@ export class ReviewRepository {
 
   getReview(reviewId: string): Promise<ReviewRow | undefined> {
     return reviewRepo.getReview(this.db, reviewId);
+  }
+
+  // ---- post-back (SPEC-06 — AC-34, AC-39, NFR-12) ------------------------
+  // Return types are DERIVED from the query module, never restated: re-declaring
+  // one is the mistake `completeAgentRun` above already makes, and it moves the
+  // failure from the type to every call site (`backend-onion-architecture` §3).
+
+  /** The review one run produced on one pull request, with its findings. */
+  reviewForRun(prId: string, runId: string): ReturnType<typeof reviewRepo.reviewForRun> {
+    return reviewRepo.reviewForRun(this.db, prId, runId);
+  }
+
+  /** Record (or replace) how a run's post-back ended. */
+  recordPostBack(
+    values: Parameters<typeof reviewRepo.recordPostBack>[1],
+  ): ReturnType<typeof reviewRepo.recordPostBack> {
+    return reviewRepo.recordPostBack(this.db, values);
+  }
+
+  /** The recorded post-back outcome for one run, if it has one. */
+  getPostBack(prId: string, runId: string): ReturnType<typeof reviewRepo.getPostBack> {
+    return reviewRepo.getPostBack(this.db, prId, runId);
   }
 
   /** In-flight runs for a PR (status='running') — the server-side source of

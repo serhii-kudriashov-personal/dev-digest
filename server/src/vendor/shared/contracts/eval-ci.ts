@@ -337,7 +337,17 @@ export type AgentManifestInput = z.input<typeof AgentManifest>;
 
 /** Request body for `POST /agents/:id/export-ci`. */
 export const CiExportInput = z.object({
-  repo: z.string().min(1), // "owner/name"
+  repo: z.string().min(1), // "owner/name", or a full namespace path
+  /**
+   * Which registered instance `repo` belongs to; `null`/absent ⇒ the built-in
+   * github.com host (SPEC-06 — AC-48).
+   *
+   * `.nullish()`, never `.nullable()`: `ci_installations` rows already on disk
+   * carry no such key, and `.nullable()` accepts an explicit `null` while
+   * REJECTING a missing one (root `INSIGHTS.md` 2026-08-02). Without it, every
+   * export request written before this feature would fail validation.
+   */
+  instance_id: z.string().nullish(),
   target: CiTarget.default('gha'),
   /** "open_pr" opens a PR with the files; "files" just returns/persists them. */
   action: z.enum(['open_pr', 'files']).default('open_pr'),

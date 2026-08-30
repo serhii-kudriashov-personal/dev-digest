@@ -8,6 +8,7 @@
 import React from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { Skeleton, ErrorState } from "@devdigest/ui";
 import type { FindingRecord, Severity } from "@devdigest/shared";
 import { AppShell } from "@/components/app-shell";
@@ -22,7 +23,7 @@ import {
 } from "@/lib/hooks/reviews";
 import { useActiveRepo, useRepoNotFound } from "@/lib/repo-context";
 import { ApiError } from "@/lib/api";
-import { githubPrUrl } from "@/lib/github-urls";
+import { changeRequestUrl, safeExternalHref } from "@/lib/forge-urls";
 import { PrDetailHeader } from "../PrDetailHeader";
 import { OverviewTab } from "../OverviewTab";
 import { FindingsTab } from "../FindingsTab";
@@ -38,6 +39,8 @@ import { DEFAULT_TAB, FINDING_PARAM } from "./constants";
 import { s } from "./styles";
 
 export function PrDetailView() {
+  const t = useTranslations("prReview");
+  const tc = useTranslations("common");
   const params = useParams<{ repoId: string; number: string }>();
   const search = useSearchParams();
   const router = useRouter();
@@ -143,13 +146,17 @@ export function PrDetailView() {
   const findingsCount = allFindings.length;
 
   const repoName = activeRepo?.full_name ?? repoId;
-  // The real "owner/repo" (null until the repo is loaded) — used to build
-  // github.com deep-links for the header and finding file references.
-  const repoFullName = activeRepo?.full_name ?? null;
+  // The owning repository (null until the repos list is loaded) — every deep
+  // link in the header and in a finding's file reference is derived from its
+  // own `web_url`, never from a host constant (AC-29).
+  const repo = activeRepo;
+  // AC-26 / AC-27 — both the section name and the identifier prefix come from
+  // the OWNING repository's provider: `#123` on GitHub, `!123` on GitLab.
+  const provider = repo?.provider ?? "github";
   const crumb = [
     { label: repoName, mono: true, href: `/repos/${repoId}/pulls` },
-    { label: "Pull Requests", href: `/repos/${repoId}/pulls` },
-    { label: `#${number}`, mono: true },
+    { label: t("list.breadcrumb", { provider }), href: `/repos/${repoId}/pulls` },
+    { label: tc("forge.identifier", { provider, number }), mono: true },
   ];
 
   // Stale/unknown :repoId → friendly empty state instead of a 404 error.
@@ -178,8 +185,14 @@ export function PrDetailView() {
       <AppShell crumb={crumb}>
         <ErrorState
           fullScreen
-          title="Couldn't load this pull request"
-          body={error instanceof ApiError ? error.message : `PR #${number} could not be loaded.`}
+          title={t("detail.loadErrorTitle", { provider })}
+          body={
+            error instanceof ApiError
+              ? error.message
+              : t("detail.loadErrorBody", {
+                  identifier: tc("forge.identifier", { provider, number }),
+                })
+          }
           onRetry={() => refetch()}
         />
       </AppShell>
@@ -193,7 +206,9 @@ export function PrDetailView() {
         prId={prId}
         tab={tab}
         findingsCount={findingsCount}
-        githubUrl={repoFullName ? githubPrUrl(repoFullName, pr.number) : null}
+        forgeUrl={repo ? safeExternalHref(changeRequestUrl(repo, pr.number), repo) : null}
+        instanceLabel={repo?.instance_label ?? null}
+        provider={repo?.provider ?? "github"}
         onSetTab={setTab}
         onRunStart={() => setTab("findings")}
         onRunsStarted={() => invalidateActiveRuns()}
@@ -205,7 +220,7 @@ export function PrDetailView() {
             prId={prId}
             headSha={pr.head_sha}
             prBody={pr.body}
-            repoFullName={repoFullName}
+            repo={repo}
             files={pr.files}
             latestReview={latestReview}
             latestReviewCostUsd={latestRun?.cost_usd ?? null}
@@ -229,7 +244,7 @@ export function PrDetailView() {
             runs={runs}
             prRuns={prRuns}
             prCommits={pr.commits}
-            repoFullName={repoFullName}
+            repo={repo}
             headSha={pr.head_sha}
             severities={severities}
             onToggleSeverity={onToggleSeverity}

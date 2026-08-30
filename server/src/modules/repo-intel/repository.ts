@@ -61,6 +61,13 @@ export interface RepoBasics {
   name: string;
   defaultBranch: string;
   clonePath: string | null;
+  /**
+   * Carried so every `RepoRef` this slice builds resolves to the clone this row
+   * actually owns. Without it a non-github.com repository resolves to the
+   * legacy two-segment path — another workspace's mirror, which `sync()` then
+   * `reset --hard`s (SPEC-06 AC-17; `@devdigest/shared` `RepoRef`).
+   */
+  instanceKey: string;
 }
 
 /** Cached row from the existing `symbols` table (blast persists these). */
@@ -141,6 +148,7 @@ export class RepoIntelRepository {
         name: t.repos.name,
         defaultBranch: t.repos.defaultBranch,
         clonePath: t.repos.clonePath,
+        instanceKey: t.repos.instanceKey,
       })
       .from(t.repos)
       .where(eq(t.repos.id, repoId));

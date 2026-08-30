@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  jsonb,
+  timestamp,
+  doublePrecision,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
@@ -88,6 +98,55 @@ export const findings = pgTable(
   (t) => [
     index('findings_review_id_idx').on(t.reviewId),
     index('findings_skill_id_idx').on(t.skillId),
+  ],
+);
+
+/**
+ * The outcome of posting one review run back to its change request (SPEC-06 —
+ * AC-39, AC-40, AC-41, NFR-12).
+ *
+ * A NEW table, not a column on `reviews` and not `composed_reviews`: the latter
+ * is one of the reserved empty tables (`AGENTS.md` §Do not touch) and belongs to
+ * a later lesson, and the run's own persisted document is jsonb that every
+ * existing run already wrote (root `INSIGHTS.md` 2026-08-11).
+ *
+ * No `workspace_id` column, matching `findings` / `pr_files` / `pr_commits`: the
+ * row is reachable only through `pr_id`, and every read and write here resolves
+ * that pull workspace-scoped first. Adding a second copy of the tenant would
+ * make two answers possible to one question.
+ *
+ * `run_id` carries no foreign key, deliberately and for the same reason
+ * `reviews.run_id` carries none — a run row and the review it produced can each
+ * outlive the other (root `INSIGHTS.md` 2026-08-02).
+ */
+export const reviewPostbacks = pgTable(
+  'review_postbacks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** The `agent_runs` row whose review was published. No FK — see above. */
+    runId: uuid('run_id').notNull(),
+    prId: uuid('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    /** A `PostBackOutcome` value. TEXT, not a pg enum: the states are owned by
+     *  the contract, and extending a pg enum costs a migration. */
+    outcome: text('outcome').notNull(),
+    /** Prose for the user (AC-38, AC-41, NFR-3). Null when the outcome says
+     *  everything there is to say. */
+    reason: text('reason'),
+    /** Notes that actually landed, summary note included (AC-40). */
+    notesPublished: integer('notes_published').notNull().default(0),
+    createdAt: now(),
+  },
+  (t) => [
+    // One row per run per change request: re-posting a run REPLACES its outcome
+    // rather than accumulating, because the question the UI asks is "how did
+    // this run's post-back end", which has exactly one current answer (NFR-12).
+    // Also indexes the `run_id` lookup by prefix.
+    uniqueIndex('review_postbacks_run_pr_uq').on(t.runId, t.prId),
+    // A foreign key is NOT an index. "Every post-back for this pull request"
+    // filters on `pr_id` alone, which the composite above cannot serve.
+    index('review_postbacks_pr_idx').on(t.prId),
   ],
 );
 

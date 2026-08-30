@@ -12,4 +12,7 @@ export const s = {
     color: "var(--text-secondary)",
     marginBottom: 14,
   } satisfies CSSProperties,
+  repoIdentity: {
+    marginBottom: 14,
+  } satisfies CSSProperties,
 } as const;

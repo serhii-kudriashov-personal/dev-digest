@@ -1,6 +1,10 @@
 import { lookup } from 'node:dns/promises';
 import type { InstanceRejectionCode } from '@devdigest/shared';
-import { isPrivateAddress } from '../../modules/_shared/forge-url.js';
+import {
+  allowlistHint,
+  isAllowlistablePrivateAddress,
+  isRefusedAddress,
+} from '../../modules/_shared/forge-url.js';
 import { RateGate } from '../../platform/resilience.js';
 
 /**
@@ -21,6 +25,10 @@ import { RateGate } from '../../platform/resilience.js';
  *     Per request, not per client: `verify()` alone makes three requests off one
  *     client, so a check latched after the first would leave the other two
  *     unguarded and a record that flips mid-verification would go unnoticed.
+ *     The operator's per-host opt-in (`allowedPrivateHosts`) is applied by the
+ *     SAME predicate the syntactic half uses, so the two cannot disagree about
+ *     which ranges it widens — and it is applied inside the per-request check,
+ *     never as a construction-time decision that stops re-evaluating.
  *  2. **A redirect is reported, never followed** (`redirect: 'manual'`, AC-11).
  *     Following one would let the instance choose the next destination, which
  *     is the whole reason the base URL is admitted up front.
@@ -100,6 +108,12 @@ export interface ForgeHttpOptions {
   instanceKey: string;
   /** Access key. Header only — see guarantee 5 above. */
   credential: string;
+  /**
+   * Hosts the operator opted into reaching on a private network
+   * (`AppConfig.allowPrivateForgeHosts`, from
+   * `DEVDIGEST_ALLOW_PRIVATE_FORGE_HOSTS`). Omitted means the shipped refusal.
+   */
+  allowedPrivateHosts?: readonly string[];
   gate?: RateGate;
   fetchImpl?: typeof fetch;
   resolveHost?: HostResolver;
@@ -119,11 +133,13 @@ export class GitLabHttp {
   private readonly fetchImpl: typeof fetch;
   private readonly resolveHost: HostResolver;
   private readonly timeoutMs: number;
+  private readonly allowedPrivateHosts: readonly string[];
 
   constructor(opts: ForgeHttpOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.instanceKey = opts.instanceKey;
     this.credential = opts.credential;
+    this.allowedPrivateHosts = opts.allowedPrivateHosts ?? [];
     this.gate = opts.gate ?? new RateGate();
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.resolveHost = opts.resolveHost ?? defaultResolver;
@@ -136,6 +152,29 @@ export class GitLabHttp {
    * response — including a 401/403/404 — when it answered.
    */
   async get(path: string, opts: { timeoutMs?: number } = {}): Promise<ForgeResponse> {
+    return this.request('GET', path, opts);
+  }
+
+  /**
+   * `POST {baseUrl}{path}` with a JSON body. Same guarantees as `get` — in
+   * particular the host guard runs here too, because it runs per REQUEST and
+   * not per client (`server/INSIGHTS.md` 2026-08-28: a guard latched on the
+   * client is a guard skipped on 3 of 4 requests).
+   */
+  async post(
+    path: string,
+    body: unknown,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<ForgeResponse> {
+    return this.request('POST', path, opts, body);
+  }
+
+  private async request(
+    method: 'GET' | 'POST',
+    path: string,
+    opts: { timeoutMs?: number } = {},
+    body?: unknown,
+  ): Promise<ForgeResponse> {
     await this.assertHostIsPublic();
 
     const url = `${this.baseUrl}${path}`;
@@ -151,17 +190,19 @@ export class GitLabHttp {
     let res: Response;
     try {
       res = await this.fetchImpl(url, {
-        method: 'GET',
+        method,
         headers: {
           [AUTH_HEADER]: this.credential,
           accept: 'application/json',
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         // Guarantee 2: a 3xx is reported, never followed.
         redirect: 'manual',
         signal,
       });
     } catch (err) {
-      throw this.classifyTransportError(err, path);
+      throw this.classifyTransportError(err, `${method} ${path}`);
     }
 
     this.gate.noteResponse(this.instanceKey, res.headers);
@@ -172,7 +213,7 @@ export class GitLabHttp {
       // reaches a log or a screen.
       throw new ForgeHttpError(
         'cross_origin_redirect',
-        `GET ${path} answered ${res.status} with a redirect; DevDigest does not follow redirects.`,
+        `${method} ${path} answered ${res.status} with a redirect; DevDigest does not follow redirects.`,
       );
     }
 
@@ -181,7 +222,8 @@ export class GitLabHttp {
 
   /** AC-4, runtime half. Runs on every request, never latched — see guarantee 1.
    *  Names the rejected host, never the resolved address list: the host is what
-   *  the operator typed and can act on. */
+   *  the operator typed and can act on, and the address list is information
+   *  about their network that a message does not need to carry. */
   private async assertHostIsPublic(): Promise<void> {
     const hostname = new URL(this.baseUrl).hostname.replace(/^\[|\]$/g, '');
 
@@ -194,20 +236,31 @@ export class GitLabHttp {
     if (addresses.length === 0) {
       throw new ForgeHttpError('unreachable', `Could not resolve '${hostname}'.`);
     }
-    // EVERY answer must be public: one private address in a round-robin set is
-    // enough to reach an internal service on a later request.
-    if (addresses.some((address) => isPrivateAddress(address))) {
+    // EVERY answer must clear the gate: one refused address in a round-robin
+    // set is enough to reach an internal service on a later request. An
+    // allowlisted host widens this for RFC 1918 and unique-local only, so the
+    // same loop still refuses `127.0.0.1`, `169.254.169.254` and `::1` for a
+    // host the operator named.
+    const refused = addresses.filter((address) =>
+      isRefusedAddress(address, hostname, this.allowedPrivateHosts),
+    );
+    if (refused.length > 0) {
+      // The hint is offered only when following it would actually work. Note
+      // this condition already implies the host is NOT allowlisted: were it
+      // allowlisted, an allowlistable address would not be in `refused` at all.
+      const actionable = refused.every((address) => isAllowlistablePrivateAddress(address));
       throw new ForgeHttpError(
         'private_address',
-        `'${hostname}' resolves to a private or loopback address, which DevDigest will not connect to.`,
+        `'${hostname}' resolves to a private or loopback address, which DevDigest will not connect to.` +
+          (actionable ? ` ${allowlistHint(hostname)}` : ''),
       );
     }
   }
 
-  private classifyTransportError(err: unknown, path: string): ForgeHttpError {
+  private classifyTransportError(err: unknown, what: string): ForgeHttpError {
     const name = (err as { name?: string })?.name;
     if (name === 'TimeoutError' || name === 'AbortError') {
-      return new ForgeHttpError('unreachable', `GET ${path} timed out.`);
+      return new ForgeHttpError('unreachable', `${what} timed out.`);
     }
     const code =
       (err as { cause?: { code?: string } })?.cause?.code ?? (err as { code?: string })?.code;
@@ -220,7 +273,7 @@ export class GitLabHttp {
     // Fail closed: anything unclassifiable is unreachable, never a pass. The
     // original error is deliberately not interpolated — it can carry the
     // request headers.
-    return new ForgeHttpError('unreachable', `GET ${path} could not be completed.`);
+    return new ForgeHttpError('unreachable', `${what} could not be completed.`);
   }
 }
 

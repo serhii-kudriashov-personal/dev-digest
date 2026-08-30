@@ -20,6 +20,12 @@ export function formatCiDuration(seconds: number | null | undefined, dash: strin
  * The pull request GitHub link — built from `repo` (the installation's
  * repository, joined in server-side) and `pr_number`. `null` when either is
  * missing, e.g. a run GitHub could not attribute to a pull request.
+ *
+ * The github.com constant is deliberate and stays after SPEC-06: a `ci_runs`
+ * row can only exist for a GitHub Actions installation, and an export naming a
+ * repository on any other forge is refused by `CiService` before a workflow is
+ * generated (AC-47, AC-48). This is a GitHub-scoped screen, not a
+ * provider-neutral one, so it is not routed through `lib/forge-urls.ts`.
  */
 export function ciRunPrUrl(run: CiRun): string | null {
   if (!run.repo || run.pr_number == null) return null;

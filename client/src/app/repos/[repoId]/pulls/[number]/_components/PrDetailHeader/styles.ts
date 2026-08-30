@@ -59,6 +59,11 @@ export const s = {
     gap: 10,
     flexShrink: 0,
   } satisfies CSSProperties,
+  /** AC-31 — the instance name as TEXT in the header's meta row. */
+  instanceChip: {
+    fontSize: 12,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
   staleBanner: {
     display: "flex",
     alignItems: "center",

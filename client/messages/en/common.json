@@ -13,6 +13,16 @@
     "empty": "Nothing here yet",
     "error": "Something went wrong"
   },
+  "forge": {
+    "changeRequest": "{provider, select, gitlab {merge request} other {pull request}}",
+    "changeRequests": "{provider, select, gitlab {merge requests} other {pull requests}}",
+    "changeRequestTitle": "{provider, select, gitlab {Merge Requests} other {Pull Requests}}",
+    "identifier": "{provider, select, gitlab {!} other {#}}{number}",
+    "onInstance": "on {instance}",
+    "repoAria": "{path} on {instance}",
+    "expandPath": "Show the full path {path}",
+    "collapsePath": "Shorten the path {path}"
+  },
   "repoNotFound": {
     "title": "No repo selected",
     "body": "This repository isn't in your workspace — it may have been removed, or the link is stale. Add a repo or pick another from the switcher to get started.",

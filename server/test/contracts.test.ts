@@ -337,6 +337,9 @@ describe('platform DTOs', () => {
         namespace_path: 'acme/payments-api',
         instance_label: 'github.com',
         web_url: 'https://github.com/acme/payments-api',
+        // SPEC-06 AC-44: nullable, but always PRESENT — `null` is "the last
+        // sync attempt did not fail", not "unknown".
+        last_sync_error: null,
       }),
     ).not.toThrow();
     expect(() =>

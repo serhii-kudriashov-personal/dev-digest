@@ -269,5 +269,8 @@ export function toRepoDto(
     web_url: instance
       ? `${instance.baseUrl}/${namespacePath}`
       : `${GITHUB_WEB_BASE}/${namespacePath}`,
+    // Already capped and credential-redacted on the way IN
+    // (`_shared/sync-error.ts`), so it is passed through untouched here.
+    last_sync_error: row.lastSyncError,
   };
 }

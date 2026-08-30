@@ -18,7 +18,11 @@ export async function loadDiff(
 ): Promise<UnifiedDiff> {
   try {
     const diff = await container.git.diff(
-      { owner: repoRow.owner, name: repoRow.name },
+      // `instanceKey` is not optional information here: without it a
+      // non-github.com repository resolves to the legacy two-segment clone
+      // path, which is another workspace's mirror (SPEC-06 AC-17;
+      // `@devdigest/shared` `RepoRef`). The row already carries it.
+      { owner: repoRow.owner, name: repoRow.name, instanceKey: repoRow.instanceKey },
       pull.base,
       pull.headSha,
     );

@@ -18,9 +18,11 @@ appending its row here in the same edit.**
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-29 | Works | `server/test/**` fixtures, "derived not read" rules, `forge.ts` `isOutdated` | To test a "derived, never read from the provider" rule, plant the provider's field at the OPPOSITE polarity in BOTH directions — an absent field discriminates nothing |
 | 2026-08-09 | Works | `server/test/**`, response assertions | A value returned but rendered NOWHERE has no UI that can notice it breaking — assert it at the boundary |
 | 2026-08-08 | Works | `server/src/modules/**/service.ts`, facade tests | A never-throw facade is untestable through a caller with its own `.catch` — test the guarantee at the service |
 | 2026-08-03 | Works | `server/test/*.it.test.ts`, vitest config | `--no-file-parallelism` makes the integration suite deterministic AND faster; re-running is the wrong fix |
+| 2026-08-28 | Doesn't | `server/src/adapters/git/simple-git.ts` `remoteIdentity`, hermetic git tests, remote comparison | A same-remote guard that parses remotes as URLs fails closed on a FILESYSTEM remote — which is what every hermetic git test uses |
 | 2026-08-21 | Doesn't | `server/src/modules/eval/helpers.ts`, `matchExpectation`, severity-restricting prompt edits | A "only report severity X" prompt line can make the agent OVER-LABEL instead of under-report — eval matching is file+line only and cannot tell the difference |
 | 2026-08-17 | Doesn't | `server/test/*.it.test.ts`, `dockerAvailable()`, multi-turn verification | "Docker was unavailable" from an earlier turn is not a property of the environment — it re-checks on every invocation |
 | 2026-08-17 | Doesn't | `plans/**`, `Done when` file references | A plan's `Done when` naming a specific test file as proof does not mean that file actually asserts the thing |
@@ -29,6 +31,13 @@ appending its row here in the same edit.**
 | 2026-08-03 | Doesn't | `server/test/helpers/pg.ts`, `*.it.test.ts` | The `*.it.test.ts` skip is a CONCURRENCY race, not a missing Docker |
 | 2026-08-02 | Doesn't | `server/.dependency-cruiser.cjs`, `pnpm arch` | A green first run proved nothing: 8 of 9 rules were blind |
 | 2026-08-02 | Doesn't | `server/test/*.it.test.ts`, CI lanes | A SKIPPING integration suite silently reads as passing |
+| 2026-08-29 | Patterns | `server/src/adapters/git/simple-git.ts` `clonePathFor`/`clone()`, `realpath` containment, sync fns with many callers | A sync path-builder with many callers keeps the LEXICAL check; the filesystem-aware one goes at the single WRITING entry point — and `lstat`, not `access`, is what makes it fail closed |
+| 2026-08-29 | Patterns | `server/src/adapters/git/simple-git.ts` `clone()`, destructive branches, any path-arity widening | A containment check is not an AUTHORISATION check — widening a segment's arity turned an unguarded `rm -rf` into cross-tenant data loss |
+| 2026-08-29 | Patterns | `rg` sweeps for DTO construction sites, `RepoRef`, `container.git.*` callers | Enumerating callers of a shape means grepping the CONSUMING METHOD — the untyped inline literal matches no type-name grep |
+| 2026-08-29 | Patterns | `server/src/adapters/mocks.ts`, isolation tests, mocks that drop a field | A mock ignoring the field an assertion discriminates on turns the test into a tautology that passes |
+| 2026-08-28 | Patterns | `server/src/db/schema/**`, `server/src/db/migrations/**`, adding a column to a UNIQUE index | "Backfill by column DEFAULT" is only free while the column stays OUT of a UNIQUE index — a constant default makes every existing row collide |
+| 2026-08-29 | Patterns | `server/test/**` fixtures, `toEqual` expectations, adding a field to a table-backed DTO | The fixture a field-name grep CANNOT find is the `toEqual` expectation — grep the DTO's sibling fields or its builder's name instead |
+| 2026-08-28 | Patterns | `server/test/contracts.test.ts`, `*/src/vendor/shared/contracts/platform.ts`, required fields on a table-backed DTO | `contracts.test.ts` is the ONLY place a `Repo` literal is hand-built — name it in the test hop's file set when widening a ring-0 contract |
 | 2026-08-28 | Patterns | `server/src/adapters/gitlab/http.ts`, any per-request security guard, `…Checked` flags | A guard latched on the CLIENT is skipped on 3 of 4 requests, and only the injected collaborator's CALL COUNT can see it |
 | 2026-08-28 | Patterns | `server/src/platform/resilience.ts`, `withTimeout`, third-party `Retry-After` | `withTimeout` is a `Promise.race` and cancels NOTHING — a third-party-driven sleep needs `clearTimeout`, not just a race |
 | 2026-08-28 | Patterns | `server/src/adapters/mocks.ts`, optional port methods, `SecretsProvider.set` | A mock missing an OPTIONAL port method sends the service down its fallback branch and the test passes having exercised nothing |
@@ -58,6 +67,8 @@ appending its row here in the same edit.**
 | 2026-08-09 | Patterns | `server/src/db/schema/**`, migrations | `findings` and `reviews` ARE indexed now — check the schema before you owe a migration |
 | 2026-08-02 | Patterns | `server/src/db/schema/**` | The `findings` table has no indexes at all — a FK is not an index |
 | 2026-08-02 | Patterns | `agents.system_prompt`, `docs/agent-prompts/**` | The live agent prompt is the DB column, not the markdown file |
+| 2026-08-29 | Tools | `server/tsconfig.json:28`, `server/test/**`, contract widening, stale fixtures | `pnpm typecheck` is BLIND to `server/test/**` — proved with a planted type error reporting 0 errors; the response-path fixture is the silent half |
+| 2026-08-29 | Tools | `server/test/eval.it.test.ts`, `--no-file-parallelism`, reading the skip count | The Docker-probe skip SURVIVES `--no-file-parallelism` — the probe runs at module load and collection is still concurrent; read the count every run |
 | 2026-08-28 | Tools | `server/src/modules/_shared/forge-url.ts` `parseIpv6`, `dns.lookup` output, SSRF runtime checks | Node's resolver spells an IPv4-mapped address in DOTTED-QUAD — a hex-only IPv6 parser answers `false` on it while every URL-form test passes |
 | 2026-08-28 | Tools | `server/src/modules/_shared/forge-url.ts`, `server/src/adapters/gitlab/http.ts`, IPv6 host checks | `url.hostname` keeps the brackets on an IPv6 literal, `dns.lookup` returns it bare — a shared predicate matches on only one call site |
 | 2026-08-28 | Tools | `server/vitest.config.ts:5-10`, `server/src/app.ts`, scratch `app.inject()` probes | `pnpm exec tsx` cannot load `src/app.ts` (`ERR_PACKAGE_PATH_NOT_EXPORTED` on `@octokit/app`) — write the probe as a temporary test file |
@@ -72,6 +83,8 @@ appending its row here in the same edit.**
 | 2026-08-03 | Tools | `server/src/modules/**/repository.ts`, transactions | A Drizzle transaction handle is NOT a `Db` — compose with `DbOrTx` |
 | 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | `octokit` and `p-queue` are UNRESOLVABLE to dependency-cruiser |
 | 2026-08-02 | Tools | `server/.dependency-cruiser.cjs` | The depcruise config must be `.cjs`, and `--init` writes the wrong extension |
+| 2026-08-29 | Errors | `server/test/eval.it.test.ts:867`, the full `.it.test` lane, NFR-8 retention | There is a SECOND full-lane-only flake, and the Docker-probe skip hides it completely — run the failing file ALONE before believing anything |
+| 2026-08-29 | Errors | `server/test/reviews.it.test.ts:471`, diagnosing an unrelated change, isolated vs full-lane runs | **CORRECTION** — it now fails IN ISOLATION too (3 of 4 runs), so "run it alone" is dead as a check; the only discriminator left is that the failing case's NAME moves between runs |
 | 2026-08-26 | Errors | `server/src/modules/ci/helpers.ts#buildWorkflowYaml`, generated `.github/workflows/devdigest-review.yml` | An unquoted `run:` sentence containing `: ` broke the generated workflow's YAML — quote any human-readable `run:` string |
 | 2026-08-21 | Errors | `server/src/modules/reviews/repository/review.repo.ts`, list queries feeding a mutated list | Accept/Dismiss reshuffled the findings list because its fetch query had no `ORDER BY` |
 | 2026-08-11 | Errors | `server/src/modules/repo-intel/**`, blast contracts | `DownstreamImpact.symbol` is not unique across `blast.downstream` |
@@ -80,6 +93,7 @@ appending its row here in the same edit.**
 | 2026-08-05 | Errors | `server/test/reviews.it.test.ts` | It fails on `prompt_assembly` for reasons that have nothing to do with your change |
 | 2026-08-03 | Errors | `*/src/vendor/shared/contracts/**`, DTOs | The jsonb `.nullish()` trap, second instance — and the fix is NOT to loosen the DTO |
 | 2026-08-02 | Errors | `server/src/modules/reviews/**` | `completeAgentRun`'s parameter type is declared TWICE |
+| 2026-08-29 | Open | `server/src/adapters/git/simple-git.ts:84`, `resolve()` containment, symlinks in cloned content | ~~`resolve()` containment is LEXICAL — symlink escape. Open~~ — **CLOSED**, superseded by the 2026-08-29 Patterns row on the `realpath`/`lstat` guard |
 | 2026-08-28 | Open | `server/src/adapters/gitlab/instance.ts` `APPROVAL_PROBE_PATH`, GitLab approvals, Stage E AC-36…AC-38 | Which GitLab endpoint honestly distinguishes "approvals permitted" from "not an eligible approver"? The probe path is an unverified guess |
 | 2026-08-25 | Open | `server/src/db/schema/ci.ts`, `CiInstallation`, `CiTab/**` | `CiInstallation` never persisted `triggers`/`post_as` — "Update" can't restore a repo's previous configuration |
 | 2026-08-25 | Open | `server/src/modules/ci/service.ts#refresh` | `{ ingested }`'s count has no defined semantics — new-this-call or touched-this-call? |
@@ -91,6 +105,14 @@ Section keys as in root `INSIGHTS.md` §Index.
 ---
 
 ## What Works
+
+### 2026-08-29 — To test a "derived, never read from the provider" rule, plant the provider's own field at the OPPOSITE polarity in BOTH directions
+
+**Pattern:** when a value must be *computed* rather than read from a third party's payload, the fixture carries the provider's tempting field set to the **wrong** answer — and carries it wrong in both directions across two cases. One case with `outdated: true` where the answer must be `false` catches an implementation that reads the field; it does not catch one that reads and negates it, nor one that reads it on only some branch. Two cases at opposite polarities catch every naive read.
+
+**Why:** SPEC-06's AC-24 requires `is_outdated` to be derived by comparing each note's `position.{base,head,start}_sha` against the MR's current `diff_refs`, never from GitLab's `outdated`/`resolvable`, which mean something else. A fixture that merely *omits* those fields proves nothing — the implementation passes whether it derived the answer or read a field that happened to be absent. This generalises to every "must not consult X" rule: absence of X discriminates nothing; a hostile X is the only fixture that does.
+
+**Where:** `server/test/gitlab-mr.test.ts` (the `is_outdated` cases), `server/src/adapters/gitlab/forge.ts` (`isOutdated`). Same shape as the AC-25 assertion in that file, which plants `web_url: 'https://evil.example.net/…'` so a pass-through of the instance's own URL cannot survive.
 
 ### 2026-08-09 — A value that is returned but rendered NOWHERE has no UI that can notice it breaking — assert it at the boundary that returns it
 
@@ -221,6 +243,14 @@ to probe.
 ("Commands") without the flag — add it there if you touch that table.
 
 ## What Doesn't Work
+
+### 2026-08-28 — A same-remote guard that classifies remotes by parsing them as URLs fails closed on a FILESYSTEM remote — which is what every hermetic git test uses
+
+**Tried:** implementing SPEC-06 AC-18's foreign-remote guard (`clone()` must refuse to reuse a directory holding a different remote) by normalising both the stored and the requested remote through a URL parse, returning `null` for anything that was neither a URL nor the scp form, and treating `null` as "foreign, refuse".
+
+**Failed:** a legitimate re-clone from an identical **filesystem** remote (`/tmp/xyz/origin.git`) was refused, because a bare path parses as neither. Production never notices — real remotes are always `https://` — so the guard looks correct in review and in manual testing. What breaks is the test suite: every hermetic git test builds its remotes as local directories, so the reuse path becomes unreachable and AC-18's happy case cannot be exercised at all. The bug is invisible in the place it fires and visible only in the place it does not.
+
+**Instead:** compare a non-URL remote **literally** after trimming a trailing `/` and `.git`, and reserve the URL normaliser for values that actually parse. `server/src/adapters/git/simple-git.ts:246-263` (`remoteIdentity`). General shape: a normaliser used as a security predicate must have a defined answer for every input its *tests* will produce, not only for every input production will.
 
 ### 2026-08-21 — A "only report severity X" prompt line does not make the agent under-report — it can make the agent OVER-LABEL, and eval matching (file+line only) cannot tell the difference
 
@@ -483,6 +513,72 @@ testcontainers.
 `server/test/reviews.it.test.ts:13` (`const d = hasDocker ? describe : describe.skip`).
 
 ## Codebase Patterns
+
+### 2026-08-29 — A sync path-builder with many callers keeps the LEXICAL check; the filesystem-aware one goes at the single WRITING entry point — and `lstat`, not `access`, is what makes it fail closed
+
+**Rule:** when a synchronous function with many callers needs a filesystem-aware security check, do not make it async. Leave the cheap lexical check where it is, and put the `realpath` check at the one entry point that actually writes. Probe ancestor existence with `lstat`, never `access`.
+
+**Why:** `clonePathFor` is called from **nine** sites and its `resolve()`-based containment is lexical, so it cannot see a symlink (superseded entry in §Open Questions). Making it async to add `realpath` would have rippled through all nine — which is exactly the shape that produced the `RepoRef.instanceKey` defect one stage earlier (root `INSIGHTS.md` 2026-08-29), where a widened signature left eight of nine call sites silently wrong. So the fix splits by responsibility: `clonePathFor` stays sync and lexical (it still catches `..`), and `clone()` — the only path that creates, reuses or deletes — resolves the deepest **existing** ancestor with `realpath` and refuses unless it is inside `realpath(cloneDir)`, before `mkdir` and therefore before the reuse, `rm` and clone branches alike.
+
+**The one-word detail that decides whether the control works:** `access(F_OK)` **follows** symlinks, so a *dangling* link reads as non-existent and the ancestor walk steps straight past it — the attacker's link is never handed to `realpath`. `lstat` counts the link itself as present, `realpath` then throws on it, and the guard refuses. Same loop, opposite security outcome.
+
+Note the boundary this leaves: the read paths (`sync`, `readFile`, `blame`, `log`, `diff`) still resolve through `clonePathFor` alone, i.e. lexically. That is deliberate — they neither create nor delete — but it is the edge to re-examine if a read path ever gains a write.
+
+**Where:** `server/src/adapters/git/simple-git.ts:206` (`assertRealDestContained`), called from `clone()` at `:138`; `:229-236` is the `lstat` walk; `:86-98` records why `clonePathFor` stayed sync. Probe-verified: a `clones/ns/A/pwn -> ../../../outside` destination is refused with `invalid_clone_path` and `outside/` stays empty, while a nested namespace and the legacy layout both still clone.
+
+### 2026-08-29 — A containment check is not an authorisation check — and widening a path segment's ARITY turns the difference into an `rm -rf` of someone else's data
+
+**Rule:** when a path component changes from single-segment to multi-segment, re-audit every branch that assumed the path was a **leaf** — not just the code that builds the path. "Resolves inside the root" answers *where*, never *whose*.
+
+**Why:** `SimpleGitClient.clone()` forks on whether the destination holds a `.git`. Stage B put `assertSameRemote` on the `.git` branch (AC-18) and left the sibling branch — exists, no `.git` — as an unguarded `await rm(dest, { recursive: true, force: true })`, on the pre-Stage-B assumption that such a directory could only be a half-written clone. Once `owner` became multi-segment, an ordinary group-level URL (`https://gitlab.example.com/group/sub`) resolved to `<cloneDir>/<key>/group/sub` — a legitimate **intermediate namespace directory**, which by definition has no `.git`. The `resolve()` containment guard passed, correctly, because the path *is* inside the clone root; the `rm` then destroyed every sibling clone beneath that namespace. The clone root is not partitioned by workspace, so one ordinary `POST /repos` was a cross-tenant data-destruction primitive. The guard covered the recoverable case (409, nothing touched) and missed the unrecoverable one.
+
+Note the fix cannot check identity: with no `.git` there is no remote to compare. It refuses unless the tree contains **no `.git` at any depth**, with bounded scanning (6 levels, 512 entries), and every ambiguous outcome — unreadable, too deep, too wide — refuses and removes nothing.
+
+Related path semantics, both verified: `path.join` (unlike `resolve`) ignores a leading `/` on a non-first argument, so `join(root, key, '/etc', 'passwd')` is `root/key/etc/passwd` — contained. The only real traversal vector through `join` is `..`, so a test expecting a *throw* on an absolute-looking segment is asserting the wrong thing.
+
+**Where:** `server/src/adapters/git/simple-git.ts:148` (the gated branch), `:196-260` (`assertRemovablePartialClone`), `server/test/clone-isolation.test.ts`. Found by the Stage B security review; confirmed independently before fixing.
+
+### 2026-08-29 — Enumerating the callers of a shape means grepping the CONSUMING METHOD, not the type name — the untyped literal matches neither
+
+**Rule:** to find every construction site of a DTO before changing its meaning, grep for the method that consumes it (`container.git.`, `codeIndex.`), not for the type name. A `rg RepoRef` sweep finds only the sites that happened to annotate.
+
+**Why:** fixing `RepoRef.instanceKey` (root `INSIGHTS.md` 2026-08-29) meant finding every construction. Seven of eight bad sites were `const ref: RepoRef = {…}` and matched a type-name grep. The eighth, `server/src/modules/reviews/diff-loader.ts:20`, passed an inline object literal straight as an argument — no annotation, no match, and it was carrying the same cross-tenant defect. The enumeration *method* was incomplete, not merely the list, which is the part worth remembering: a type-name grep silently under-reports by exactly the sites that never named the type.
+
+**Where:** `server/src/modules/reviews/diff-loader.ts:19-27`; contrast the seven annotated sites in `repo-intel`, `intent`, `brief`, `conventions`. Extends root `INSIGHTS.md` 2026-08-11 ("asserting a negative from a truncated grep").
+
+### 2026-08-29 — A mock that ignores the field an assertion discriminates on turns an isolation test into a tautology that passes
+
+**Rule:** a mock must model every field the test's assertion distinguishes on. If two inputs differing only in field X must produce different outputs, and the mock ignores X, the test compares two identical values and passes having proven the opposite of its name.
+
+**Why:** `MockGitClient.clonePathFor` returned `/mock/clones/<owner>/<name>` unconditionally, ignoring `instanceKey`. Any AC-17 clone-isolation test routed through the standard ring-2/ring-5 seam would assert that two repositories on two different instances get two different paths — and would pass, because both sides were the same string, whether or not production was correct. The test writer worked around it by subclassing the real `SimpleGitClient` and overriding only `clone()`, which keeps production's own path derivation under test; re-deriving the path in the test would have asserted the test's arithmetic instead.
+
+This is the second shape of the same trap: 2026-08-28 records a mock missing an **optional method** silently selecting a service's fallback branch. Generalisation: a mock is part of the assertion, and an incomplete one fails silently in the passing direction.
+
+**Where:** `server/src/adapters/mocks.ts:293-313` (now branches on `instanceKey`), `server/test/repos-instances.it.test.ts`. Note the mock deliberately does **not** mirror `clonePathFor`'s containment throw — that guard is over a real `cloneDir`, and asserting it against an invented `/mock/clones` root would be asserting a fiction; containment belongs in `clone-isolation.test.ts` against `SimpleGitClient`.
+
+### 2026-08-28 — "Backfill by column DEFAULT" is only free while the column stays out of a UNIQUE index — a constant default makes every existing row collide
+
+**Rule:** a plan that adds a column with a constant `NOT NULL DEFAULT` *and* puts that column in a new `UNIQUE` index cannot be executed as written on a table that already has rows. Every pre-existing row takes the same default, so they all collide and `CREATE UNIQUE INDEX` fails. Check the two clauses against each other before writing the migration: the default trick is free only when the defaults are **distinct per row**, or when the column is not part of a unique constraint.
+
+**Why:** SPEC-06's Step B2 specified `uniqueIndex(...).on(workspaceId, instanceKey, namespacePath)` with `namespace_path text NOT NULL DEFAULT ''`. Both halves are individually correct and were individually reasoned about — the default exists precisely so AC-19 needs no DML backfill, and the plan explicitly forbids `UPDATE`/`INSERT` in a migration. Together they are impossible: every legacy repository in a workspace would be `('github.com','')`. The escapes are a backfilling `UPDATE` (ruled out by the requirement), an expression index, or a different third column. We took the third: `full_name`, which is already populated on every row and carries the identical invariant going forward — a nested GitLab namespace simply puts several segments in `owner`. `namespace_path` is still added and written on every insert.
+
+**Where:** `server/src/db/schema/repos.ts:56-88`, `server/src/db/migrations/0023_skinny_shiver_man.sql` (8 statements, zero DML). Deviation accepted by the repo owner on 2026-08-28.
+
+### 2026-08-29 — The fixture a field-name grep CANNOT find is the `toEqual` expectation — grep the DTO's sibling fields or its builder's name instead
+
+**Rule:** after adding a field to a table-backed DTO, grep for the **builder's name** (`toRepoDto`) and for a **sibling required field** (`web_url`, `instance_label`), not only for the new field's own name. A whole-object `toEqual` expectation breaks on the new key while containing zero occurrences of it, so the obvious grep returns nothing and reads as "no consumers".
+
+**Why:** adding `Repo.last_sync_error` broke two places. `server/test/contracts.test.ts` is the one 2026-08-28 already names — it hand-builds a `Repo` literal. The second, `server/test/repos-url.test.ts:307,334`, has a `repoRow()` fixture and a `toEqual` assertion for `toRepoDto`; neither mentioned `last_sync_error` before the edit, by definition, because the field did not exist there yet. And `pnpm typecheck` cannot help: it does not cover `server/test/**` (Tools, 2026-08-29). So the field-name grep — the advice from the previous entry — is necessary and **not sufficient**; a whole-object equality assertion is invisible to it.
+
+**Where:** `server/test/repos-url.test.ts:307,334`; `server/test/contracts.test.ts:342`. Extends 2026-08-28 below, which names only the literal-building file.
+
+### 2026-08-28 — `server/test/contracts.test.ts` is the ONLY place a `Repo` literal is hand-built, so it is the cheap tripwire for any ring-0 contract widening
+
+**Rule:** when a plan makes a field **required** on a table-backed ring-0 DTO, list `server/test/contracts.test.ts` in the test hop's file set. It is the single file that constructs those literals by hand, so it is the only thing that goes red — and it goes red *correctly*, as the contract change landing, not as a defect.
+
+**Why:** Stage B made five fields required on `Repo`. Production code all builds its DTOs through `toRepoDto`, which the same step updates, so nothing else notices. `contracts.test.ts:320` builds one by hand and failed with a Zod issue that reads like a bug. Because the file lives under `server/test/**`, it falls outside an `implementer`'s owned file set, and an implementer correctly forbidden from editing a test to match its own change must stop and report — costing a round trip that naming the file up front avoids. The fix is mechanical: add the new keys to the literal.
+
+**Where:** `server/test/contracts.test.ts:320-345`, `server/src/vendor/shared/contracts/platform.ts` (`Repo`). Related: root `INSIGHTS.md` 2026-08-11 and 2026-08-02 govern the jsonb case, which is the opposite rule — this one is for a table-backed DTO, where required is correct.
 
 ### 2026-08-28 — A guard latched on the CLIENT is a guard skipped on 3 of 4 requests, and no value assertion can see it — only the injected collaborator's CALL COUNT
 
@@ -1212,6 +1308,22 @@ the editor field is
 
 ## Tool & Library Notes
 
+### 2026-08-29 — `pnpm typecheck` is BLIND to `server/test/**` — `tsconfig.json` includes only `src/**/*.ts`, so a stale fixture never announces itself
+
+**Quirk:** `server/tsconfig.json:28` is `"include": ["src/**/*.ts"]`, so `tsc --noEmit -p tsconfig.json` never looks at the test tree. Proved rather than assumed: appending `const __probe: number = "definitely not a number";` to `server/test/gitlab-mr.test.ts` and running `pnpm typecheck` reports **0 errors**. The only thing that typechecks a test file here is the vitest run, and vitest transpiles without typechecking — so a fixture whose type no longer matches the contract fails *only* if some runtime assertion happens to notice.
+
+**Workaround:** after widening a ring-0 contract, grep the test tree for the field by name; do not rely on a green `pnpm typecheck`. Note which half is dangerous: when `PrReviewComment.id` went `number` → `string`, the *request* fixture (`in_reply_to: 42`) went red because Fastify validates request bodies against the route's Zod schema and returned 422 — but the *response* fixture (`id: 1`) stayed silent, because these routes declare **no response schema**, so nothing on the way out checks anything. The durable fix in a test is to parse the response body through the ring-0 schema itself, which is the only thing that will notice.
+
+**Where:** `server/tsconfig.json:28`, `server/test/pulls-comments.it.test.ts:50` (the silent one) and `:120` (the loud one). Complements `server/INSIGHTS.md` 2026-08-28 on `contracts.test.ts` and root `INSIGHTS.md` 2026-08-29 on the client half.
+
+### 2026-08-29 — The `eval.it.test.ts` Docker-probe skip SURVIVES `--no-file-parallelism`, because the probe runs at module load
+
+**Quirk:** 2026-08-03 records `--no-file-parallelism` as the fix for the `*.it.test.ts` skip race, and for the *execution* race it is. It does not cover this one: `eval.it.test.ts` calls `await dockerAvailable()` at **module load**, and vitest still collects files concurrently even when it runs them serially. Observed on 2026-08-29 with the identical command back to back — run 1 `Tests 2 failed | 143 passed | 20 skipped (165)`, run 2 `Tests 2 failed | 163 passed (165)`. Same flag, same machine, 20 skips or none.
+
+**Workaround:** read the count on **every** run, not once. A run reporting `N skipped` has not verified what its exit code implies, and re-running is the diagnosis, not the fix. The collected total (165, 175, …) stays constant across both outcomes, so the total alone cannot distinguish them — the `skipped` word is the signal.
+
+**Where:** `server/test/eval.it.test.ts` (module-load `dockerAvailable()`), `server/test/helpers/pg.ts`. Extends 2026-08-03, which is correct about execution and silent about collection.
+
 ### 2026-08-28 — Node's resolver spells an IPv4-mapped address in DOTTED-QUAD, so a hex-only IPv6 parser answers `false` on resolver output while every URL-form test passes
 
 **Quirk:** second instance of the entry below, and worse, because this one cannot be caught by any admission-side test. `dns.lookup(host, { family: 6, v4mapped: true })` returns `::ffff:192.0.0.170` — never the hex form — while `new URL()` canonicalises every URL-form input to hex (`https://[::ffff:127.0.0.1]` → `[::ffff:7f00:1]`). A parser whose group regex is `^[0-9a-f]{1,4}$` therefore returns `null` for the whole literal, `isPrivateAddress` answers `false`, and the **runtime** half of the SSRF gate is open on any host publishing an IPv4-mapped AAAA record. Every syntactic test is green throughout, because the URL parser hands that side a spelling the regex accepts.
@@ -1546,6 +1658,34 @@ than relying on config auto-discovery. Same trap applies to any future
 
 ## Recurring Errors & Fixes
 
+### 2026-08-29 (later) — CORRECTION: `reviews.it.test.ts` now fails IN ISOLATION too, so "run it alone" is no longer the discriminator. The only one left is that the failing case MOVES
+
+**Symptom:** unchanged — `TypeError: Cannot read properties of undefined (reading 'skills')` at `test/reviews.it.test.ts:471`.
+
+**Cause:** the same `prompt_assembly` ordering race (2026-08-08). What changed is its rate. The entry below, written earlier the same day, states the file "passes 22/22 when run alone" and builds a three-step protocol on that. **That is no longer true.** Measured back to back on the same machine, same command, hours later: `1 failed | 21 passed`, `1 failed | 21 passed`, `22 passed`, `1 failed | 21 passed` — three of four isolated runs red. A separate agent independently hit `2 failed`, `2 failed`, `1 failed`, then green inside a full lane.
+
+**Takeaway:** the surviving discriminator is **identity, not isolation**. Across today's runs the failing case has been `every enabled skill disabled ⇒ no block at all`, `a run with no skills writes no run_skills rows`, and `records one run_skills row per ENABLED skill, with its version and order` — three different tests in one describe block. A deterministic regression cannot move; this can. So: run it twice, and if the *name* of the failing case changes, it is the race. If the same case fails every time, look at your diff.
+
+Do not read a red isolated run as proof of your own breakage, and do not "fix" it by editing the assertion. The real fix remains an ordering change in the run executor (`completeAgentRun` before `saveRunTrace`), which nobody has made.
+
+**Supersedes:** the isolation half of the entry below. Its index row is updated in the same edit — root `INSIGHTS.md` 2026-08-16 records what happens when a superseded claim survives in the index.
+
+### 2026-08-29 — There is a SECOND full-lane-only integration flake, in `eval.it.test.ts` NFR-8 — and the Docker-probe skip hides it completely
+
+**Symptom:** `test/eval.it.test.ts:867` — `AssertionError: expected false to be true`, on "NFR-8: after enough runs the oldest still reports its metrics and `detail_expired: true`". It fails **only** in the full `.it.test` lane; the same file passes `20 passed (20)` in isolation, twice in a row.
+
+**Cause:** not diagnosed. What is established is that it is a *third* independent full-lane behaviour, distinct from both the `prompt_assembly` ordering race (entry below) and the `eval.it.test.ts` module-load Docker-probe skip (Tools, 2026-08-29). The three interact in a way that makes a single run worthless as evidence: on one run the file is **skipped entirely** (`20 skipped`, so NFR-8 never executes and the lane looks clean); on the next, with the identical command, it **runs and fails**. Two consecutive runs of the same command produced exactly that pair.
+
+**Takeaway:** when the full lane is red, run the failing file **alone** before believing anything. Three known full-lane-only outcomes now exist, so "it failed in the lane" carries almost no information by itself: `reviews.it.test.ts` (identity of the failing case moves), `eval.it.test.ts` skipped wholesale, and `eval.it.test.ts` NFR-8. Isolation is the cheap discriminator for all three, and the collected count (175) stays constant across every one of them, so the total cannot distinguish them either.
+
+### 2026-08-29 — The `prompt_assembly` race fires on nearly every FULL-LANE run now, and the failing test's IDENTITY moves — which is the cheapest way to prove it is not your regression
+
+**Symptom:** `test/reviews.it.test.ts` fails with `TypeError: Cannot read properties of undefined (reading 'skills')` at `:471` (`trace.prompt_assembly.skills ?? null`). Anyone touching an unrelated slice now meets it while checking their own change, and the honest first reading is "I broke something".
+
+**Cause:** the ordering race recorded on 2026-08-08 — `completeAgentRun(status:'done')` runs before `saveRunTrace`, so a status-keyed waiter can return while `run_traces` still has no row. What has changed is the **rate**: that entry describes it as intermittent, and on this machine it now fires on essentially every full-lane run. Measured on 2026-08-29 while verifying an unrelated Stage B fix: `pnpm exec vitest run test/reviews.it.test.ts` alone → **22/22 green, three runs in a row**; the full lane (`.it.test --no-file-parallelism`) → one or two failures every time.
+
+**Takeaway:** the discriminator is not the pass/fail but **which** test fails. Two runs named two different tests in the same describe block ("every enabled skill disabled ⇒ no block at all" and "a run with no skills writes no run_skills rows"); a deterministic regression cannot move. So the three-step protocol is: run the file alone (expect green), run the full lane twice (expect a failure whose identity moves), and only then look at your diff. Do not "fix" it by editing the assertion. Note the count still reads `165 collected, 0 skipped` throughout, so the lane is genuinely running — this is not the skip trap of 2026-08-02.
+
 ### 2026-08-26 — `buildWorkflowYaml`'s "Skip forked pull request" step generated an invalid `.github/workflows/devdigest-review.yml`
 
 **Symptom:** installing CI via the Export to CI wizard produced a workflow
@@ -1874,6 +2014,18 @@ other delegated methods there.
 _Empty so far._
 
 ## Open Questions
+
+### 2026-08-29 — `resolve()` containment is LEXICAL, so a symlink inside an already-cloned repository can still put a nested-namespace destination outside the clone root — open, not fixed
+
+**Question:** should `clonePathFor`'s containment check call `realpath` on the existing parent chain (and should `clone()` refuse a destination whose parents traverse a symlink), or is the two-import precondition acceptable for a local-first deployment?
+
+`server/src/adapters/git/simple-git.ts:84` decides containment with `full.startsWith(root + sep)` after `resolve()`. `resolve()` never touches the filesystem, so it cannot see a symlink, while `mkdir(dirname(dest), { recursive: true })` traverses one happily. The docblock at `:62-67` promises "CONTAINMENT … it fails closed", which lexical resolution alone cannot deliver. Verified in a scratchpad: with `clones/ns/A/pwn -> ../../../outside`, `dest = clones/ns/A/pwn/x` reports `inside = true`, the `mkdir` succeeds through the link, and the write lands in `outside/`.
+
+Reachable because git checks out symlinks by default, so an attacker-authored repository can *place* the link, and SPEC-06 accepts a namespace of any depth — so `https://gitlab.example.com/ns/A/pwn/etc` is a plausible-looking deep GitLab path. It needs **two** operator-initiated imports (first the repository carrying the link, then the path through it), which is why this is an open question rather than a fix already made. One mitigating fact, verified: `fs.rm` on a symlink unlinks the link rather than the target, so the `rm` branch does not compound it.
+
+Cost to close: `realpath` the deepest existing ancestor and re-check containment against that, which is a handful of lines but adds a filesystem call to every clone. **Blocked on:** a decision about whether a nested-namespace depth cap would be the cheaper control.
+
+**Superseded by:** 2026-08-29 — "A sync path-builder with many callers keeps the LEXICAL check; the filesystem-aware one goes at the single writing entry point". Closed: `realpath` was chosen, the depth cap rejected (a symlink sits at any depth, so a cap moves the attack rather than stopping it).
 
 ### 2026-08-28 — Which GitLab endpoint honestly distinguishes "approvals permitted" from "not an eligible approver"? `APPROVAL_PROBE_PATH` is currently a guess
 

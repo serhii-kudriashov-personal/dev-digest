@@ -4,7 +4,10 @@ import { NextIntlClientProvider } from "next-intl";
 import type { ConventionCandidate } from "@devdigest/shared";
 import messages from "../../../../../../../messages/en/conventions.json";
 import { ConventionCard } from "./ConventionCard";
-import { confidenceColor, evidenceRef, githubBlobUrl } from "./helpers";
+import { confidenceColor, evidenceRef } from "./helpers";
+// `githubBlobUrl` moved to `@/lib/forge-urls` as `conventionEvidenceUrl` (SPEC-06 D2).
+// These cases moved with it in intent only — they belong in `lib/forge-urls.test.ts`.
+import { conventionEvidenceUrl } from "@/lib/forge-urls";
 
 afterEach(cleanup);
 
@@ -150,39 +153,44 @@ describe("evidenceRef", () => {
   });
 });
 
-describe("githubBlobUrl", () => {
-  const REPO = { full_name: "acme/payments-api", default_branch: "main" };
+describe("conventionEvidenceUrl", () => {
+  const REPO = {
+    provider: "github" as const,
+    web_url: "https://github.com/acme/payments-api",
+    instance_label: "github.com",
+    default_branch: "main",
+  };
 
   it("builds a blob URL with the line range as an anchor", () => {
-    expect(githubBlobUrl(CANDIDATE, REPO)).toBe(
+    expect(conventionEvidenceUrl(CANDIDATE, REPO)).toBe(
       "https://github.com/acme/payments-api/blob/main/src/api/users.ts#L23-L31",
     );
   });
 
   it("collapses a single-line anchor", () => {
     expect(
-      githubBlobUrl({ ...CANDIDATE, evidence_line_start: 9, evidence_line_end: 9 }, REPO),
+      conventionEvidenceUrl({ ...CANDIDATE, evidence_line_start: 9, evidence_line_end: 9 }, REPO),
     ).toBe("https://github.com/acme/payments-api/blob/main/src/api/users.ts#L9");
   });
 
   it("links the file with no anchor rather than `#L0` when no range was computed", () => {
     expect(
-      githubBlobUrl({ ...CANDIDATE, evidence_line_start: 0, evidence_line_end: 0 }, REPO),
+      conventionEvidenceUrl({ ...CANDIDATE, evidence_line_start: 0, evidence_line_end: 0 }, REPO),
     ).toBe("https://github.com/acme/payments-api/blob/main/src/api/users.ts");
   });
 
   it("uses the repo's own default branch, not a hardcoded main", () => {
-    expect(githubBlobUrl(CANDIDATE, { ...REPO, default_branch: "trunk" })).toContain(
+    expect(conventionEvidenceUrl(CANDIDATE, { ...REPO, default_branch: "trunk" })).toContain(
       "/blob/trunk/",
     );
   });
 
   it("returns null while the repo is still loading, so no dead link renders", () => {
-    expect(githubBlobUrl(CANDIDATE, undefined)).toBeNull();
+    expect(conventionEvidenceUrl(CANDIDATE, undefined)).toBeNull();
   });
 
   it("returns null when the candidate has no evidence path", () => {
-    expect(githubBlobUrl({ ...CANDIDATE, evidence_path: "" }, REPO)).toBeNull();
+    expect(conventionEvidenceUrl({ ...CANDIDATE, evidence_path: "" }, REPO)).toBeNull();
   });
 });
 

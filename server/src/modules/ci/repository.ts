@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { CiTarget } from '@devdigest/shared';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
@@ -42,8 +42,55 @@ export interface RunResultPatch {
   costUsd: number | null;
 }
 
+/**
+ * What the export path needs to know about the target repository (SPEC-06 —
+ * AC-48). Plain data: nothing Drizzle-shaped crosses this boundary.
+ */
+export interface CiTargetRepoRow {
+  id: string;
+  provider: string;
+  instanceLabel: string;
+}
+
 export class CiRepository {
   constructor(private db: Db) {}
+
+  /**
+   * The imported repository an export names, or `null` when the workspace has
+   * not imported it (SPEC-06 — AC-48).
+   *
+   * `repos.namespace_path === repos.full_name` by invariant, so one predicate
+   * matches an `owner/name` and a nested GitLab namespace alike. `instanceId`
+   * is part of the key rather than an afterthought: two instances may hold the
+   * same namespace path, and `null` selects the built-in github.com host, which
+   * is deliberately not a `git_instances` row — `IS NULL` and not `= NULL`.
+   *
+   * Reading `repos` from this slice's own repository follows the established
+   * shape (`conventions`, `context`, `intent` and `brief` all do it): the SQL
+   * stays inside a `repository.ts`, and no slice imports another slice's
+   * private files (`backend-onion-architecture` §4, §5).
+   */
+  async findTargetRepo(
+    workspaceId: string,
+    fullName: string,
+    instanceId: string | null,
+  ): Promise<CiTargetRepoRow | null> {
+    const [row] = await this.db
+      .select({
+        id: t.repos.id,
+        provider: t.repos.provider,
+        instanceLabel: t.repos.instanceKey,
+      })
+      .from(t.repos)
+      .where(
+        and(
+          eq(t.repos.workspaceId, workspaceId),
+          eq(t.repos.fullName, fullName),
+          instanceId === null ? isNull(t.repos.instanceId) : eq(t.repos.instanceId, instanceId),
+        ),
+      );
+    return row ?? null;
+  }
 
   /**
    * Create-or-touch the (agent, repo) installation (AC-20). Throws

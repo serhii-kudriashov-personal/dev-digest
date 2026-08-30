@@ -11,7 +11,7 @@
     "light": "light"
   },
   "removeRepo": {
-    "confirm": "Remove {name} from DevDigest?\n\nThis only removes it from DevDigest (and its imported PRs). Nothing is deleted on GitHub, and your local clone on disk is left untouched.",
+    "confirm": "Remove {name} from DevDigest?\n\nThis only removes it from DevDigest (and the change requests imported from it). Nothing is deleted on {instance}, and your local clone on disk is left untouched.",
     "fallbackName": "this repository"
   },
   "nav": {
@@ -39,8 +39,8 @@
     "posting": "Posting…",
     "cancel": "Cancel",
     "reply": "Reply",
-    "viewOnGitHub": "View on GitHub",
-    "postedToGitHub": "Posts to GitHub immediately",
+    "viewOnForge": "View on {instance}",
+    "postedToForge": "Posts to {instance} immediately",
     "outdatedTitle": "{count} comment(s) on older revisions"
   }
 }

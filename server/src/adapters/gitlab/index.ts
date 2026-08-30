@@ -6,6 +6,12 @@
  *   instance.ts  the `GitLabInstanceClient` port + its HTTP implementation:
  *                verify a base URL and an access key, report version/edition,
  *                and probe the approval capability
+ *   forge.ts     `GitLabForgeClient implements ForgeClient` — the read path
+ *                (merge requests, their diffs and commits, linked issues and
+ *                inline discussion notes, all mapped onto the shared contracts)
+ *                AND the write path: publishing a review as a summary note plus
+ *                anchored diff notes, with the approval attempted and its
+ *                outcome reported rather than predicted
  *
  * One shallow barrel, re-exporting only. Nothing outside `platform/container.ts`
  * constructs an implementation from here (`backend-onion-architecture` §4);
@@ -14,3 +20,4 @@
  */
 export * from './http.js';
 export * from './instance.js';
+export * from './forge.js';

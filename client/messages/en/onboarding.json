@@ -1,4 +1,17 @@
 {
+  "addRepo": {
+    "title": "Add a repository",
+    "body": "Paste a repository URL from a host you have registered — DevDigest clones it locally and imports its open change requests. API keys aren’t needed here; set them once in <link>Settings → API Keys</link>.",
+    "urlLabel": "Repository URL",
+    "urlHint": "The full browser URL of the project, at any namespace depth.",
+    "urlPlaceholder": "https://host/namespace/project",
+    "close": "Close",
+    "cancel": "Cancel",
+    "submit": "Add repository",
+    "submitting": "Cloning…",
+    "errorFallback": "Could not add repository",
+    "footer": "API keys live in Settings"
+  },
   "title": "Onboarding Tour",
   "sections": "Sections",
   "sectionCount": "{count} sections",

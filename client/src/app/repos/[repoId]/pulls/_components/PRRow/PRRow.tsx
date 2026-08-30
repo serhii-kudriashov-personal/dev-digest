@@ -5,15 +5,25 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Icon, Avatar, Badge, CircularScore } from "@devdigest/ui";
-import type { PrMeta } from "@/lib/types";
+import type { PrMeta, Repo } from "@/lib/types";
 import { SIZE_COLOR, STATUS_META } from "../../constants";
 import { FindingsCell } from "../FindingsCell";
 import { relativeTime, sizeOf } from "../../helpers";
 import { formatCost } from "@/lib/format";
 import { s } from "../../styles";
 
-export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
+export function PRRow({
+  pr,
+  repoId,
+  repo,
+}: {
+  pr: PrMeta;
+  repoId: string;
+  /** The owning repository — supplies the identifier prefix and the instance name (AC-26, AC-27, AC-31). */
+  repo?: Pick<Repo, "provider" | "instance_label"> | null;
+}) {
   const t = useTranslations("prReview");
+  const tc = useTranslations("common");
   const router = useRouter();
   const [h, setH] = React.useState(false);
   const st = STATUS_META[pr.status] ?? STATUS_META.needs_review!;
@@ -31,8 +41,13 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
         <div style={s.rowTitleWrap}>
           <div style={s.rowTitle(h)}>{pr.title}</div>
           <span className="mono" style={s.rowNumber}>
-            #{pr.number}
+            {tc("forge.identifier", { provider: repo?.provider ?? "github", number: pr.number })}
           </span>
+          {repo && (
+            <span style={s.rowInstance}>
+              {tc("forge.onInstance", { instance: repo.instance_label })}
+            </span>
+          )}
         </div>
       </div>
       <div style={s.authorCell}>

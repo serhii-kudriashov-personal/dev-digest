@@ -13,12 +13,13 @@ import { useFindingAction } from "@/lib/hooks/reviews";
 import { useCreateEvalCaseFromFinding } from "@/lib/hooks/eval";
 import { KEY_TO_ACTION } from "./constants";
 import { byConfidence, countBySeverity, visibleFindings } from "./helpers";
+import type { ForgeRepoRef } from "@/lib/forge-urls";
 import { s } from "./styles";
 
 export function FindingsPanel({
   findings,
   prId,
-  repoFullName,
+  repo,
   headSha,
   severities = [],
   onToggleSeverity,
@@ -27,7 +28,7 @@ export function FindingsPanel({
 }: {
   findings: FindingRecord[];
   prId: string;
-  repoFullName?: string | null;
+  repo?: ForgeRepoRef | null;
   headSha?: string | null;
   /** Page-wide severity selection (from `?severity=`); empty means all. */
   severities?: Severity[];
@@ -161,7 +162,7 @@ export function FindingsPanel({
               expanded={expandedById[f.id]}
               onExpandedChange={(next) => setExpandedById((prev) => ({ ...prev, [f.id]: next }))}
               pending={action.isPending}
-              repoFullName={repoFullName}
+              repo={repo}
               headSha={headSha}
               onAction={(act) => action.mutate({ findingId: f.id, action: act, prId })}
               creatingEvalCase={createEvalCase.isPending}

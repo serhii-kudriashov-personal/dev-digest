@@ -17,13 +17,13 @@ export interface DiffCommentApi {
     line: number;
     side: "LEFT" | "RIGHT";
     body: string;
-    in_reply_to?: number;
+    in_reply_to?: string;
   }) => Promise<unknown>;
 }
 
 /** One review-comment thread anchored to a diff line (or outdated). */
 export interface CommentThread {
-  rootId: number;
+  rootId: string;
   comments: PrReviewComment[];
   line: number | null;
   side: "LEFT" | "RIGHT";
@@ -37,7 +37,7 @@ export function lineKey(side: "LEFT" | "RIGHT", line: number | null | undefined)
 
 /** Group flat comments into threads (root + replies), ordered oldest-first. */
 export function buildThreads(comments: PrReviewComment[]): CommentThread[] {
-  const byRoot = new Map<number, PrReviewComment[]>();
+  const byRoot = new Map<string, PrReviewComment[]>();
   for (const c of comments) {
     const rootId = c.in_reply_to_id ?? c.id;
     const list = byRoot.get(rootId) ?? [];

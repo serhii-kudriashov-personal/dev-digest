@@ -30,7 +30,7 @@
     "body": "No callers were found for the symbols this PR changes."
   },
   "openInDiff": "Open {path} line {line} in the diff",
-  "openOnGitHub": "Open {path} line {line} on GitHub",
+  "openOnForge": "Open {path} line {line} on {instance}",
   "graph": {
     "empty": "No downstream callers to graph.",
     "ariaLabel": "Blast radius graph"

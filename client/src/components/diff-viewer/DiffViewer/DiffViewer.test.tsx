@@ -43,7 +43,7 @@ const BIG: PrFile = {
 };
 
 const EXISTING_COMMENT: PrReviewComment = {
-  id: 11,
+  id: "11",
   path: SMALL.path,
   line: 2,
   original_line: 2,

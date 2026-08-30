@@ -22,6 +22,12 @@ export interface RepoClone {
   owner: string;
   name: string;
   clonePath: string | null;
+  /**
+   * Carried so the `RepoRef` this slice builds resolves to the clone this row
+   * actually owns — a bare `{ owner, name }` from a non-github.com row reads
+   * another workspace's mirror (SPEC-06 AC-17; `@devdigest/shared` `RepoRef`).
+   */
+  instanceKey: string;
 }
 
 export interface InsertConvention {
@@ -56,6 +62,7 @@ export class ConventionsRepository {
         owner: t.repos.owner,
         name: t.repos.name,
         clonePath: t.repos.clonePath,
+        instanceKey: t.repos.instanceKey,
       })
       .from(t.repos)
       .where(and(eq(t.repos.workspaceId, workspaceId), eq(t.repos.id, repoId)));

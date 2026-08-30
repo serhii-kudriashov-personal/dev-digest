@@ -2,8 +2,17 @@
  * Pure helpers for the review service (side-effect free; operate purely on
  * their arguments — no DB / network / `this`).
  */
-import type { Finding, PromptAssembly } from '@devdigest/shared';
-import type { FindingRow, PullRow, ReviewRow } from './repository.js';
+import type {
+  Finding,
+  PostBackOutcome,
+  PromptAssembly,
+  ReviewPostBack,
+  ReviewPublication,
+  ReviewPublicationNote,
+  Verdict,
+} from '@devdigest/shared';
+import type { FindingRow, PullRow, ReviewPostbackRow, ReviewRow } from './repository.js';
+import { POST_BACK_NOTE_CAP, POST_BACK_SEVERITY_ORDER } from './constants.js';
 
 // reduceReviews + sliceDiff live in @devdigest/reviewer-core (pure engine logic
 // shared with the CI runner); re-exported here for backward-compatible imports.
@@ -72,6 +81,123 @@ export function reviewToDto(
     model: review.model,
     created_at: review.createdAt.toISOString(),
     findings: findings.map(findingRowToDto),
+  };
+}
+
+// ---- Posting a review back (SPEC-06 — AC-34, AC-35, AC-41, NFR-3) ---------
+
+/** What `buildReviewPublication` produced, plus what it had to leave out. */
+export interface ReviewPostBackPayload {
+  publication: ReviewPublication;
+  /** Findings the note cap dropped (NFR-3). `0` when nothing was truncated. */
+  truncated: number;
+}
+
+/** Human wording for a verdict, used in the summary note (AC-41). */
+const VERDICT_WORDS: Record<Verdict, string> = {
+  approve: 'Approve',
+  request_changes: 'Request changes',
+  comment: 'Comment',
+};
+
+/**
+ * Turn a persisted review into what actually goes on the change request.
+ *
+ * PURE, and deliberately so — the cap, the ordering and every string a user
+ * will read are decided here rather than inside an adapter, so one rule holds
+ * for every provider and none of it needs a forge to exercise.
+ *
+ * Three decisions:
+ *
+ *  1. **Most severe first, then capped** (NFR-3). Publishing in row order would
+ *     sometimes spend the cap on suggestions and drop a critical; the count of
+ *     what was dropped comes back so the caller can say so out loud.
+ *  2. **The summary note carries the verdict in words.** GitLab has no
+ *     "request changes" review state, so a verdict that is not written down is
+ *     a verdict the merge request does not carry at all (AC-41).
+ *  3. **Every note is `RIGHT`-sided today, and that is a property of the
+ *     FINDINGS, not a shortcut.** The port expresses both sides (AC-35) because
+ *     GitLab anchors an added line by `new_line` and a removed line by
+ *     `old_line` — but this repo's grounding gate only keeps a finding whose
+ *     line appears in the diff's NEW-side line numbers, so no old-side finding
+ *     exists to send. If grounding ever admits one, this is the function that
+ *     must start choosing a side.
+ */
+export function buildReviewPublication(
+  review: ReviewRow,
+  findings: FindingRow[],
+  noteCap: number = POST_BACK_NOTE_CAP,
+): ReviewPostBackPayload {
+  const verdict = (review.verdict ?? 'comment') as Verdict;
+  const rank = (severity: string): number => {
+    const i = POST_BACK_SEVERITY_ORDER.indexOf(severity as (typeof POST_BACK_SEVERITY_ORDER)[number]);
+    return i === -1 ? POST_BACK_SEVERITY_ORDER.length : i;
+  };
+  const ordered = [...findings].sort(
+    (a, b) =>
+      rank(a.severity) - rank(b.severity) ||
+      a.file.localeCompare(b.file) ||
+      a.startLine - b.startLine,
+  );
+  const kept = ordered.slice(0, Math.max(0, noteCap));
+  const truncated = ordered.length - kept.length;
+
+  const summaryLines = [
+    `**DevDigest review — ${VERDICT_WORDS[verdict]}**`,
+    ...(review.summary ? ['', review.summary] : []),
+    ...(review.score === null ? [] : ['', `Score: ${review.score}/100`]),
+    ...(truncated > 0
+      ? [
+          '',
+          `Showing the ${kept.length} most severe of ${ordered.length} findings as inline ` +
+            `notes; ${truncated} more are in DevDigest.`,
+        ]
+      : []),
+  ];
+
+  return {
+    publication: {
+      summary: summaryLines.join('\n'),
+      notes: kept.map(toPublicationNote),
+      verdict,
+    },
+    truncated,
+  };
+}
+
+function toPublicationNote(finding: FindingRow): ReviewPublicationNote {
+  const body = [
+    `**${finding.severity} — ${finding.title}**`,
+    '',
+    finding.rationale,
+    ...(finding.suggestion ? ['', `Suggested fix: ${finding.suggestion}`] : []),
+  ].join('\n');
+  return {
+    path: finding.file,
+    // The START line is the anchor: grounding guarantees it appears in the diff,
+    // and an end line can run past the hunk the finding was grounded against.
+    line: finding.startLine,
+    side: 'RIGHT',
+    body,
+  };
+}
+
+/**
+ * A recorded post-back row as the wire contract (SPEC-06 — AC-39, NFR-12).
+ *
+ * `outcome` is widened from the column's `text` back to the contract's enum
+ * here, at the one place a row becomes a response — the column is text so the
+ * closed set can grow without a migration, and this is where that trade is
+ * paid.
+ */
+export function toPostBackDto(row: ReviewPostbackRow): ReviewPostBack {
+  return {
+    run_id: row.runId,
+    pr_id: row.prId,
+    outcome: row.outcome as PostBackOutcome,
+    reason: row.reason,
+    notes_published: row.notesPublished,
+    created_at: row.createdAt.toISOString(),
   };
 }
 

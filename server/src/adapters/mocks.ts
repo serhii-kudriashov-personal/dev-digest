@@ -7,6 +7,7 @@ import type {
   StructuredRequest,
   StructuredResult,
   Embedder,
+  ForgeClient,
   GitHubClient,
   RepoRef,
   PrMeta,
@@ -18,6 +19,8 @@ import type {
   CommitFilesPayload,
   WorkflowRunSummary,
   IssueMeta,
+  ReviewPublication,
+  ReviewPublicationResult,
   GitClient,
   CloneOptions,
   UnifiedDiff,
@@ -140,10 +143,14 @@ export interface MockGitHubOptions {
   workflowRuns?: WorkflowRunSummary[];
   /** Seeds `downloadRunArtifact`; defaults to no artifact. */
   runArtifact?: Uint8Array;
+  /** When set, `publishReview` reports `not_posted` carrying this reason. */
+  publishFailure?: string;
 }
 
 export class MockGitHubClient implements GitHubClient {
   public posted: { n: number; review: GitHubReviewPayload }[] = [];
+  /** Every `publishReview` call, so a test can assert WHAT was published. */
+  public published: { repo: RepoRef; n: number; payload: ReviewPublication }[] = [];
   public openedPrs: OpenPrPayload[] = [];
   public committed: CommitFilesPayload[] = [];
   public createdComments: CreateReviewCommentInput[] = [];
@@ -205,6 +212,27 @@ export class MockGitHubClient implements GitHubClient {
     return { id: `mock-review-${n}` };
   }
 
+  /**
+   * GitHub's publication is ONE request, so the mock models only the two
+   * outcomes the real adapter can reach — never `partially_published`, which
+   * describes a note-by-note forge (SPEC-06 AC-39).
+   */
+  async publishReview(
+    repo: RepoRef,
+    n: number,
+    payload: ReviewPublication,
+  ): Promise<ReviewPublicationResult> {
+    this.published.push({ repo, n, payload });
+    if (this.opts.publishFailure) {
+      return { outcome: 'not_posted', reason: this.opts.publishFailure, notesPublished: 0 };
+    }
+    return {
+      outcome: 'posted_verdict_applied',
+      reason: null,
+      notesPublished: payload.notes.length + 1,
+    };
+  }
+
   async listReviewComments(_repo: RepoRef, _n: number): Promise<PrReviewComment[]> {
     return this.opts.comments ?? [];
   }
@@ -216,7 +244,8 @@ export class MockGitHubClient implements GitHubClient {
   ): Promise<PrReviewComment> {
     this.createdComments.push(input);
     return {
-      id: this.createdComments.length,
+      // String, like the real adapter's `String(c.id)` (SPEC-06 AC-23).
+      id: String(this.createdComments.length),
       path: input.path,
       line: input.line,
       original_line: input.line,
@@ -269,6 +298,159 @@ export class MockGitHubClient implements GitHubClient {
   }
 }
 
+// ---------- Mock Forge (provider-neutral, SPEC-06) ----------
+/** What one repository's forge answers with. Seeded per instance key. */
+export interface MockForgeSeed {
+  pulls?: PrMeta[];
+  detail?: Partial<PrDetail>;
+  comments?: PrReviewComment[];
+  /**
+   * When set, EVERY call for this instance key rejects with this message —
+   * the "one registered instance is offline" case (AC-43).
+   */
+  offline?: string;
+  /**
+   * Seeds what `publishReview` reports for this instance (SPEC-06 AC-39).
+   * Seeded rather than derived, because the four outcomes are the whole point
+   * of the port and a mock that only ever answers "posted" would let every
+   * caller's degraded branch go unexercised (`server/INSIGHTS.md` 2026-08-28).
+   * Defaults to `posted_verdict_applied` with every note published.
+   */
+  publication?: Omit<ReviewPublicationResult, 'notesPublished'> & { notesPublished?: number };
+}
+
+export interface MockForgeOptions extends MockForgeSeed {
+  login?: string;
+  /**
+   * Per-instance-key overrides, looked up by `RepoRef.instanceKey` (absent ⇒
+   * `'github.com'`, the legacy layout the port's docblock defines).
+   *
+   * THE MOCK BRANCHES ON `instanceKey` ON PURPOSE. A mock that ignored it would
+   * answer identically for two repositories on two instances, and an isolation
+   * test asserting they differ would pass having compared one value with itself
+   * (`server/INSIGHTS.md` 2026-08-29).
+   */
+  byInstanceKey?: Record<string, MockForgeSeed>;
+}
+
+/**
+ * `ForgeClient` mock — the seam that keeps ring 2 and ring 5 testable for a
+ * provider that is not GitHub (`backend-onion-architecture` §9). Every call
+ * records its `RepoRef`, so a test can assert WHICH repository was asked, not
+ * merely that something was.
+ */
+export class MockForgeClient implements ForgeClient {
+  /** Every ref this client was called with, in order. */
+  public calls: { method: string; repo: RepoRef; n?: number }[] = [];
+  public createdComments: { repo: RepoRef; n: number; input: CreateReviewCommentInput }[] = [];
+  /** Every published review, so a test can assert the summary, the note count
+   *  after the cap, and each note's side (SPEC-06 AC-34, AC-35, NFR-3). */
+  public published: { repo: RepoRef; n: number; payload: ReviewPublication }[] = [];
+
+  constructor(private opts: MockForgeOptions = {}) {}
+
+  /** Absent `instanceKey` means the legacy github.com layout — see `RepoRef`. */
+  private seedFor(repo: RepoRef): MockForgeSeed {
+    const key = repo.instanceKey ?? 'github.com';
+    return this.opts.byInstanceKey?.[key] ?? this.opts;
+  }
+
+  private enter(method: string, repo: RepoRef, n?: number): MockForgeSeed {
+    this.calls.push({ method, repo, ...(n === undefined ? {} : { n }) });
+    const seed = this.seedFor(repo);
+    if (seed.offline) throw new Error(seed.offline);
+    return seed;
+  }
+
+  async listPullRequests(repo: RepoRef): Promise<PrMeta[]> {
+    return this.enter('listPullRequests', repo).pulls ?? [];
+  }
+
+  async getPullRequest(repo: RepoRef, n: number): Promise<PrDetail> {
+    const seed = this.enter('getPullRequest', repo, n);
+    const base: PrDetail = {
+      number: n,
+      title: `Change request !${n}`,
+      author: 'mock.author',
+      branch: 'feat/mock',
+      base: 'main',
+      head_sha: 'a1b2c3d4',
+      additions: 3,
+      deletions: 1,
+      files_count: 1,
+      status: 'open',
+      opened_at: '2026-06-01T00:00:00Z',
+      updated_at: '2026-06-01T03:00:00Z',
+      body: null,
+      files: [{ path: 'src/config.ts', additions: 3, deletions: 1, patch: null }],
+      commits: [
+        { sha: 'a1b2c3d4', message: 'Mock commit', author: 'mock.author', committed_at: null },
+      ],
+      linked_issue: null,
+    };
+    return { ...base, ...seed.detail };
+  }
+
+  async listReviewComments(repo: RepoRef, n: number): Promise<PrReviewComment[]> {
+    return this.enter('listReviewComments', repo, n).comments ?? [];
+  }
+
+  async createReviewComment(
+    repo: RepoRef,
+    n: number,
+    input: CreateReviewCommentInput,
+  ): Promise<PrReviewComment> {
+    this.enter('createReviewComment', repo, n);
+    this.createdComments.push({ repo, n, input });
+    return {
+      id: `mock-discussion-${this.createdComments.length}`,
+      path: input.path,
+      line: input.line,
+      original_line: input.line,
+      side: input.side ?? 'RIGHT',
+      body: input.body,
+      user: this.opts.login ?? 'mock-user',
+      created_at: '2026-06-01T00:00:00Z',
+      html_url: `https://forge.test/mock/-/merge_requests/${n}#note_1`,
+      in_reply_to_id: input.inReplyTo ?? null,
+      is_outdated: false,
+    };
+  }
+
+  async getIssue(repo: RepoRef, n: number): Promise<IssueMeta> {
+    this.enter('getIssue', repo, n);
+    return { number: n, title: `Issue #${n}`, body: 'mock issue', state: 'opened' };
+  }
+
+  async currentLogin(): Promise<string> {
+    return this.opts.login ?? 'mock-user';
+  }
+
+  async publishReview(
+    repo: RepoRef,
+    n: number,
+    payload: ReviewPublication,
+  ): Promise<ReviewPublicationResult> {
+    // `enter` throws for a seeded-offline instance, which is the "nothing
+    // landed" path the caller must still turn into `not_posted` itself.
+    const seed = this.enter('publishReview', repo, n);
+    this.published.push({ repo, n, payload });
+    const seeded = seed.publication;
+    if (!seeded) {
+      return {
+        outcome: 'posted_verdict_applied',
+        reason: null,
+        notesPublished: payload.notes.length + 1,
+      };
+    }
+    return {
+      outcome: seeded.outcome,
+      reason: seeded.reason,
+      notesPublished: seeded.notesPublished ?? payload.notes.length + 1,
+    };
+  }
+}
+
 // ---------- Mock Git ----------
 export interface MockGitOptions {
   diff?: string;
@@ -288,8 +470,28 @@ export class MockGitClient implements GitClient {
 
   constructor(private opts: MockGitOptions = {}) {}
 
+  /**
+   * Mirrors `SimpleGitClient.clonePathFor`'s IDENTITY semantics, including the
+   * legacy branch: an absent, empty or `'github.com'` `instanceKey` gives the
+   * two-segment path (byte-identical to this mock's pre-SPEC-06 value, so no
+   * existing expectation moves), and any other key is a path segment of its own.
+   *
+   * It has to. A mock that ignored `instanceKey` returns ONE string for two
+   * repositories that differ only by instance, so any test asserting clone
+   * isolation through the standard ring-2/ring-5 seam compares two identical
+   * strings and passes having asserted nothing — the exact failure the real
+   * change is meant to prevent.
+   *
+   * What it deliberately does NOT mirror is `clonePathFor`'s containment check:
+   * that is a filesystem guard over a real `cloneDir`, and asserting it belongs
+   * against `SimpleGitClient` itself, not against a mock with an invented root.
+   */
   clonePathFor(repo: RepoRef): string {
-    return `/mock/clones/${repo.owner}/${repo.name}`;
+    const key = repo.instanceKey;
+    const legacy = key === undefined || key === '' || key === 'github.com';
+    return legacy
+      ? `/mock/clones/${repo.owner}/${repo.name}`
+      : `/mock/clones/${key}/${repo.owner}/${repo.name}`;
   }
   async clone(repo: RepoRef, url: string, _opts?: CloneOptions): Promise<{ path: string }> {
     this.cloned.push({ repo, url });

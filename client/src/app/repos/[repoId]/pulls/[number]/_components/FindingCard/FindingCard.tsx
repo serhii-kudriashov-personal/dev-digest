@@ -20,7 +20,7 @@ import {
 import type { FindingRecord, FindingActionKind } from "@devdigest/shared";
 import { SEV_COLOR, SEV_COLOR_FALLBACK } from "./constants";
 import { lineLabel } from "./helpers";
-import { githubBlobUrl } from "@/lib/github-urls";
+import { blobUrl, safeExternalHref, type ForgeRepoRef } from "@/lib/forge-urls";
 import { s } from "./styles";
 
 export function FindingCard({
@@ -31,7 +31,7 @@ export function FindingCard({
   onExpandedChange,
   onAction,
   pending,
-  repoFullName,
+  repo,
   headSha,
   onCreateEvalCase,
   creatingEvalCase,
@@ -50,7 +50,7 @@ export function FindingCard({
   onExpandedChange?: (expanded: boolean) => void;
   onAction?: (action: FindingActionKind, reply?: string) => void;
   pending?: boolean;
-  repoFullName?: string | null;
+  repo?: ForgeRepoRef | null;
   headSha?: string | null;
   /**
    * L06, SPEC-04 — AC-1…AC-9: freeze this finding into an eval case. Optional:
@@ -69,9 +69,12 @@ export function FindingCard({
     onExpandedChange?.(next);
   };
   const sevColor = SEV_COLOR[f.severity] ?? SEV_COLOR_FALLBACK;
+  // AC-25: the link is admitted against the repository's own registered origin,
+  // and a rejected target renders no clickable element at all (see below).
   const fileHref =
-    repoFullName && headSha
-      ? githubBlobUrl(repoFullName, headSha, f.file, f.start_line, f.end_line)
+    repo && headSha
+      ? (safeExternalHref(blobUrl(repo, headSha, f.file, f.start_line, f.end_line), repo) ??
+        undefined)
       : undefined;
   const accepted = !!f.accepted_at;
   const dismissed = !!f.dismissed_at;

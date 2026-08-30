@@ -60,7 +60,7 @@ const STEP_COUNT = 4;
 
 export function ExportToCiWizard({ agentId, agentName, onClose, prefill }: ExportToCiWizardProps) {
   const t = useTranslations("ci");
-  const { activeRepo } = useActiveRepo();
+  const { activeRepo, repos } = useActiveRepo();
 
   const [step, setStep] = React.useState(0);
   const [repo, setRepo] = React.useState(() => prefill?.repo ?? activeRepo?.full_name ?? "");
@@ -81,8 +81,20 @@ export function ExportToCiWizard({ agentId, agentName, onClose, prefill }: Expor
     t("exportWizard.steps.install"),
   ];
 
+  // SPEC-06 — AC-47/AC-48. Which imported repository the typed name resolves
+  // to, derived during render; `null` when the workspace has not imported it.
+  // GitHub Actions is the only CI target, so a repository on any other forge
+  // gets a STATED reason and NO action — the wizard stays reachable, the
+  // continue control simply is not offered. The server refuses independently,
+  // before generating or committing anything (AC-48).
+  const targetRepo = repos.find((r) => r.full_name === repo.trim()) ?? null;
+  const unsupportedProvider = targetRepo != null && targetRepo.provider !== "github";
+
   const buildInput = (): Omit<CiExportInputBody, "action"> => ({
     repo,
+    // Names the instance the repository was imported from, so the server
+    // resolves exactly one row when two instances hold the same path (AC-48).
+    instance_id: targetRepo?.instance_id ?? null,
     triggers,
     post_as: postAs,
     base: DEFAULT_BASE_BRANCH,
@@ -99,7 +111,7 @@ export function ExportToCiWizard({ agentId, agentName, onClose, prefill }: Expor
 
   const goBack = () => setStep((n) => Math.max(n - 1, 0));
 
-  const canAdvanceTarget = repo.trim().length > 0;
+  const canAdvanceTarget = repo.trim().length > 0 && !unsupportedProvider;
   const canAdvancePreview = !preview.isPending && preview.isSuccess;
   const busy = preview.isPending || install.isPending;
 
@@ -130,6 +142,16 @@ export function ExportToCiWizard({ agentId, agentName, onClose, prefill }: Expor
                 aria-label={t("exportWizard.repoLabel")}
               />
             </FormField>
+            {unsupportedProvider && (
+              <div role="status" aria-live="polite" style={s.errorBox}>
+                <span style={s.errorText}>
+                  {t("exportWizard.unsupportedProvider", {
+                    repo: targetRepo.full_name,
+                    instance: targetRepo.instance_label,
+                  })}
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -273,7 +295,7 @@ export function ExportToCiWizard({ agentId, agentName, onClose, prefill }: Expor
           <Button kind="ghost" onClick={goBack} disabled={step === 0 || busy}>
             {t("exportWizard.back")}
           </Button>
-          {step < 2 && (
+          {step < 2 && !(step === 0 && unsupportedProvider) && (
             <Button
               kind="primary"
               onClick={goNext}

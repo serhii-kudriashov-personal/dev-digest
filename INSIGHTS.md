@@ -50,6 +50,10 @@ entry nobody is told to open.
 | 2026-08-02 | Doesn't | `client/package.json`, `server/src/app.ts` CORS | A second web instance can't verify a UI change against the running API |
 | 2026-08-02 | Doesn't | `agents.system_prompt`, `docs/agent-prompts/**` | Stacking convention blocks into an agent's `system_prompt` made the review WORSE |
 | 2026-08-02 | Doesn't | `*/src/vendor/shared/**`, `scripts/check-shared-sync.sh` | `diff -r` is the wrong check for the two `vendor/shared` copies |
+| 2026-08-29 | Patterns | `plans/**` `Done when`, `rg` checks over source, `mcp/src/tools.ts`, any wording invariant | A `rg` check cannot see a `+`-concatenated string — the fourth `Done when` failure and the FIRST that passes wrongly rather than failing wrongly |
+| 2026-08-29 | Patterns | `*/src/vendor/shared/contracts/**`, staged plans, cross-package contract widening | A staged plan widening a ring-0 contract must name the CONSUMER files on BOTH sides — and the field-name grep matters more than `tsc`, because the runtime-only break is silent |
+| 2026-08-29 | Patterns | `plans/**`, step ordering, `Done when` checks, `.claude/agents/implementation-planner.md` | "Strictly sequential" steps can still invert construction order, and the earlier step's `Done when` passes VACUOUSLY |
+| 2026-08-29 | Patterns | `*/src/vendor/shared/adapters.ts`, optional fields on a port DTO, `RepoRef.instanceKey` | A `?` on a port DTO field records TWO facts — an optional field with a SEMANTIC DEFAULT must say what absence selects, or every gate stays green while callers pick the wrong resource |
 | 2026-08-28 | Patterns | `server/src/vendor/shared/adapters.ts`, `server/src/adapters/github/**`, `server/src/modules/polling/**`, `client/messages/**`, `specs/**`, spec intake | A port method with a real adapter, a mock and a passing test can still have ZERO production callers — verify an "already works" premise by grepping for a CALLER |
 | 2026-08-25 | Patterns | `plans/**`, `.claude/agents/implementation-planner.md`, multi-agent dispatch design | A plan's "Files owned" cell needs cross-checking against that same dispatch's OWN "Done when" text, not just its prose description |
 | 2026-08-25 | Patterns | `plans/**`, disjoint-file-ownership hops, multi-agent execution | Splitting a plan into disjoint-file-ownership hops lets a renamed/deleted symbol's stale COMMENT survive in a file none of them own |
@@ -98,6 +102,7 @@ entry nobody is told to open.
 | 2026-08-04 | Tools | `.claude/skills/**`, `skills-lock.json` | The lock covers only 8 of the 13 skills — four vendored-looking ones are ours |
 | 2026-08-02 | Tools | `.claude/skills/react-best-practices/**`, routing severity | A vendored skill is upstream opinion, not house policy |
 | 2026-08-02 | Tools | `findings`, any confidence display or gate | `findings.confidence` is not calibrated — never gate on it |
+| 2026-08-29 | Errors | `*/.env.example`, `scripts/dev.sh:42`, `platform/config.ts`, adding an env variable | A new variable in `.env.example` reaches ONLY fresh clones — `dev.sh` copies it once, so the symptom is the feature's own refusal and the code looks broken |
 | 2026-08-28 | Errors | `plans/**`, `Done when` checks, security-invariant greps, `.claude/agents/implementation-planner.md` | Third instance of the unsatisfiable `Done when` grep — first where the colliding token is a member of the contract the same step mandates |
 | 2026-08-14 | Errors | `.claude/agents/README.md` | The counted prose was ALREADY wrong before the eighth agent |
 | 2026-08-09 | Errors | `server/src/vendor/shared/**`, build residue | Untracked `.js` inside the vendored contracts that no gate can see |
@@ -1053,6 +1058,44 @@ historical drift is its own task.
 `client/src/vendor/shared`.
 
 ## Codebase Patterns
+
+### 2026-08-29 — A `rg` check cannot enforce a wording rule on a `+`-concatenated string — the fourth `Done when` failure is the first that passes WRONGLY
+
+**Rule:** an invariant about user-visible text must be asserted on the **assembled runtime value**, never grepped from source lines. Source-level greps are blind to any string built by concatenation, template interpolation or a lookup, and their silence reads exactly like success.
+
+**Why:** SPEC-06's Step D8 required MCP's tool text to become provider-neutral, with the check `rg -ni "pull request" mcp/src/tools.ts mcp/src/handlers.ts` returning only provider-scoped strings. It did — and the rule was still broken. `get_findings`'s description is built as `'…review of a pull ' + 'request, without starting a new one. …'`, so the forbidden phrase exists in the shipped bytes and in **no** source line. The step reported done, the gate agreed, and the defect was only found by a test that asserted over the assembled `tools/list` payload.
+
+This is the fourth entry in the `Done when` family (2026-08-16, 2026-08-25, 2026-08-28) and the first that fails in the dangerous direction: the previous three were *unsatisfiable* — loud, annoying, safe. This one was **vacuously satisfied**. A check that cannot fail and a check that cannot detect look identical in a report.
+
+**Where:** `mcp/src/tools.ts:80-81`, `mcp/test/tools-list.test.ts` (the assembled-payload assertion that caught it). Related: `server/INSIGHTS.md` 2026-08-29 on `pnpm typecheck` being blind to `server/test/**` — same shape, a gate whose silence was read as coverage.
+
+### 2026-08-29 — A staged plan that widens a ring-0 contract must name the CONSUMER files on both sides of the repo, or it hands an agent a gate it structurally cannot make pass
+
+**Rule:** the hop that changes a shared contract owns every file that breaks because of it — `server/**`, `client/**` and the test fixtures alike. If those files are not in that hop's `Files owned` cell, the hop ends red through no fault of the agent, and the plan has assigned a gate to someone who is forbidden from satisfying it.
+
+**Why:** SPEC-06's Step C1 widened `PrReviewComment.id` from `number` to `string` and listed `cd client && pnpm typecheck` in its own `Verify` block. That check cannot pass from inside C1's cell: the change breaks `client/src/components/diff-viewer/comments.ts` (three sites), `InlineComposer.tsx` and a `.test.tsx` fixture — all of which the plan assigns to **Stage D**, two stages later. The implementer did the correct thing and stopped, and the fix was five one-word edits made outside any stage.
+
+**The dangerous half is the one that does NOT break the build.** `client/src/lib/hooks/reviews.ts:116` declared `in_reply_to?: number` on a local interface whose value leaves through an untyped `api.post`. `tsc` stayed silent, so nothing announced it — and every reply would have taken a 422 from the route it posts to. Compile errors are the cheap half of a contract widening; the expensive half is found only by grepping the **field name** across both packages. Do that grep before declaring the widening done.
+
+**Where:** `server/src/vendor/shared/contracts/platform.ts` (`PrReviewComment`), `client/src/components/diff-viewer/**`, `client/src/lib/hooks/reviews.ts:116`. Sibling of `server/INSIGHTS.md` 2026-08-28, which records the same failure for `server/test/contracts.test.ts`.
+
+### 2026-08-29 — "Strictly sequential" steps can still contain a construction-order inversion, and the earlier step's `Done when` passes VACUOUSLY
+
+**Rule:** when ordering plan steps, check for each one that every symbol it names already exists or is created by an earlier step. A `Done when` phrased as "grep finds no unwanted construction of X" is satisfied trivially while X does not exist yet, so it cannot detect the inversion it sits next to.
+
+**Why:** SPEC-06's Stage C declares its steps strictly sequential. Step C3 adds `container.forge()`, which constructs `GitLabForgeClient`; Step C4 is what *creates* that class. C3 cannot compile before C4, so the executor had to invert them. C3's own check — `rg -n "new GitLab" server/src --glob '!platform/container.ts'` returns nothing — passes perfectly in the inverted state, in the correct state, and in the state where the class does not exist at all. It measures nothing about the ordering it belongs to.
+
+**Where:** `plans/2026-08-28-gitlab-repositories.md` Steps C3 and C4; `server/src/platform/container.ts`, `server/src/adapters/gitlab/forge.ts`. Related: root `INSIGHTS.md` 2026-08-16, 2026-08-25 and 2026-08-28 on `Done when` checks that cannot fail.
+
+### 2026-08-29 — A `?` on a port DTO field records TWO different facts, and if the docblock states the wrong one, `tsc` stays green while eight of nine call sites silently pick the wrong resource
+
+**Rule:** when an optional field carries a **semantic default** — absent means something specific, not "unused" — the docblock states that default and names the callers that must not rely on it. "Optional so existing callers keep compiling" is not a justification; it is a description of the bug about to ship.
+
+**Why:** SPEC-06 added `RepoRef.instanceKey?`, justified in its own docblock as "`CodeIndex`, `repo-intel`, `conventions`, `intent` and `brief` — none of which knows or needs to know which forge the repository came from". False: `clonePathFor(ref)` is the function that turns a `RepoRef` into a directory, and it consumes exactly this field. Absent did not mean "don't care", it meant **the legacy github.com two-segment layout**. Nine sites construct a `RepoRef`; one passed the field. The other eight resolved a *different repository's* clone — `sync()` ran `fetch` + `reset --hard` in it, `readFile()` fed its source to the LLM and to the UI. The clone root is not partitioned by workspace, so this was cross-tenant. Every gate stayed green throughout: optional is optional, and neither `tsc` nor `pnpm arch` can see a semantic default being ignored.
+
+Making the field **required** is the wrong fix — it would break the legacy layout AC-19 depends on. The fix is the docblock plus the eight call sites; the durable lesson is that a `?` earns a sentence saying what absence *selects*.
+
+**Where:** `server/src/vendor/shared/adapters.ts:105-126` and the client copy; the eight sites across `server/src/modules/{repo-intel,intent,brief,conventions,reviews}/**`. Found by the Stage B security review of `plans/2026-08-28-gitlab-repositories.md` and confirmed independently before fixing.
 
 ### 2026-08-28 — A port method with a real adapter, a mock and a passing test can still have ZERO production callers — verify an "already works" premise by grepping for a CALLER
 
@@ -2552,6 +2595,16 @@ diff, never that the claim about them is true.
 **Where:** `findings.confidence`; `agent_runs.grounding`.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-29 — A new variable added to `.env.example` reaches ONLY fresh clones: `dev.sh` copies the example just once, so every existing developer silently lacks it
+
+**Symptom:** a feature gated on a new environment variable does not work, and what the operator sees is the feature's own refusal message — nothing that mentions configuration. Observed live while registering a self-managed GitLab: the allowlist variable was documented in `server/.env.example`, the operator's existing `server/.env` never gained it, and the screen kept showing the SSRF refusal as though the code change had never landed.
+
+**Cause:** two correct behaviours that only bite in combination. `scripts/dev.sh:42` copies `.env.example` → `.env` **only when `.env` does not exist** — which is right (it must never clobber real keys) and means an existing checkout never receives a newly documented variable. And `server/src/platform/config.ts:1` does `import 'dotenv/config'`, read once at **startup**: a running dev server cannot pick the variable up through hot reload, and an `export` typed in another terminal never reaches the process `dev.sh` already started.
+
+**Takeaway:** adding an environment variable is three edits, not one — `.env.example`, the README table, **and the refusal path naming the file to put it in**. "Set `FOO` and restart the server" is not actionable, because the operator's `export` and the running server are different processes; "add `FOO` to `server/.env` and restart" is. And when the symptom is "the feature did not work", read the operator's actual `.env` before re-reading the code — the code was correct both times this happened today.
+
+**Where:** `scripts/dev.sh:42`, `server/src/platform/config.ts:1`, `server/.env.example`. Found wiring `DEVDIGEST_ALLOW_PRIVATE_FORGE_HOSTS` for a live corporate GitLab at `10.10.128.52`.
 
 ### 2026-08-28 — Third instance of the unsatisfiable `Done when` grep — and the first where the colliding token is a member of the contract the SAME step mandates
 

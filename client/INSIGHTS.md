@@ -18,6 +18,8 @@ appending its row here in the same edit.**
 
 | Date | Section | Scope | Entry |
 |---|---|---|---|
+| 2026-08-29 | Patterns | `client/src/**/*.test.tsx`, next-intl key leaks, `aria-label`/`placeholder` | The key leak reaches ATTRIBUTES — sweep `document.body.innerHTML` for the namespace; `queryByText` misses the very bug this was written for |
+| 2026-08-29 | Patterns | `client/messages/en/**`, `useTranslations` call sites, adding an ICU argument | Parameterising a catalogue string BREAKS every consumer, and next-intl fails soft — it renders the message key into the DOM while all six gates stay green |
 | 2026-08-28 | Patterns | `client/src/lib/github-urls.ts`, `client/.../ConventionCard/helpers.ts`, any deep-link or provider-URL sweep | `githubBlobUrl` exists TWICE under two different signatures, and only one lives in `lib/` — grepping the import path finds three of four consumers |
 | 2026-08-26 | Patterns | `client/src/vendor/shared/contracts/observability.ts`, `client/.../MultiAgentView/**`, `client/.../MultiAgentResults/**` | `MultiAgentRunResult` has no PR title — the results screen needed one joined in from the shell's `usePulls` fetch |
 | 2026-08-26 | Patterns | `client/src/vendor/ui/kit/Checkbox.tsx`, `client/src/components/agent-picker/**` | `AgentPicker`'s vendored `Checkbox` label already forwards a click from anywhere in it — a wrapper `onClick` double-toggles |
@@ -60,6 +62,7 @@ appending its row here in the same edit.**
 | 2026-08-03 | Tools | `client/eslint.config.mjs` | `pnpm lint` UNDER-reports deep relative imports: the rule is off in test files |
 | 2026-08-03 | Tools | `client/eslint.config.mjs` | `import/no-cycle` makes `eslint .` unusable here (>5 min → 25s without it) |
 | 2026-08-02 | Tools | `client/src/components/**`, severity chips | `SeverityBadge compact` renders NO label — icon and count only |
+| 2026-08-29 | Errors | `client/.../ReviewRunAccordion/ReviewRunAccordion.test.tsx:20`, whole-module `vi.mock` factories | A two-hook mock factory is green only because every test leaves the accordion COLLAPSED — a child's new hook fails as "is not a function", naming the child |
 | 2026-08-25 | Errors | `client/src/**/*.test.tsx`, cross-route component promotion | Promoting a component also breaks a RELATIVE `vi.mock(...)` path in its moved test — the failure reads as an unrelated "No QueryClient set" bug |
 | 2026-08-16 | Errors | `client/messages/**`, `client/src/**` rendering engine output | A message reproducing engine output goes through `t.raw`, not `t()` — `<untrusted …>` throws INVALID_TAG |
 | 2026-08-16 | Errors | `client/src/app/**` `?tab=` allowlists, editor tab bars | A duplicated `VALID_TABS` swallows every new tab: the URL changes, the pane does not |
@@ -189,6 +192,26 @@ lines were in
 shared constants live at `client/src/app/skills/constants.ts`.
 
 ## Codebase Patterns
+
+### 2026-08-29 — The next-intl key leak reaches ATTRIBUTES, so the detector must read the serialized DOM — `queryByText` would have missed the very bug that prompted this
+
+**Rule:** to assert no message key leaked, sweep `document.body.innerHTML` for the namespaced prefix (`/prReview\./`), not `queryByText`. A missing ICU argument renders the key wherever the string was going — including `aria-label`, `placeholder` and `title` — and a text query cannot see any of those.
+
+**Why:** the entry below records that next-intl fails soft and renders the message key. What it does not say is *where*. Proved with a throwaway probe: `t("postBack.notes", {})` renders `<span>prReview.postBack.notes</span>`, and `aria-label={t("postBack.action", {})}` renders `aria-label="prReview.postBack.action"`. The original bug that produced that entry was `FilterBar`'s **`placeholder`** — an attribute. So a suite that swept only rendered text would have been green on the exact defect it was written for.
+
+Two details worth copying: the fallback renders the **namespaced** key (`prReview.postBack.notes`, not `postBack.notes`), so the needle is the namespace; and this is the one assertion in a component test that legitimately reads serialized HTML instead of using a query — everything else still follows `getByRole`/`getByText`.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/PostBackPanel/PostBackPanel.test.tsx` (the six-state sweep), `client/src/app/repos/[repoId]/pulls/_components/FilterBar/FilterBar.tsx:38` (the attribute case that started it).
+
+### 2026-08-29 — Parameterising a catalogue string is a BREAKING change for every consumer, and next-intl fails soft by rendering the message key into the DOM
+
+**Rule:** when a step turns `"Filter pull requests…"` into `"Filter {provider, select, …}"`, it must render every consumer of that key, not grep the catalogue. Adding an ICU argument breaks each call site that does not pass it, and next-intl does **not** throw — it logs `FORMATTING_ERROR` to stderr and falls back to rendering the **key itself**.
+
+**Why:** SPEC-06's Step D3 parameterised the change-request vocabulary across eight catalogues. `FilterBar.tsx:38` called `t("list.filterPlaceholder")` with no argument and was never given a `provider` prop, so the search box shipped with `placeholder="prReview.list.filterPlaceholder"` on **both** providers — a raw message key visible to the user on the main pull-request screen. `tsc` was silent (the catalogue is not typed against call sites), `eslint` was silent, `pnpm arch` was silent, and the six-gate run was fully green. Only a rendering test saw it.
+
+The fix was one line, and that is the point: `provider` was already computed in the parent (`PullsView.tsx:56`) and already passed to **every other** `t()` call on that screen. A parameterisation sweep misses the call site that sits one component deeper than the one being edited.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/_components/FilterBar/FilterBar.tsx:38` and its caller `PullsView.tsx:91`; `client/messages/en/prReview.json`. Sibling of 2026-08-28 below, where a two-signature helper hid a fourth consumer from an import-path grep — same failure, different sweep.
 
 ### 2026-08-28 — `githubBlobUrl` exists TWICE under two different signatures, and only one of them lives in `lib/` — a sweep that greps the import path finds three of four consumers
 
@@ -1355,6 +1378,16 @@ s.label}`); consumers are `src/components/findings-hover-card/SeverityBadges.tsx
 and the card's own per-finding rows.
 
 ## Recurring Errors & Fixes
+
+### 2026-08-29 — `ReviewRunAccordion.test.tsx`'s two-hook `vi.mock` factory is green only because every test leaves the accordion COLLAPSED — a child that adds a hook fails as "is not a function", naming the child
+
+**Symptom:** adding a hook to any component rendered inside `ReviewRunAccordion`'s open body makes `ReviewRunAccordion.test.tsx` fail with `usePostBackOutcome is not a function`. The stack points at the **child** component, so the obvious reading is "the new child is broken" — and the child is fine.
+
+**Cause:** `ReviewRunAccordion.test.tsx:20` mocks the whole `@/lib/hooks/reviews` module with a factory that returns exactly two hooks (`useDeleteReview`, `useFindingAction`). A whole-module `vi.mock` replaces *everything* the module exports, so every other hook is `undefined`. The file has stayed green for a different reason than it appears: none of its tests ever opens the accordion body, so no child hook is ever called. The mock has been lying since it was written; nothing had asked it a question yet.
+
+**Takeaway:** a whole-module `vi.mock` factory is a standing claim about every export, and its correctness is only exercised by the code paths a test actually reaches. When adding a hook to a component that renders inside another component's collapsed/conditional region, either extend that file's factory in the same change, or test the new component **directly** rather than through its parent. Do not work around it by keeping the region collapsed — that preserves the lie for the next author. `PostBackPanel` is tested directly for exactly this reason, with a docblock recording it.
+
+**Where:** `client/src/app/repos/[repoId]/pulls/[number]/_components/ReviewRunAccordion/ReviewRunAccordion.test.tsx:20`; `.../PostBackPanel/PostBackPanel.test.tsx`. Sibling of 2026-08-25 below — both are `vi.mock` claims that break on a change nowhere near the mock.
 
 ### 2026-08-25 — Promoting a component also breaks a RELATIVE `vi.mock(...)` path in its moved test, and the failure reads as an unrelated React Query bug
 

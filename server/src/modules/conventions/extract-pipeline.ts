@@ -68,7 +68,11 @@ export async function runExtraction(
   if (!repoRow.clonePath) {
     throw new AppError('repo_not_cloned', 'Repo is not cloned yet — clone it first', 409);
   }
-  const ref: RepoRef = { owner: repoRow.owner, name: repoRow.name };
+  const ref: RepoRef = {
+    owner: repoRow.owner,
+    name: repoRow.name,
+    instanceKey: repoRow.instanceKey,
+  };
 
   const files = await sampleFiles(container, ref, repoId);
 

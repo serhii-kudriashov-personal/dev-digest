@@ -5,6 +5,8 @@ import type {
   IssueMeta,
   PrReviewComment,
 } from './contracts/platform.js';
+import type { PostBackOutcome } from './contracts/review-api.js';
+import type { Verdict } from './contracts/findings.js';
 
 /**
  * Adapter interfaces. ALL external calls go behind these interfaces.
@@ -101,17 +103,29 @@ export interface Embedder {
   readonly dims: number;
 }
 
-// ---------- GitHub (Octokit REST, thin) ----------
+// ---------- Forge (GitHub, GitLab — change requests, comments, issues) ----------
 /**
  * How a repository is named to an adapter.
  *
- * `instanceKey` is OPTIONAL on purpose (SPEC-06 — AC-17, AC-19). Making it
- * required would break every caller that legitimately constructs a bare
- * `{ owner, name }` literal — `CodeIndex`, `repo-intel`'s service and both
- * pipelines, `conventions/extract-pipeline`, `intent/pipeline` and
- * `brief/pipeline` — none of which knows or needs to know which forge the
- * repository came from. Absent (or `'github.com'`) therefore means the built-in
- * GitHub host, and keeps the legacy clone location byte-identical.
+ * `instanceKey` is OPTIONAL, and optional here means exactly one thing
+ * (SPEC-06 — AC-17, AC-19): **absent selects the legacy github.com layout**,
+ * `<cloneDir>/<owner>/<name>`, which is what keeps every clone already on disk
+ * working without a re-import. It is a DEFAULT, not a "the caller does not care"
+ * escape hatch.
+ *
+ * SO EVERY CALLER THAT REACHES `container.git` OR `container.codeIndex` MUST
+ * PASS IT. `GitClient.clonePathFor` turns a `RepoRef` into a directory, and
+ * `CodeIndex` resolves its root through that same method — so a bare
+ * `{ owner, name }` built from a non-github.com repository row does not degrade,
+ * it resolves to a DIFFERENT repository's clone: the one github.com would own at
+ * those two segments. That is a read of another workspace's mirror, and
+ * `sync()` `reset --hard`s it, so it is destructive as well (root `INSIGHTS.md`
+ * 2026-08-16). The value is always available — `repos.instance_key` is
+ * `NOT NULL DEFAULT 'github.com'` — so a row in scope is a value in scope.
+ *
+ * The field stays optional rather than required only because the legacy branch
+ * must remain expressible; making it required is a separate decision that would
+ * break AC-19's zero-migration path.
  */
 export interface RepoRef {
   owner: string;
@@ -157,8 +171,63 @@ export interface CreateReviewCommentInput {
   line: number;
   side?: 'LEFT' | 'RIGHT';
   body: string;
-  /** When set, post as a reply to that comment's thread instead of a new one. */
-  inReplyTo?: number;
+  /**
+   * When set, post as a reply to that comment's thread instead of a new one.
+   *
+   * A STRING, because a comment identity is a string on this port (SPEC-06
+   * AC-23): GitHub numbers its review comments, GitLab names its discussions.
+   * The adapter converts — `OctokitGitHubClient` parses this back to a number
+   * on the way out, so GitHub behaviour above the adapter is unchanged (AC-27).
+   */
+  inReplyTo?: string;
+}
+
+/**
+ * One inline note of a published review (SPEC-06 — AC-34, AC-35).
+ *
+ * `side` is what makes AC-35 expressible: `'RIGHT'` is a line of the new file
+ * and `'LEFT'` a line of the old one, so an adapter can anchor an added line by
+ * its new-side number and a removed line by its old-side number. The caller
+ * states the side; no adapter guesses it from the line number.
+ */
+export interface ReviewPublicationNote {
+  path: string;
+  line: number;
+  side: 'LEFT' | 'RIGHT';
+  body: string;
+}
+
+/**
+ * A whole review, ready to publish (SPEC-06 — AC-34…AC-41).
+ *
+ * The caller has ALREADY applied the note cap and composed `summary`; this
+ * carries what goes on the change request, not the review it came from. `notes`
+ * is therefore what will be posted, in the order it will be posted.
+ */
+export interface ReviewPublication {
+  /** Posted as one change-request-level note (AC-34). */
+  summary: string;
+  notes: ReviewPublicationNote[];
+  /** What the run concluded. How — or whether — it becomes a forge ACTION is
+   *  the adapter's answer, reported through `ReviewPublicationResult`. */
+  verdict: Verdict;
+}
+
+/**
+ * How publication ended, in the same four states the user is shown (AC-39).
+ *
+ * The port reports rather than throws, because "some of it landed" is an
+ * ordinary outcome on a forge where the summary note, each inline note and the
+ * verdict are separate requests — an exception would lose the count of what
+ * already reached the change request (AC-40).
+ */
+export interface ReviewPublicationResult {
+  outcome: PostBackOutcome;
+  /** Prose for the user: a refusal (AC-38), the `request_changes` downgrade
+   *  (AC-41), or what failed. Null when the outcome needs nothing added. */
+  reason: string | null;
+  /** Notes that actually landed, summary note included. */
+  notesPublished: number;
 }
 
 export interface OpenPrPayload {
@@ -168,18 +237,78 @@ export interface OpenPrPayload {
   body: string;
 }
 
-export interface GitHubClient {
+/**
+ * What EVERY forge can do (SPEC-06 — AC-20…AC-25). The provider-neutral read
+ * path codes against this, never against `GitHubClient`: a pull request and a
+ * merge request are the same conversation, so the capability is named for the
+ * conversation and not for the vendor (`backend-onion-architecture` §3).
+ *
+ * Resolve it from `container.forge(repo)`, which picks the implementation from
+ * the repository's own `provider`/`instance_id`. `container.github()` stays for
+ * the GitHub-only surfaces below.
+ *
+ * The vocabulary is still GitHub's (`listPullRequests`, `n`) because renaming it
+ * would touch every caller for no behavioural gain; the CONTRACT is neutral, and
+ * `n` is the change request's number on GitHub and its `iid` on GitLab (AC-21 —
+ * the store keys by repository + integer, so no new identifier is introduced).
+ */
+export interface ForgeClient {
   listPullRequests(repo: RepoRef): Promise<PrMeta[]>;
   getPullRequest(repo: RepoRef, n: number): Promise<PrDetail>;
-  postReview(repo: RepoRef, n: number, review: GitHubReviewPayload): Promise<{ id: string }>;
-  /** List inline review comments on a PR (for the "Files changed" tab). */
+  /** List inline review comments on a change request (the "Files changed" tab). */
   listReviewComments(repo: RepoRef, n: number): Promise<PrReviewComment[]>;
-  /** Create one inline review comment (or reply) on a PR; returns the new comment. */
+  /** Create one inline review comment (or reply); returns the new comment. */
   createReviewComment(
     repo: RepoRef,
     n: number,
     input: CreateReviewCommentInput,
   ): Promise<PrReviewComment>;
+  getIssue(repo: RepoRef, n: number): Promise<IssueMeta>;
+  /** The identity the configured credential belongs to — for "posting as @user". */
+  currentLogin(): Promise<string>;
+  /**
+   * Publish a completed review onto the change request (SPEC-06 — AC-34…AC-41).
+   *
+   * REPORTS, never throws for an ordinary outcome. A forge where the summary
+   * note, each inline note and the verdict are three separate requests can end
+   * half-way, and an exception would discard the one fact the user needs: how
+   * much of it already landed (AC-40).
+   *
+   * The verdict becomes a forge ACTION only where the forge has one. GitHub
+   * applies all three as a review state; GitLab has approvals but no
+   * "request changes" state, so that verdict is carried by the summary note and
+   * the result says so in words (AC-41). Neither answer is predicted from a
+   * capability probe — the action is attempted and its outcome reported (root
+   * `INSIGHTS.md` 2026-08-28).
+   */
+  publishReview(
+    repo: RepoRef,
+    n: number,
+    payload: ReviewPublication,
+  ): Promise<ReviewPublicationResult>;
+}
+
+/**
+ * GitHub, which is a forge PLUS the surfaces only GitHub has here: opening a
+ * PR, committing files, and the two GitHub Actions reads the `ci` slice needs
+ * (SPEC-05).
+ *
+ * It EXTENDS rather than re-declaring the neutral methods — a signature is
+ * declared once (`backend-onion-architecture` §3), so widening `ForgeClient`
+ * cannot leave this interface behind.
+ *
+ * Review publication is NO LONGER one of them: `publishReview` is provider-
+ * neutral and lives on `ForgeClient` above (SPEC-06 — AC-34). `postReview`
+ * stays here as GitHub's own single-request review API, which is what
+ * `OctokitGitHubClient.publishReview` is implemented on top of.
+ */
+export interface GitHubClient extends ForgeClient {
+  /**
+   * GitHub's atomic "create review" call: body, event and inline comments in
+   * ONE request. Prefer `publishReview` — this is the GitHub-shaped primitive
+   * underneath it, kept because the payload's `event` vocabulary is GitHub's.
+   */
+  postReview(repo: RepoRef, n: number, review: GitHubReviewPayload): Promise<{ id: string }>;
   openPullRequest(repo: RepoRef, payload: OpenPrPayload): Promise<{ url: string }>;
   /** Recent runs of ONE workflow file, newest first, capped by `perPage`
    *  (SPEC-05 NFR-2). */
@@ -190,9 +319,6 @@ export interface GitHubClient {
   /** Raw bytes of the named artifact of a run, as a zip. `null` when the run
    *  uploaded no artifact of that name or it has expired. */
   downloadRunArtifact(repo: RepoRef, runId: number, name: string): Promise<Uint8Array | null>;
-  getIssue(repo: RepoRef, n: number): Promise<IssueMeta>;
-  /** GET /user — for "posting as @user". */
-  currentLogin(): Promise<string>;
 }
 
 // ---------- Git (simple-git, heavy) ----------

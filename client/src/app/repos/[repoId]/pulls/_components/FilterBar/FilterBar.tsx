@@ -3,6 +3,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
+import type { RepoProvider } from "@devdigest/shared";
 import { Chip, Button, TextInput, SelectInput } from "@devdigest/ui";
 import { STATUS_FILTERS } from "../../constants";
 import { s } from "../../styles";
@@ -16,6 +17,7 @@ export function FilterBar({
   onSort,
   onRefresh,
   refreshing,
+  provider,
 }: {
   active: string;
   onActive: (k: string) => void;
@@ -25,6 +27,8 @@ export function FilterBar({
   onSort: (v: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
+  /** Selects the change-request vocabulary in the catalogue (AC-26, AC-27). */
+  provider: RepoProvider;
 }) {
   const t = useTranslations("prReview");
   const sortOptions = [
@@ -35,7 +39,7 @@ export function FilterBar({
     <div style={s.filterBar}>
       <div style={s.filterChips}>
         <div style={{ width: 240 }}>
-          <TextInput value={query} onChange={onQuery} placeholder={t("list.filterPlaceholder")} />
+          <TextInput value={query} onChange={onQuery} placeholder={t("list.filterPlaceholder", { provider })} />
         </div>
         {STATUS_FILTERS.map(({ key, labelKey }) => (
           <Chip key={key} active={active === key} onClick={() => onActive(key)}>

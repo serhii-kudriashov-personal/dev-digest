@@ -6,8 +6,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
-import type { PrMeta } from "@devdigest/shared";
+import type { PrMeta, Repo } from "@devdigest/shared";
 import messages from "../../../../../../../messages/en/prReview.json";
+import commonMessages from "../../../../../../../messages/en/common.json";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -45,10 +46,15 @@ function pr(over: Partial<PrMeta> = {}): PrMeta {
   };
 }
 
-function renderRow(meta: PrMeta) {
+/** The owning repository, in the shape the row actually reads (AC-26, AC-27, AC-31). */
+type RowRepo = Pick<Repo, "provider" | "instance_label">;
+
+function renderRow(meta: PrMeta, repo?: RowRepo) {
   return render(
-    <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
-      <PRRow pr={meta} repoId="r1" />
+    // `common` carries the forge vocabulary — the identifier prefix and the
+    // "on {instance}" phrase — which is a different catalogue from `prReview`.
+    <NextIntlClientProvider locale="en" messages={{ prReview: messages, common: commonMessages }}>
+      <PRRow pr={meta} repoId="r1" repo={repo} />
     </NextIntlClientProvider>,
   );
 }
@@ -80,5 +86,48 @@ describe("PRRow findings cell", () => {
     expect(screen.queryByText("None")).toBeNull();
     // score, cost and findings all render "—" for an unreviewed PR.
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/**
+ * SPEC-06 (`specs/2026-08-28-gitlab-repositories.md`) — AC-26, AC-27, AC-31.
+ *
+ * The row is where a user first meets a change request, so it is where naming it
+ * wrong costs the most: `#17` on a merge request is a reference that does not
+ * exist on the instance, and a row that never says which host it came from is
+ * ambiguous the moment a workspace holds two.
+ */
+describe("PRRow forge identity", () => {
+  const GITLAB: RowRepo = { provider: "gitlab", instance_label: "Acme GitLab" };
+  const GITHUB: RowRepo = { provider: "github", instance_label: "github.com" };
+
+  it("prefixes a GitLab change request with ! (AC-26)", () => {
+    renderRow(pr({ number: 17 }), GITLAB);
+    expect(screen.getByText("!17")).toBeInTheDocument();
+    expect(screen.queryByText("#17")).toBeNull();
+  });
+
+  it("prefixes a GitHub pull request with # (AC-27)", () => {
+    renderRow(pr({ number: 17 }), GITHUB);
+    expect(screen.getByText("#17")).toBeInTheDocument();
+    expect(screen.queryByText("!17")).toBeNull();
+  });
+
+  it("falls back to the GitHub form while the repository is still loading (AC-19)", () => {
+    // Every pre-feature workspace is GitHub, so the honest default is `#` —
+    // not a blank prefix that shifts the layout once the repo query resolves.
+    renderRow(pr({ number: 17 }));
+    expect(screen.getByText("#17")).toBeInTheDocument();
+  });
+
+  it("names the instance the row came from, as text (AC-31)", () => {
+    renderRow(pr(), GITLAB);
+    expect(screen.getByText("on Acme GitLab")).toBeInTheDocument();
+  });
+
+  it("takes the instance from the owning repository, not from a constant", () => {
+    renderRow(pr(), { provider: "gitlab", instance_label: "Team GitLab" });
+    expect(screen.getByText("on Team GitLab")).toBeInTheDocument();
+    expect(screen.queryByText("on Acme GitLab")).toBeNull();
   });
 });

@@ -1,0 +1,1 @@
+ALTER TABLE "repos" ADD COLUMN "last_sync_error" text;

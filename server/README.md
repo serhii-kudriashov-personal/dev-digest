@@ -97,8 +97,30 @@ flowchart TB
 | `EMBEDDINGS_ENABLED` | `false` | memory/RAG embeddings (OpenAI); off → **zero** OpenAI calls |
 | `REPO_INTEL_ENABLED` | `true` | repo skeleton + callers in the prompt; `false` → ripgrep-only |
 | `DEVDIGEST_CLONE_DIR` | `./clones` | imported-repo checkouts (git-ignored) |
+| `DEVDIGEST_ALLOW_PRIVATE_FORGE_HOSTS` | — | comma-separated **exact** hostnames allowed to resolve to a private address (see below) |
 | `LOG_LEVEL` | `info` (`silent` in test) | pino level |
 | `NODE_ENV` | `development` | `test` → silent logs + global rate-limit disabled |
+
+**Forge instances on a private network.** A registered forge base URL is an SSRF
+control surface, so DevDigest refuses any host that resolves to a private,
+loopback or link-local address (SPEC-06 AC-4). A self-managed GitLab on a
+corporate network is exactly that, so `DEVDIGEST_ALLOW_PRIVATE_FORGE_HOSTS` opts
+named hosts back in:
+
+```
+DEVDIGEST_ALLOW_PRIVATE_FORGE_HOSTS=git.devart.com,gitlab.internal
+```
+
+- **Exact hostnames only** — no wildcards, no suffixes, no scheme.
+  `evil-git.devart.com` does not match an entry of `git.devart.com`.
+- It widens **RFC 1918** (`10/8`, `172.16/12`, `192.168/16`) and **IPv6
+  unique-local** (`fc00::/7`) and nothing else. Loopback (`127/8`, `::1`,
+  `localhost`), link-local (`169.254/16` — the cloud metadata service), CGNAT,
+  multicast and reserved ranges stay refused **even for a named host**.
+- Both halves of the gate honour it: the base-URL admission check
+  (`modules/_shared/forge-url.ts`) and the per-request DNS check
+  (`adapters/gitlab/http.ts`). It is read once at startup — restart after
+  changing it.
 
 Secrets (API keys, `GITHUB_TOKEN`) are **not** part of `AppConfig` — they go
 through `SecretsProvider` (`~/.devdigest/secrets.json`, mode `0600`, with

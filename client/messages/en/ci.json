@@ -46,6 +46,7 @@
       "configure": "Configure",
       "install": "Install"
     },
+    "unsupportedProvider": "Export to CI targets GitHub Actions, and {repo} lives on {instance}. There is nothing to export for this repository — the workflow would have nowhere to run.",
     "target": "GitHub Actions",
     "targetNote": "GitHub Actions is the only supported CI platform in this version.",
     "repoLabel": "Target repository",

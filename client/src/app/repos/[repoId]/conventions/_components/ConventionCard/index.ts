@@ -1,2 +1,2 @@
 export { ConventionCard } from "./ConventionCard";
-export { confidenceColor, copySnippet, evidenceRef, githubBlobUrl } from "./helpers";
+export { confidenceColor, copySnippet, evidenceRef } from "./helpers";

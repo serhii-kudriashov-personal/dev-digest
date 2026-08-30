@@ -1,4 +1,10 @@
 {
+  "detail": {
+    "viewOnForge": "View on {instance}",
+    "loadErrorTitle": "Couldn’t load this {provider, select, gitlab {merge request} other {pull request}}",
+    "loadErrorBody": "{identifier} could not be loaded.",
+    "mergedBanner": "This {provider, select, gitlab {merge request} other {pull request}} is already {status} — running a review is informational and won’t affect the merged code."
+  },
   "finding": {
     "accepted": "accepted",
     "dismissed": "dismissed",
@@ -89,10 +95,11 @@
     "groupedByRole": "Smart Diff · grouped by role"
   },
   "list": {
-    "breadcrumb": "Pull Requests",
-    "title": "Pull Requests",
+    "breadcrumb": "{provider, select, gitlab {Merge Requests} other {Pull Requests}}",
+    "title": "{provider, select, gitlab {Merge Requests} other {Pull Requests}}",
     "summary": "{open} open · {needsReview} need review",
-    "loading": "Loading pull requests…",
+    "onInstance": "on {instance}",
+    "loading": "Loading {provider, select, gitlab {merge requests} other {pull requests}}…",
     "status": {
       "open": "Open",
       "closed": "Closed",
@@ -109,13 +116,13 @@
     },
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
-    "filterPlaceholder": "Filter pull requests…",
+    "filterPlaceholder": "Filter {provider, select, gitlab {merge requests} other {pull requests}}…",
     "sort": {
       "newest": "Sort: Newest",
       "oldest": "Sort: Oldest"
     },
     "columns": {
-      "pullRequest": "Pull request",
+      "pullRequest": "{provider, select, gitlab {Merge request} other {Pull request}}",
       "author": "Author",
       "size": "Size",
       "score": "Score",
@@ -125,11 +132,28 @@
       "updated": "Updated"
     },
     "filesCount": "{count} files",
-    "errorTitle": "Couldn’t load pull requests",
+    "errorTitle": "Couldn’t load {provider, select, gitlab {merge requests} other {pull requests}}",
     "errorBody": "The engine returned an error.",
-    "emptyTitle": "No pull requests",
-    "emptyAllBody": "No open PRs found for this repo yet. Refresh to sync from GitHub.",
-    "emptyStatusBody": "No PRs with status “{status}”."
+    "emptyTitle": "No {provider, select, gitlab {merge requests} other {pull requests}}",
+    "emptyAllBody": "No open {provider, select, gitlab {merge requests} other {pull requests}} found for this repository yet. Refresh to sync from {instance}.",
+    "staleTitle": "Couldn’t sync with {instance}",
+    "staleBody": "Showing the last snapshot DevDigest holds. The most recent sync failed: {reason}",
+    "emptyStatusBody": "No {provider, select, gitlab {merge requests} other {pull requests}} with status “{status}”."
+  },
+  "postBack": {
+    "sectionLabel": "Posting this review",
+    "action": "Post to {provider, select, gitlab {merge request} other {pull request}}",
+    "retry": "Try posting again",
+    "posting": "Posting…",
+    "notPostedYet": "This run has not been posted to the {provider, select, gitlab {merge request} other {pull request}}.",
+    "outcome": {
+      "posted_verdict_applied": "Posted, and the verdict was applied",
+      "posted_verdict_not_applied": "Posted, but the verdict was not applied",
+      "partially_published": "Partially published — some notes are already on the {provider, select, gitlab {merge request} other {pull request}}",
+      "not_posted": "Not posted — nothing reached the {provider, select, gitlab {merge request} other {pull request}}"
+    },
+    "notes": "{count, plural, =0 {No notes published} one {# note published} other {# notes published}}",
+    "recordedAt": "Recorded {when}"
   },
   "timeline": {
     "goToReview": "Jump to this run’s findings below",

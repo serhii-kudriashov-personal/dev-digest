@@ -46,7 +46,7 @@ const MESSAGES = {
   repoNotFound: (repo: string) =>
     `Repository "${repo}" is not in DevDigest. Add it in the web UI at http://localhost:3000, or check the spelling — it must be owner/name.`,
   prNotImported: (pr: unknown, repo: string) =>
-    `Pull request #${String(pr)} is not imported for ${repo}. Open the repository in the web UI to import its pull requests, then retry.`,
+    `Change request #${String(pr)} is not imported for ${repo}. Open the repository in the web UI to import its change requests, then retry.`,
   runFailed: (error: string) =>
     `The review run failed: ${error}. Check the API key in Settings, then retry.`,
   noReview: (repo: string, pr: number) =>
@@ -55,13 +55,14 @@ const MESSAGES = {
     `No accepted conventions for ${repo}. Extract them in the web UI under the repository's Conventions tab.`,
   blastUnavailable: (repo: string) =>
     `The code index for ${repo} cannot answer this yet. Re-analyze the repository in the web UI at http://localhost:3000, then retry.`,
-  invalidPr: () => 'The "pr" argument must be a whole pull-request number, for example 42.',
+  invalidPr: () =>
+    'The "pr" argument must be a whole change-request number, for example 42.',
   rateLimited: () =>
     'The DevDigest API is rate-limiting this MCP server. Wait a minute, then retry.',
   badShape: (base: string) =>
     `The DevDigest engine at ${base} answered with a shape this MCP server does not understand. The engine and the MCP package may be from different commits — rebuild both, then retry.`,
   engineError: (message: string) =>
-    `The DevDigest engine rejected the request: ${message}. Check the repository and pull request in the web UI at http://localhost:3000, then retry.`,
+    `The DevDigest engine rejected the request: ${message}. Check the repository and change request in the web UI at http://localhost:3000, then retry.`,
   /** Deliberately NOT an error. `isError: true` here invites a second paid run. */
   timedOut:
     'The review is still running after 120 seconds. It will finish on its own — call get_findings with the same repo, pr, and agent in a minute to read the result.',
@@ -180,7 +181,7 @@ export function createHandlers(deps: HandlerDeps): Record<string, Handler> {
       ctx.agent = agent;
 
       // Agent first: one GET, and an unknown name should not pay for the
-      // GitHub-syncing pulls call.
+      // forge-syncing pulls call.
       const agentId = await resolver.resolveAgentId(agent);
       const repoId = await resolver.resolveRepoId(repo);
       const prId = await resolver.resolvePullId(repoId, pr);

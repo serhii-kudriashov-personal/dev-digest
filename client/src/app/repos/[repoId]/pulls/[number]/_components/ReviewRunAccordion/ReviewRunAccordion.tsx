@@ -12,9 +12,11 @@ import type { ReviewRecord, Severity, Verdict } from "@devdigest/shared";
 import { FindingsPanel } from "../FindingsPanel";
 import { countBySeverity } from "../FindingsPanel/helpers";
 import { VerdictBanner } from "../VerdictBanner";
+import { PostBackPanel } from "../PostBackPanel";
 import { FindingsHoverCard, SeverityBadges } from "@/components/findings-hover-card";
 import { useDeleteReview } from "@/lib/hooks/reviews";
 import { formatCost } from "@/lib/format";
+import type { ForgeRepoRef } from "@/lib/forge-urls";
 
 const VERDICT_COLOR: Record<string, string> = {
   request_changes: "var(--crit)",
@@ -32,7 +34,7 @@ export function ReviewRunAccordion({
   prId,
   defaultOpen = false,
   costUsd = null,
-  repoFullName,
+  repo,
   headSha,
   targetRunId = null,
   targetNonce = 0,
@@ -47,7 +49,7 @@ export function ReviewRunAccordion({
   /** Cost of the agent_run behind this review (joined by run_id upstream);
    *  null when unknown — renders "—". */
   costUsd?: number | null;
-  repoFullName?: string | null;
+  repo?: ForgeRepoRef | null;
   headSha?: string | null;
   /** When this matches review.run_id, the accordion opens and scrolls into view
    *  (driven from the Timeline: clicking an agent name navigates here). */
@@ -201,13 +203,19 @@ export function ReviewRunAccordion({
           <FindingsPanel
             findings={findings}
             prId={prId}
-            repoFullName={repoFullName}
+            repo={repo}
             headSha={headSha}
             severities={severities}
             onToggleSeverity={onToggleSeverity}
             targetFindingId={holdsTargetFinding ? targetFindingId : null}
             targetFindingNonce={targetFindingNonce}
           />
+          {/* Posting is per RUN, so it belongs to this accordion and not to the
+              tab: a PR with three runs can post any one of them. A review with
+              no `run_id` predates run tracking and has nothing to post. */}
+          {review.run_id && (
+            <PostBackPanel prId={prId} runId={review.run_id} provider={repo?.provider} />
+          )}
         </div>
       )}
     </div>

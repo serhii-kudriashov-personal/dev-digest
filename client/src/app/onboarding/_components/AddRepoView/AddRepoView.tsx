@@ -1,16 +1,25 @@
-/* AddRepoView — add-repository screen body. URL only. API keys (OpenAI /
-   Anthropic / GitHub PAT) are NOT entered here; they live in Settings → API
-   Keys and don't change per repo. Escapable: Esc or the close button returns
-   to the app. */
+/* AddRepoView — add-repository screen body. URL only. API keys and instance
+   credentials are NOT entered here; they live in Settings and don't change per
+   repository. Escapable: Esc or the close button returns to the app.
+
+   Every string comes from `messages/en/onboarding.json` and NAMES NO PROVIDER
+   (AC-32): the URL a workspace pastes belongs to whichever host its operator
+   registered. The server's rejection is surfaced verbatim, because that message
+   is what lists the registered instances (AC-14). */
 "use client";
 
 import React from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Button, Icon, IconBtn, Kbd, TextInput, FormField } from "@devdigest/ui";
 import { useAddRepo } from "@/lib/hooks";
 import { ApiError } from "@/lib/api";
 
+/** Ties the server's rejection to the URL field for assistive tech (AC-14). */
+const ADD_REPO_ERROR_ID = "add-repo-error";
+
 export function AddRepoView() {
+  const t = useTranslations("onboarding");
   const router = useRouter();
   const [repoUrl, setRepoUrl] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
@@ -34,7 +43,7 @@ export function AddRepoView() {
       const repo = await addRepo.mutateAsync(repoUrl.trim());
       router.push(`/repos/${repo.id}/pulls`);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not add repository");
+      setError(e instanceof ApiError ? e.message : t("addRepo.errorFallback"));
     }
   };
 
@@ -71,32 +80,38 @@ export function AddRepoView() {
         }}
       >
         <div style={{ position: "absolute", top: 16, right: 16 }}>
-          <IconBtn icon="X" label="Close" onClick={close} />
+          <IconBtn icon="X" label={t("addRepo.close")} onClick={close} />
         </div>
 
-        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em" }}>Add a repository</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em" }}>
+          {t("addRepo.title")}
+        </h1>
         <p style={{ fontSize: 14, color: "var(--text-secondary)", marginTop: 8, marginBottom: 28, lineHeight: 1.5 }}>
-          Paste a GitHub repository URL — DevDigest clones it locally and imports open PRs.
-          API keys aren’t needed here; set them once in{" "}
-          <a
-            href="/settings/api-keys"
-            onClick={(e) => {
-              e.preventDefault();
-              router.push("/settings/api-keys");
-            }}
-            style={{ color: "var(--accent-text)" }}
-          >
-            Settings → API Keys
-          </a>
-          .
+          {t.rich("addRepo.body", {
+            link: (chunks) => (
+              <a
+                href="/settings/api-keys"
+                onClick={(e) => {
+                  e.preventDefault();
+                  router.push("/settings/api-keys");
+                }}
+                style={{ color: "var(--accent-text)" }}
+              >
+                {chunks}
+              </a>
+            ),
+          })}
         </p>
 
-        <FormField label="Repository URL" hint="e.g. https://github.com/acme/payments-api">
+        <FormField label={t("addRepo.urlLabel")} hint={t("addRepo.urlHint")}>
           <TextInput
             value={repoUrl}
             onChange={setRepoUrl}
             mono
-            placeholder="https://github.com/owner/repo"
+            placeholder={t("addRepo.urlPlaceholder")}
+            aria-label={t("addRepo.urlLabel")}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? ADD_REPO_ERROR_ID : undefined}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
             }}
@@ -105,6 +120,8 @@ export function AddRepoView() {
 
         {error && (
           <div
+            id={ADD_REPO_ERROR_ID}
+            role="alert"
             style={{
               display: "flex",
               alignItems: "center",
@@ -123,7 +140,7 @@ export function AddRepoView() {
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 24 }}>
           <Button kind="ghost" size="md" onClick={close}>
-            Cancel
+            {t("addRepo.cancel")}
           </Button>
           <div style={{ flex: 1 }} />
           <Button
@@ -133,13 +150,13 @@ export function AddRepoView() {
             onClick={submit}
             disabled={!repoUrl.trim() || addRepo.isPending}
           >
-            {addRepo.isPending ? "Cloning…" : "Add repository"}
+            {addRepo.isPending ? t("addRepo.submitting") : t("addRepo.submit")}
           </Button>
         </div>
       </div>
 
       <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 24, display: "inline-flex", gap: 8, alignItems: "center" }}>
-        <Icon.Lock size={12} /> API keys live in Settings · <Kbd>esc</Kbd> to close
+        <Icon.Lock size={12} /> {t("addRepo.footer")} · <Kbd>esc</Kbd> to close
       </p>
     </div>
   );

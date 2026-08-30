@@ -181,6 +181,21 @@ export const Repo = z.object({
   instance_label: z.string(),
   /** Canonical browser URL for the repository on its own forge. */
   web_url: z.string(),
+  /**
+   * Why the LAST sync attempt against this repository's forge failed; `null`
+   * when the last attempt succeeded (AC-44, NFR-7).
+   *
+   * `.nullable()` and not `.nullish()`: `Repo` is a table-backed DTO built by
+   * `toRepoDto` from a nullable column and is always serialized in full, so
+   * the key is always present and `null` carries a meaning of its own — "no
+   * failure on record". The jsonb rule of root `INSIGHTS.md` 2026-08-11 /
+   * 2026-08-02 governs documents already on disk with the key MISSING, which
+   * this is not.
+   *
+   * It is capped, redacted, third-party-influenced text — a forge composed it.
+   * Render it as data (never as HTML, never as a link) and do not parse it.
+   */
+  last_sync_error: z.string().nullable(),
 });
 export type Repo = z.infer<typeof Repo>;
 
@@ -247,14 +262,21 @@ export const PrDetail = PrMeta.extend({
 });
 export type PrDetail = z.infer<typeof PrDetail>;
 
-// ---- PR review (inline) comments ----
+// ---- Change-request review (inline) comments ----
 /**
- * A GitHub PR review comment anchored to a diff line. Mirrors the fields the
- * "Files changed" tab needs to render threads inline; `line` is the position in
- * the current diff (null when GitHub can no longer anchor it → `is_outdated`).
+ * One inline review comment anchored to a diff line, on any forge. Mirrors the
+ * fields the "Files changed" tab needs to render threads inline; `line` is the
+ * position in the current diff.
+ *
+ * `id` and `in_reply_to_id` are STRINGS (SPEC-06 AC-23): GitHub numbers its
+ * review comments, GitLab names its discussions, and the identity has to hold
+ * both without the consumer knowing which forge it came from. Each adapter
+ * converts at its own boundary — `OctokitGitHubClient` stringifies GitHub's
+ * integers on the way in and parses them back on the way out, so GitHub
+ * behaviour above the adapter is unchanged (AC-27).
  */
 export const PrReviewComment = z.object({
-  id: z.number().int(),
+  id: z.string(),
   path: z.string(),
   line: z.number().int().nullable(),
   original_line: z.number().int().nullable(),
@@ -263,8 +285,17 @@ export const PrReviewComment = z.object({
   user: z.string(),
   created_at: z.string(),
   html_url: z.string(),
-  in_reply_to_id: z.number().int().nullable(),
-  /** GitHub couldn't anchor it to the current diff (line == null). */
+  in_reply_to_id: z.string().nullable(),
+  /**
+   * This comment no longer anchors to the current diff, so the UI shows it
+   * detached from any line.
+   *
+   * DERIVED PER PROVIDER, and deliberately not defined as any one provider's
+   * rule: GitHub drops `line` when it can no longer place the comment, while
+   * GitLab keeps the note's `position` and expects the reader to compare its
+   * revision shas against the merge request's current `diff_refs` (AC-24). The
+   * adapter decides; consumers read the boolean and nothing else.
+   */
   is_outdated: z.boolean(),
 });
 export type PrReviewComment = z.infer<typeof PrReviewComment>;
@@ -275,8 +306,8 @@ export const PrCommentInput = z.object({
   line: z.number().int().positive(),
   side: z.enum(['LEFT', 'RIGHT']).optional(),
   body: z.string().min(1),
-  /** Reply to an existing review comment thread (its comment id). */
-  in_reply_to: z.number().int().optional(),
+  /** Reply to an existing comment thread (its `PrReviewComment.id`, a string). */
+  in_reply_to: z.string().min(1).optional(),
 });
 export type PrCommentInput = z.infer<typeof PrCommentInput>;
 

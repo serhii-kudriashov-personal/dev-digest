@@ -4,7 +4,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Chip, EmptyState, SectionLabel } from "@devdigest/ui";
 import type { BlastRadiusResponse, DownstreamImpact } from "@devdigest/shared";
-import { githubBlobUrl } from "@/lib/github-urls";
+import { blobUrl, safeExternalHref, type ForgeRepoRef } from "@/lib/forge-urls";
 import { BlastGraph } from "./BlastGraph";
 import { BLAST_VIEWS, STATE_BADGE, type BlastView } from "./constants";
 import { s } from "./styles";
@@ -25,7 +25,7 @@ interface BlastRadiusCardProps {
   loading: boolean;
   /** The PR's changed file paths — what decides in-app vs GitHub navigation. */
   changedPaths: Set<string>;
-  repoFullName: string | null;
+  repo: ForgeRepoRef | null;
   headSha: string | null;
   onOpenCaller: (path: string, line: number) => void;
 }
@@ -34,7 +34,7 @@ export function BlastRadiusCard({
   blast,
   loading,
   changedPaths,
-  repoFullName,
+  repo,
   headSha,
   onOpenCaller,
 }: BlastRadiusCardProps) {
@@ -124,7 +124,7 @@ export function BlastRadiusCard({
                 entry={entry}
                 declFile={entry.file}
                 changedPaths={changedPaths}
-                repoFullName={repoFullName}
+                repo={repo}
                 headSha={headSha}
                 onOpenCaller={onOpenCaller}
               />
@@ -150,14 +150,14 @@ function SymbolNode({
   entry,
   declFile,
   changedPaths,
-  repoFullName,
+  repo,
   headSha,
   onOpenCaller,
 }: {
   entry: DownstreamImpact;
   declFile: string | null;
   changedPaths: Set<string>;
-  repoFullName: string | null;
+  repo: ForgeRepoRef | null;
   headSha: string | null;
   onOpenCaller: (path: string, line: number) => void;
 }) {
@@ -188,7 +188,7 @@ function SymbolNode({
               file={caller.file}
               line={caller.line}
               inDiff={changedPaths.has(caller.file)}
-              repoFullName={repoFullName}
+              repo={repo}
               headSha={headSha}
               onOpenCaller={onOpenCaller}
             />
@@ -223,21 +223,22 @@ function SymbolNode({
  * Blast callers are cross-file by construction and the declaring file is
  * excluded, while the Diff tab renders only the PR's own patches — so an in-app
  * jump is possible ONLY when the caller file is itself part of this PR. Outside
- * it, the honest affordance is GitHub at the indexed commit; with no repo name,
- * plain text.
+ * it, the honest affordance is the repository's OWN forge at the indexed commit
+ * (AC-29); with no repository, or a target the origin check refuses (AC-25),
+ * plain text and no clickable element at all.
  */
 function CallerRow({
   file,
   line,
   inDiff,
-  repoFullName,
+  repo,
   headSha,
   onOpenCaller,
 }: {
   file: string;
   line: number;
   inDiff: boolean;
-  repoFullName: string | null;
+  repo: ForgeRepoRef | null;
   headSha: string | null;
   onOpenCaller: (path: string, line: number) => void;
 }) {
@@ -257,14 +258,16 @@ function CallerRow({
     );
   }
 
-  if (repoFullName && headSha) {
+  const href =
+    repo && headSha ? safeExternalHref(blobUrl(repo, headSha, file, line), repo) : null;
+  if (href) {
     return (
       <a
-        href={githubBlobUrl(repoFullName, headSha, file, line)}
+        href={href}
         target="_blank"
         rel="noreferrer"
         style={s.callerRow}
-        aria-label={t("openOnGitHub", { path: file, line })}
+        aria-label={t("openOnForge", { path: file, line, instance: repo!.instance_label })}
       >
         {label}
       </a>

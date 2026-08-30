@@ -18,6 +18,21 @@ import type { PullRow } from '../../db/rows.js';
 export interface BriefRepoRow {
   owner: string;
   name: string;
+  /**
+   * Carried so the `RepoRef` this slice builds resolves to the clone this row
+   * actually owns — a bare `{ owner, name }` from a non-github.com row reads
+   * another workspace's mirror (SPEC-06 AC-17; `@devdigest/shared` `RepoRef`).
+   */
+  instanceKey: string;
+  /**
+   * The three fields `container.forge(repo)` resolves an outbound client from
+   * (SPEC-06). Carried on the row rather than looked up again, so this slice
+   * never branches on a provider itself — `workspaceId` is here because the
+   * instance lookup behind the resolver is workspace-scoped.
+   */
+  workspaceId: string;
+  provider: string;
+  instanceId: string | null;
 }
 
 export interface BriefPrFileRow {
@@ -41,7 +56,14 @@ export class BriefRepository {
 
   async getRepo(repoId: string): Promise<BriefRepoRow | undefined> {
     const [row] = await this.db
-      .select({ owner: t.repos.owner, name: t.repos.name })
+      .select({
+        owner: t.repos.owner,
+        name: t.repos.name,
+        instanceKey: t.repos.instanceKey,
+        workspaceId: t.repos.workspaceId,
+        provider: t.repos.provider,
+        instanceId: t.repos.instanceId,
+      })
       .from(t.repos)
       .where(eq(t.repos.id, repoId));
     return row;

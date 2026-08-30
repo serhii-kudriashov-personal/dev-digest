@@ -19,7 +19,8 @@ import {
 } from "@/lib/hooks/conventions";
 import { useRepoNotFound } from "@/lib/repo-context";
 import { ApiError } from "@/lib/api";
-import { ConventionCard, githubBlobUrl } from "../ConventionCard";
+import { ConventionCard } from "../ConventionCard";
+import { conventionEvidenceUrl, safeExternalHref } from "@/lib/forge-urls";
 import { CreateSkillFromConventionsModal } from "../CreateSkillFromConventionsModal";
 import { acceptedIds, scanAge } from "./helpers";
 import { s } from "./styles";
@@ -185,7 +186,7 @@ export function ConventionsView() {
                 key={c.id}
                 c={c}
                 busy={setStatus.isPending}
-                evidenceHref={githubBlobUrl(c, repo)}
+                evidenceHref={safeExternalHref(conventionEvidenceUrl(c, repo), repo)}
                 onAccept={() => judge([c.id], "accepted")}
                 onReject={() => judge([c.id], "rejected")}
                 onSaveRule={async (rule) => {

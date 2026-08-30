@@ -1,13 +1,13 @@
 {
   "reviewDrawer": {
     "title": "Compose Review",
-    "subtitle": "Post a GitHub review as yourself (PAT)",
+    "subtitle": "Post a review to {instance} as yourself",
     "inlineComments": "Inline comments",
     "cancel": "Cancel",
-    "post": "Post review to GitHub",
+    "post": "Post review to {instance}",
     "posting": "Posting…",
-    "postedWithId": "Review posted to GitHub · id {id}.",
-    "posted": "Review posted to GitHub.",
+    "postedWithId": "Review posted to {instance} · id {id}.",
+    "posted": "Review posted to {instance}.",
     "verdictLabel": "Verdict",
     "verdicts": {
       "approve": "Approve",

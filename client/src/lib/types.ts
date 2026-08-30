@@ -31,6 +31,16 @@ export type {
   IndexStatus,
 } from "@devdigest/shared";
 
+/** Registered forge instances (SPEC-06). */
+export type {
+  RepoProvider,
+  ApprovalCapability,
+  InstanceRejectionCode,
+  GitInstance,
+  GitInstanceInput,
+  InstanceTestResult,
+} from "@devdigest/shared";
+
 export type { Review, Finding, Severity, Verdict } from "@devdigest/shared";
 export type { PrBrief, SmartDiff } from "@devdigest/shared";
 

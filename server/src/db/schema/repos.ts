@@ -68,6 +68,21 @@ export const repos = pgTable(
      */
     namespacePath: text('namespace_path').notNull().default(''),
     lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
+    /**
+     * SPEC-06 AC-44 / NFR-7 — why the last sync attempt against this
+     * repository's forge failed, or NULL when the last attempt succeeded.
+     *
+     * NULLABLE and undefaulted on purpose: NULL is "no failure on record",
+     * which is what every pre-feature row means and what a successful sync
+     * writes back. Without it a read of `GET /repos/:id/pulls` cannot tell a
+     * stale snapshot after a failed sync from an empty project — the failure
+     * was only ever visible in the poll RESPONSE, which a page load never sees.
+     *
+     * THE VALUE IS THIRD-PARTY-INFLUENCED TEXT: it originates in a forge's own
+     * error. It is capped and redacted by `_shared/sync-error.ts#toSyncError`
+     * before it reaches this column — never write a raw `err.message` here.
+     */
+    lastSyncError: text('last_sync_error'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: now(),
   },

@@ -78,6 +78,13 @@ const USER_PATH = '/api/v4/user';
 const APPROVAL_PROBE_PATH = '/api/v4/merge_request_approval_settings';
 
 export interface GitLabInstanceClientOptions {
+  /**
+   * The operator's private-host opt-in, from `AppConfig.allowPrivateForgeHosts`
+   * (SPEC-06 AC-4). Supplied by the composition root and handed straight to
+   * `GitLabHttp`, which is where the per-request check that consumes it lives.
+   * Omitted means the shipped refusal.
+   */
+  allowedPrivateHosts?: readonly string[];
   gate?: RateGate;
   fetchImpl?: typeof fetch;
   resolveHost?: HostResolver;
@@ -91,8 +98,10 @@ export class GitLabInstanceHttpClient implements GitLabInstanceClient {
   private readonly resolveHost?: HostResolver;
   private readonly now: () => number;
   private readonly budgetMs: number;
+  private readonly allowedPrivateHosts: readonly string[];
 
   constructor(opts: GitLabInstanceClientOptions = {}) {
+    this.allowedPrivateHosts = opts.allowedPrivateHosts ?? [];
     this.gate = opts.gate;
     this.fetchImpl = opts.fetchImpl;
     this.resolveHost = opts.resolveHost;
@@ -108,6 +117,7 @@ export class GitLabInstanceHttpClient implements GitLabInstanceClient {
       baseUrl: input.baseUrl,
       instanceKey: input.instanceKey,
       credential: input.credential,
+      allowedPrivateHosts: this.allowedPrivateHosts,
       gate: this.gate,
       fetchImpl: this.fetchImpl,
       resolveHost: this.resolveHost,

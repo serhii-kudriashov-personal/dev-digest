@@ -1,4 +1,5 @@
 import type { GitInstance, InstanceRejectionCode } from '@devdigest/shared';
+import { allowlistHint, isAllowlistablePrivateAddress } from '../_shared/forge-url.js';
 import type { GitInstanceRow } from './repository.js';
 
 /**
@@ -46,6 +47,17 @@ export function hostnameOf(rawUrl: string): string | null {
  * English for a rejection code, for the codes decided before any request is
  * made. The codes the adapter decides arrive with their own message, which is
  * more specific than anything this table could say.
+ *
+ * `private_address` is the one that has to be ACTIONABLE. A refusal an operator
+ * cannot act on is what turned the self-managed-forge case into a support
+ * question, so when the address is one the per-host opt-in can widen — RFC 1918
+ * or unique-local — the message names the environment variable that does it.
+ * When it is not (loopback, link-local, and the rest), no hint is offered,
+ * because following it would not change the answer.
+ *
+ * Deciding that from the ADDRESS alone is why this needs no allowlist
+ * parameter: a host that is already allowlisted and still refused is refused
+ * for a reason the allowlist does not reach.
  */
 export function admissionMessage(code: InstanceRejectionCode, rawUrl: string): string {
   const host = hostnameOf(rawUrl);
@@ -54,10 +66,13 @@ export function admissionMessage(code: InstanceRejectionCode, rawUrl: string): s
       return 'Only TLS-protected instances are supported: the base URL must start with https://.';
     case 'credentials_in_url':
       return 'The base URL must not contain a username or password. Supply the access token separately.';
-    case 'private_address':
-      return host
-        ? `'${host}' is a loopback, link-local or private address, which DevDigest will not connect to.`
-        : 'The base URL names a loopback, link-local or private address, which DevDigest will not connect to.';
+    case 'private_address': {
+      if (!host) {
+        return 'The base URL names a loopback, link-local or private address, which DevDigest will not connect to.';
+      }
+      const refusal = `'${host}' is a loopback, link-local or private address, which DevDigest will not connect to.`;
+      return isAllowlistablePrivateAddress(host) ? `${refusal} ${allowlistHint(host)}` : refusal;
+    }
     default:
       return host
         ? `'${host}' could not be used as an instance base URL.`

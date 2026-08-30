@@ -26,27 +26,3 @@ export function evidenceRef(c: ConventionCandidate): string {
 export function copySnippet(snippet: string): void {
   void navigator.clipboard?.writeText(snippet);
 }
-
-/**
- * GitHub blob URL for a candidate's evidence, with the line range as an anchor.
- *
- * Pinned to the repo's default branch, not to a commit — so the file always opens,
- * but the `#L` anchor drifts once those lines move. That is the honest trade for
- * not storing a sha per candidate: the range was computed against the clone as it
- * stood at scan time, and nothing records which commit that was. If the anchor
- * ever needs to be permanent, add `conventions.head_sha` and prefer it here — the
- * change is additive, since a missing sha falls back to this.
- *
- * Returns null when there is nothing safe to link: no repo loaded yet, or no path.
- */
-export function githubBlobUrl(
-  c: ConventionCandidate,
-  repo: { full_name: string; default_branch: string } | undefined,
-): string | null {
-  if (!repo || !c.evidence_path) return null;
-  const base = `https://github.com/${repo.full_name}/blob/${repo.default_branch}/${c.evidence_path}`;
-  const { evidence_line_start: start, evidence_line_end: end } = c;
-  // A range the gate could not compute is stored as 0 — link the file, not `#L0`.
-  if (!start) return base;
-  return start === end ? `${base}#L${start}` : `${base}#L${start}-L${end}`;
-}

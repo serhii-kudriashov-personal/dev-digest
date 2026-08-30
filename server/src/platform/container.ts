@@ -1,6 +1,7 @@
 import type {
   AuthProvider,
   SecretsProvider,
+  ForgeClient,
   GitHubClient,
   GitClient,
   CodeIndex,
@@ -25,11 +26,13 @@ import { PriceBook } from './price-book.js';
 import { ConfigError } from './errors.js';
 import {
   type GitLabInstanceClient,
+  GitLabForgeClient,
   GitLabInstanceHttpClient,
 } from '../adapters/gitlab/index.js';
 import { RateGate } from './resilience.js';
 import { AgentsRepository } from '../modules/agents/repository.js';
 import { InstancesRepository } from '../modules/instances/repository.js';
+import { instanceSecretKey } from '../modules/instances/constants.js';
 import { SkillsRepository } from '../modules/skills/repository.js';
 import { ReviewRepository } from '../modules/reviews/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
@@ -54,6 +57,14 @@ export interface ContainerOverrides {
   secrets?: SecretsProvider;
   auth?: AuthProvider;
   github?: GitHubClient;
+  /**
+   * Provider-neutral forge (SPEC-06) — injected, it answers for EVERY
+   * repository regardless of provider, which is what lets a route test drive a
+   * GitLab repository without a GitLab. `MockForgeClient` branches on the
+   * `RepoRef`'s `instanceKey`, so one injected client can still model two
+   * instances behaving differently (AC-43).
+   */
+  forge?: ForgeClient;
   git?: GitClient;
   codeIndex?: CodeIndex;
   embedder?: Embedder;
@@ -108,6 +119,8 @@ export class Container {
   private _priceBook?: PriceBook;
   private _gitlabInstanceClient?: GitLabInstanceClient;
   private _forgeRateGate?: RateGate;
+  /** One forge client per registered instance id, cleared with the secrets. */
+  private forgeCache = new Map<string, ForgeClient>();
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -254,7 +267,14 @@ export class Container {
    */
   get gitlabInstanceClient(): GitLabInstanceClient {
     if (this.overrides.gitlabInstanceClient) return this.overrides.gitlabInstanceClient;
-    this._gitlabInstanceClient ??= new GitLabInstanceHttpClient({ gate: this.forgeRateGate });
+    // `allowPrivateForgeHosts` is threaded from config HERE rather than read
+    // inside the adapter: the adapter must not know where the list came from,
+    // and `modules/_shared/forge-url.ts` — the other half of the same gate —
+    // stays pure for the same reason (`backend-onion-architecture` §1, §4).
+    this._gitlabInstanceClient ??= new GitLabInstanceHttpClient({
+      gate: this.forgeRateGate,
+      allowedPrivateHosts: this.config.allowPrivateForgeHosts,
+    });
     return this._gitlabInstanceClient;
   }
 
@@ -284,6 +304,11 @@ export class Container {
     return this._priceBook;
   }
 
+  /**
+   * The GitHub client. Kept as-is, and still the resolver the `ci` slice uses:
+   * GitHub Actions export (SPEC-05) needs the six GitHub-only methods, which
+   * `ForgeClient` deliberately does not carry.
+   */
   async github(): Promise<GitHubClient> {
     if (this.overrides.github) return this.overrides.github;
     if (this._github) return this._github;
@@ -291,6 +316,59 @@ export class Container {
     if (!token) throw new ConfigError('GITHUB_TOKEN is not configured');
     this._github = new OctokitGitHubClient(token);
     return this._github;
+  }
+
+  /**
+   * The forge that owns ONE repository (SPEC-06 — AC-20, AC-45). This is the
+   * resolver every provider-neutral read path uses; the repository row decides
+   * the implementation, so no caller ever branches on a provider itself.
+   *
+   * `ConfigError` from here is a NORMAL PATH, exactly as it is from `github()`
+   * and `llm()`: a repository whose instance credential is missing or whose
+   * instance row has been removed is a state the caller catches and degrades
+   * from (serving the persisted snapshot), never a 500.
+   *
+   * Nothing outside this file may `new GitLabForgeClient(...)` —
+   * `ContainerOverrides.forge` is the seam that keeps every route and service
+   * testable without an outbound request (`backend-onion-architecture` §4).
+   */
+  async forge(repo: {
+    /** Scopes the instance lookup — the `:id` reaching a route is untrusted. */
+    workspaceId: string;
+    provider: string;
+    instanceId: string | null;
+  }): Promise<ForgeClient> {
+    if (this.overrides.forge) return this.overrides.forge;
+    if (repo.provider === 'github') return this.github();
+
+    if (!repo.instanceId) {
+      throw new ConfigError(
+        `A ${repo.provider} repository has no registered instance to talk to`,
+      );
+    }
+    const cached = this.forgeCache.get(repo.instanceId);
+    if (cached) return cached;
+
+    const instance = await this.instancesRepo.findById(repo.workspaceId, repo.instanceId);
+    if (!instance) {
+      throw new ConfigError('The instance this repository belongs to is no longer registered');
+    }
+    const credential = await this.secrets.get(instanceSecretKey(instance.id));
+    if (!credential) {
+      // Names the instance, never the key (AC-10, AC-45).
+      throw new ConfigError(`No access token is stored for ${instance.label}`);
+    }
+
+    const client = new GitLabForgeClient({
+      baseUrl: instance.baseUrl,
+      instanceKey: instance.id,
+      credential,
+      instanceLabel: instance.label,
+      gate: this.forgeRateGate,
+      allowedPrivateHosts: this.config.allowPrivateForgeHosts,
+    });
+    this.forgeCache.set(instance.id, client);
+    return client;
   }
 
   /** Resolve an LLM provider by id; constructs from the secret key, cached. */
@@ -349,5 +427,9 @@ export class Container {
     this.llmCache.clear();
     this._github = undefined;
     this._embedder = undefined;
+    // Per-instance forge clients hold the instance's access token, so a
+    // rotation must drop them too — otherwise the next resolve hands back a
+    // client built from the old credential (SPEC-06).
+    this.forgeCache.clear();
   }
 }

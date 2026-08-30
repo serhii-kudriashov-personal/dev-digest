@@ -10,7 +10,12 @@ import type {
   ReviewStrategy,
 } from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
-import { ConfigError, ExternalServiceError, NotFoundError } from '../../platform/errors.js';
+import {
+  ConfigError,
+  ExternalServiceError,
+  NotFoundError,
+  ValidationError,
+} from '../../platform/errors.js';
 import { TimeoutError, withTimeout } from '../../platform/resilience.js';
 import { CiRepository } from './repository.js';
 import {
@@ -60,6 +65,36 @@ export class CiService {
 
   constructor(private container: Container) {
     this.repo = new CiRepository(container.db);
+  }
+
+  /**
+   * Refuse an export whose target repository does not live on GitHub
+   * (SPEC-06 — AC-48).
+   *
+   * Called FIRST by both entry points, before a single file is generated and
+   * long before anything is committed: the only supported CI target is GitHub
+   * Actions, so a GitLab-resolved repository has nowhere for the generated
+   * workflow to run. The refusal is a thrown `AppError`, never a hand-crafted
+   * `reply.code` — the envelope and the logging both hang off that
+   * (`backend-onion-architecture` §6).
+   *
+   * A repository the workspace has NOT imported is left alone rather than
+   * refused: this gate exists to catch a positively-resolved non-GitHub
+   * provider, and refusing on "unknown" would break exporting to a repository
+   * that was never imported into DevDigest in the first place.
+   */
+  private async assertGitHubTarget(workspaceId: string, input: CiExportInput): Promise<void> {
+    const target = await this.repo.findTargetRepo(
+      workspaceId,
+      input.repo,
+      input.instance_id ?? null,
+    );
+    if (!target || target.provider === 'github') return;
+    throw new ValidationError(
+      `Export to CI targets GitHub Actions, and "${input.repo}" lives on ` +
+        `${target.instanceLabel} (${target.provider}). Nothing was generated and nothing ` +
+        `was committed.`,
+    );
   }
 
   /**
@@ -120,6 +155,7 @@ export class CiService {
    * synthesised with an empty id rather than a persisted row.
    */
   async preview(workspaceId: string, agentId: string, input: CiExportInput): Promise<CiExport> {
+    await this.assertGitHubTarget(workspaceId, input);
     const files = await this.buildBundle(workspaceId, agentId, input);
     return {
       installation: {
@@ -140,6 +176,9 @@ export class CiService {
    * any throw above leaves no row). Bounded by NFR-1's 60s budget.
    */
   async install(workspaceId: string, agentId: string, input: CiExportInput): Promise<CiExport> {
+    // Outside `withTimeout`, and before `doInstall`: the refusal is a cheap
+    // local read and must not be able to surface as a timeout (AC-48).
+    await this.assertGitHubTarget(workspaceId, input);
     try {
       return await withTimeout(
         this.doInstall(workspaceId, agentId, input),

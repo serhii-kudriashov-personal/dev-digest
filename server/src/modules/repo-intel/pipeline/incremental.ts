@@ -79,7 +79,7 @@ export async function runIncremental(
     return runFullIndex(container, repository, payload);
   }
 
-  const ref: RepoRef = { owner: repo.owner, name: repo.name };
+  const ref: RepoRef = { owner: repo.owner, name: repo.name, instanceKey: repo.instanceKey };
   let currentSha: string;
   try {
     currentSha = await container.git.currentHead(ref);

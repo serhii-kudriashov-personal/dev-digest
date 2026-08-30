@@ -8,15 +8,24 @@ import { AgentPicker, type AgentPickerAgent } from "@/components/agent-picker";
 import { useAgents } from "@/lib/hooks/agents";
 import { useStartMultiAgentRun } from "@/lib/hooks/multi-agent";
 import { s } from "./styles";
-import type { PrDetail } from "@/lib/types";
+import type { PrDetail, RepoProvider } from "@/lib/types";
 
 interface PrDetailHeaderProps {
   pr: PrDetail;
   prId: string | null;
   tab: string;
   findingsCount: number;
-  /** github.com PR URL; null when the repo's full_name isn't known yet. */
-  githubUrl?: string | null;
+  /**
+   * The change request's URL on its OWN forge, already admitted by
+   * `safeExternalHref` (AC-25, AC-29). Null when the repository is not loaded
+   * yet, or when the target failed the origin check — in which case NO
+   * clickable element is rendered at all, rather than a disabled-looking one.
+   */
+  forgeUrl?: string | null;
+  /** Instance the repository lives on — rendered as text in the action's name (AC-31). */
+  instanceLabel?: string | null;
+  /** Which forge, so the identifier prefix reads `#123` or `!123` (AC-27). */
+  provider?: RepoProvider;
   onSetTab: (tab: string) => void;
   onRunStart: () => void;
   onRunsStarted: () => void;
@@ -27,12 +36,15 @@ export function PrDetailHeader({
   prId,
   tab,
   findingsCount,
-  githubUrl,
+  forgeUrl,
+  instanceLabel,
+  provider = "github",
   onSetTab,
   onRunStart,
   onRunsStarted,
 }: PrDetailHeaderProps) {
   const t = useTranslations("prReview");
+  const tc = useTranslations("common");
   const { repoId } = useParams<{ repoId: string }>();
   const { data: agentsData } = useAgents();
   const startRun = useStartMultiAgentRun();
@@ -97,7 +109,7 @@ export function PrDetailHeader({
         <div style={s.titleCol}>
           <h1 style={s.h1}>
             <span className="mono" style={s.prNumber}>
-              #{pr.number}
+              {tc("forge.identifier", { provider, number: pr.number })}
             </span>
             {pr.title}
           </h1>
@@ -123,20 +135,24 @@ export function PrDetailHeader({
             <Badge dot bg="transparent" color={statusColor}>
               {pr.status}
             </Badge>
+            {instanceLabel && (
+              <span style={s.instanceChip}>
+                {tc("forge.onInstance", { instance: instanceLabel })}
+              </span>
+            )}
           </div>
         </div>
         <div style={s.actions}>
-          <Button
-            kind="ghost"
-            size="sm"
-            icon="ExternalLink"
-            disabled={!githubUrl}
-            onClick={() =>
-              githubUrl && window.open(githubUrl, "_blank", "noopener,noreferrer")
-            }
-          >
-            View on GitHub
-          </Button>
+          {forgeUrl && (
+            <Button
+              kind="ghost"
+              size="sm"
+              icon="ExternalLink"
+              onClick={() => window.open(forgeUrl, "_blank", "noopener,noreferrer")}
+            >
+              {t("detail.viewOnForge", { instance: instanceLabel ?? "" })}
+            </Button>
+          )}
           {prId && (
             <div ref={popoverRef} style={s.pickerWrap}>
               <span
@@ -175,10 +191,7 @@ export function PrDetailHeader({
       {(pr.status === "merged" || pr.status === "closed") && (
         <div style={s.staleBanner}>
           <Icon.AlertTriangle size={13} style={{ color: "var(--warn)", flexShrink: 0 }} />
-          <span>
-            This PR is already {pr.status} — running a review is informational and won't affect the
-            merged code.
-          </span>
+          <span>{t("detail.mergedBanner", { provider, status: pr.status })}</span>
         </div>
       )}
       <Tabs

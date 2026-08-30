@@ -153,6 +153,73 @@ export const BlastRadiusResponse = BlastRadius.extend({
 export type BlastRadiusResponse = z.infer<typeof BlastRadiusResponse>;
 
 /**
+ * How posting a review run back to its change request ended (SPEC-06 — AC-39,
+ * AC-40, AC-41).
+ *
+ * Four states, not a boolean, because posting is NOT atomic on GitLab: the
+ * summary note, each inline note and the verdict action are separate requests,
+ * so "posted but the verdict was not applied" and "some notes landed" are
+ * ordinary outcomes rather than errors.
+ *
+ *  - `posted_verdict_applied`     — everything landed AND the verdict was
+ *                                   applied as a forge action (an approval, or
+ *                                   an approval withdrawn).
+ *  - `posted_verdict_not_applied` — everything landed, the verdict did not
+ *                                   become a forge action. Covers both the
+ *                                   refusal case (AC-38) and the deliberate
+ *                                   `request_changes` downgrade GitLab has no
+ *                                   review state for (AC-41). `reason` says
+ *                                   which, in words.
+ *  - `partially_published`        — at least one note landed and publication
+ *                                   then failed (AC-40). Distinguishable from
+ *                                   both a complete post and one that never
+ *                                   started; the verdict is NOT attempted.
+ *  - `not_posted`                 — nothing landed.
+ */
+export const PostBackOutcome = z.enum([
+  'posted_verdict_applied',
+  'posted_verdict_not_applied',
+  'partially_published',
+  'not_posted',
+]);
+export type PostBackOutcome = z.infer<typeof PostBackOutcome>;
+
+/**
+ * The recorded outcome of posting one review run back, and the response of
+ * `POST /pulls/:id/post-review` (SPEC-06 — AC-39, NFR-12).
+ *
+ * A SIBLING schema, deliberately: this is new REQUIRED information about a run,
+ * and the run's own persisted document (`run_traces.json`) is jsonb written for
+ * every run that already exists — a required key added there would make every
+ * document on disk unparseable (root `INSIGHTS.md` 2026-08-11). It gets its own
+ * `review_postbacks` row instead, which is also what makes NFR-12 true: the
+ * outcome survives a reload because it was never only in the response.
+ */
+export const ReviewPostBack = z.object({
+  run_id: z.string(),
+  pr_id: z.string(),
+  outcome: PostBackOutcome,
+  /**
+   * Why, in words, for the user — a refused approval (AC-38), the
+   * `request_changes` downgrade (AC-41), a note cap that truncated the post
+   * (NFR-3), or what failed. Null only when there is nothing to add to the
+   * outcome itself. Several of those can be true at once, so this is prose
+   * composed by the server, not a code.
+   */
+  reason: z.string().nullable(),
+  /** Notes that actually reached the change request, summary note included. */
+  notes_published: z.number().int(),
+  created_at: z.string(),
+});
+export type ReviewPostBack = z.infer<typeof ReviewPostBack>;
+
+/** Body of `POST /pulls/:id/post-review` — which run's review to publish. */
+export const PostReviewInput = z.object({
+  run_id: z.string().uuid(),
+});
+export type PostReviewInput = z.infer<typeof PostReviewInput>;
+
+/**
  * PR Risk Brief (SPEC-02) — the model's structured answer, the persisted
  * document, and the wire response are three distinct schemas on purpose, same
  * split as `PrIntentRecord`/`BlastRadiusResponse` above.

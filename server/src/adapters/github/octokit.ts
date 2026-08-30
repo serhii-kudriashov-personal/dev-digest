@@ -12,6 +12,8 @@ import type {
   CommitFilesPayload,
   WorkflowRunSummary,
   IssueMeta,
+  ReviewPublication,
+  ReviewPublicationResult,
 } from '@devdigest/shared';
 import { withRetry, withTimeout } from '../../platform/resilience.js';
 
@@ -135,6 +137,60 @@ export class OctokitGitHubClient implements GitHubClient {
     }
   }
 
+  /**
+   * GitHub's half of SPEC-06 AC-34/AC-39, on top of `postReview`.
+   *
+   * Only two of the four outcomes are reachable here, and that is a property of
+   * the forge rather than a gap: `pulls.createReview` is ONE request carrying
+   * the body, the event and every inline comment, so it either all lands with
+   * the verdict applied (`posted_verdict_applied`) or none of it does
+   * (`not_posted`). `partially_published` describes a forge that publishes note
+   * by note, which GitHub is not.
+   *
+   * The cap and the summary text are the caller's; this method posts what it is
+   * given.
+   */
+  async publishReview(
+    repo: RepoRef,
+    n: number,
+    payload: ReviewPublication,
+  ): Promise<ReviewPublicationResult> {
+    const event =
+      payload.verdict === 'approve'
+        ? 'APPROVE'
+        : payload.verdict === 'request_changes'
+          ? 'REQUEST_CHANGES'
+          : 'COMMENT';
+    try {
+      await this.postReview(repo, n, {
+        body: payload.summary,
+        event,
+        // GitHub anchors a LEFT-side comment by the same `line` plus a `side`;
+        // `postReview`'s payload carries no side, so an old-side note would land
+        // on the new side. Sending it as `side` is not available on this
+        // primitive, so the note keeps its line and GitHub resolves it against
+        // the diff — unchanged from the pre-SPEC-06 shape of this call.
+        comments: payload.notes.map((note) => ({
+          path: note.path,
+          line: note.line,
+          body: note.body,
+        })),
+      });
+      return {
+        outcome: 'posted_verdict_applied',
+        reason: null,
+        // The summary is part of the same review object GitHub created.
+        notesPublished: payload.notes.length + 1,
+      };
+    } catch (err) {
+      return {
+        outcome: 'not_posted',
+        reason: err instanceof Error ? err.message : 'GitHub refused the review.',
+        notesPublished: 0,
+      };
+    }
+  }
+
   async postReview(
     repo: RepoRef,
     n: number,
@@ -162,7 +218,15 @@ export class OctokitGitHubClient implements GitHubClient {
     );
   }
 
-  /** Shape an Octokit review-comment payload into our DTO. */
+  /**
+   * Shape an Octokit review-comment payload into our DTO.
+   *
+   * THIS IS THE BOUNDARY WHERE GITHUB'S INTEGER IDS BECOME STRINGS (SPEC-06
+   * AC-23, AC-27). The port carries a string because GitLab names its
+   * discussions, and the conversion lives here rather than one layer up so
+   * nothing above the adapter can tell the contract changed: `String(c.id)` in,
+   * `Number(input.inReplyTo)` back out in `createReviewComment`.
+   */
   private mapReviewComment(c: {
     id: number;
     path: string;
@@ -176,7 +240,7 @@ export class OctokitGitHubClient implements GitHubClient {
     in_reply_to_id?: number;
   }): PrReviewComment {
     return {
-      id: c.id,
+      id: String(c.id),
       path: c.path,
       line: c.line ?? null,
       original_line: c.original_line ?? null,
@@ -185,8 +249,10 @@ export class OctokitGitHubClient implements GitHubClient {
       user: c.user?.login ?? 'unknown',
       created_at: c.created_at,
       html_url: c.html_url,
-      in_reply_to_id: c.in_reply_to_id ?? null,
-      // GitHub drops `line` when the comment can no longer be placed on the diff.
+      in_reply_to_id: c.in_reply_to_id == null ? null : String(c.in_reply_to_id),
+      // GitHub's own rule for `is_outdated` — it drops `line` when the comment
+      // can no longer be placed on the diff. Each provider derives this
+      // differently; the contract states the meaning, not this rule.
       is_outdated: c.line == null,
     };
   }
@@ -217,11 +283,17 @@ export class OctokitGitHubClient implements GitHubClient {
       withTimeout(
         (async () => {
           if (input.inReplyTo != null) {
+            // Back to GitHub's own representation — the port's string id came
+            // from `String(c.id)` above, so this is the exact inverse (AC-27).
+            const commentId = Number(input.inReplyTo);
+            if (!Number.isInteger(commentId)) {
+              throw new Error(`'${input.inReplyTo}' is not a GitHub review-comment id`);
+            }
             const res = await this.octokit.rest.pulls.createReplyForReviewComment({
               owner: repo.owner,
               repo: repo.name,
               pull_number: n,
-              comment_id: input.inReplyTo,
+              comment_id: commentId,
               body: input.body,
             });
             return this.mapReviewComment(res.data);

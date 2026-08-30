@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { RunRequest } from '@devdigest/shared';
-import type { RunEvent } from '@devdigest/shared';
+import { z } from 'zod';
+import { PostReviewInput, RunRequest } from '@devdigest/shared';
+import type { ReviewPostBack, RunEvent } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
@@ -13,9 +14,15 @@ import { ReviewService } from './service.js';
  *   GET    /runs/:id/events                            → SSE stream of RunEvent (replay-first)
  *   GET    /runs/:id/trace                             → the single-document RunTrace
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
+ *   POST   /pulls/:id/post-review  {run_id}            → publish a run's review to the forge
+ *   GET    /pulls/:id/post-review/:runId               → the recorded post-back outcome
  *   POST   /findings/:id/(accept|dismiss|learn)         → finding actions
  */
 const FINDING_ACTIONS = ['accept', 'dismiss', 'learn'] as const;
+
+/** `GET /pulls/:id/post-review/:runId` — both segments address a row, so both
+ *  are validated at the edge and a bad one is a 422 before the handler runs. */
+const PostBackParams = IdParams.extend({ runId: z.string().uuid() });
 export default async function reviewsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const { container } = app;
@@ -130,6 +137,36 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     const { workspaceId } = await getContext(container, req);
     return service.reviewsForPull(workspaceId, req.params.id);
   });
+
+  // ---- Post a run's review back to its change request (SPEC-06) -----------
+  // Tight per-route limit, same reasoning as the review trigger above: each
+  // call fans out to one request per note against a third-party forge.
+  //
+  // Answers 200 with the recorded outcome even when nothing was published — the
+  // four states ARE the answer (AC-39), and a missing access token or a refused
+  // approval is a stated outcome rather than an HTTP error, the same shape
+  // `POST /pulls/:id/brief` uses for its degraded states.
+  app.post(
+    '/pulls/:id/post-review',
+    {
+      schema: { params: IdParams, body: PostReviewInput },
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
+    async (req): Promise<ReviewPostBack> => {
+      const { workspaceId } = await getContext(container, req);
+      return service.postReviewBack(workspaceId, req.params.id, req.body.run_id);
+    },
+  );
+
+  // ---- The recorded post-back outcome, so a reload can show it (NFR-12) ----
+  app.get(
+    '/pulls/:id/post-review/:runId',
+    { schema: { params: PostBackParams } },
+    async (req): Promise<ReviewPostBack | null> => {
+      const { workspaceId } = await getContext(container, req);
+      return service.getPostBack(workspaceId, req.params.id, req.params.runId);
+    },
+  );
 
   // ---- Delete a whole review run (one agent's pass) + its findings --------
   app.delete('/reviews/:id', { schema: { params: IdParams } }, async (req) => {

@@ -2,6 +2,10 @@ import 'dotenv/config';
 import { z } from 'zod';
 import { homedir } from 'node:os';
 import { join, isAbsolute, resolve } from 'node:path';
+import {
+  ALLOW_PRIVATE_FORGE_HOSTS_ENV,
+  parseAllowedPrivateHosts,
+} from '../modules/_shared/forge-url.js';
 
 /**
  * Central, zod-validated environment config. Loaded once at startup.
@@ -26,6 +30,13 @@ const EnvSchema = z.object({
   // Note: even when on, sections only populate once the repo is indexed; an
   // unindexed repo degrades gracefully. Per-agent override: agents.repo_intel.
   REPO_INTEL_ENABLED: z.string().optional(),
+  // SSRF opt-in for a self-managed forge on a private network (SPEC-06 AC-4).
+  // Comma-separated EXACT hostnames — `git.devart.com,gitlab.internal`. Empty
+  // by default, which is the shipped refusal; naming a host widens it to
+  // RFC 1918 and IPv6 unique-local for THAT host only, never to loopback and
+  // never to link-local. The rules and the reasons are in
+  // `modules/_shared/forge-url.ts`; this is only where the value is read.
+  DEVDIGEST_ALLOW_PRIVATE_FORGE_HOSTS: z.string().optional(),
   API_PORT: z.coerce.number().int().default(3001),
   WEB_PORT: z.coerce.number().int().default(3000),
   DEVDIGEST_CLONE_DIR: z.string().optional(),
@@ -70,6 +81,17 @@ export type AppConfig = {
    * EXACTLY like the ripgrep-only baseline.
    */
   repoIntelEnabled: boolean;
+  /**
+   * Hosts the operator has explicitly opted into reaching on a private network
+   * (`DEVDIGEST_ALLOW_PRIVATE_FORGE_HOSTS`). Empty by default. Canonicalised
+   * and de-duplicated; matched EXACTLY, and only ever able to widen the refusal
+   * to RFC 1918 / IPv6 unique-local — see `modules/_shared/forge-url.ts`.
+   *
+   * Not a secret: it is a list of hostnames the operator typed, so `AppConfig`
+   * is the right home for it (unlike an access token, which is
+   * `SecretsProvider`'s — see the note at the top of this file).
+   */
+  allowPrivateForgeHosts: readonly string[];
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -94,5 +116,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webOrigin: `http://localhost:${parsed.WEB_PORT}`,
     embeddingsEnabled: parsed.EMBEDDINGS_ENABLED === 'true',
     repoIntelEnabled: parsed.REPO_INTEL_ENABLED !== 'false',
+    // Indexed by the constant rather than written as `parsed.DEVDIGEST_…`, so
+    // the schema key and the name the refusal messages print cannot drift: a
+    // mismatch is a typecheck error here, not a variable nobody notices is
+    // being ignored.
+    allowPrivateForgeHosts: parseAllowedPrivateHosts(parsed[ALLOW_PRIVATE_FORGE_HOSTS_ENV]),
   };
 }

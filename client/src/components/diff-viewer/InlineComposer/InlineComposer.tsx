@@ -19,7 +19,7 @@ export function InlineComposer({
   path: string;
   line: number;
   side: "LEFT" | "RIGHT";
-  inReplyTo?: number;
+  inReplyTo?: string;
   onClose: () => void;
 }) {
   const t = useTranslations("shell");

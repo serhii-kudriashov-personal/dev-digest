@@ -115,6 +115,88 @@ export async function getReview(db: Db, reviewId: string): Promise<ReviewRow | u
   return row;
 }
 
+/**
+ * The review one run produced on one pull request, with its findings (SPEC-06 —
+ * AC-34). Scoped by `prId` as well as `runId`: the caller resolved the pull
+ * inside a workspace, so pinning both is what keeps a run id from another
+ * workspace unable to select anything.
+ *
+ * `kind: 'review'` only — a `summary` row is the multi-agent roll-up, which has
+ * no findings of its own to anchor.
+ */
+export async function reviewForRun(
+  db: Db,
+  prId: string,
+  runId: string,
+): Promise<{ review: ReviewRow; findings: FindingRow[] } | undefined> {
+  const [review] = await db
+    .select()
+    .from(t.reviews)
+    .where(
+      and(eq(t.reviews.prId, prId), eq(t.reviews.runId, runId), eq(t.reviews.kind, 'review')),
+    )
+    .orderBy(desc(t.reviews.createdAt));
+  if (!review) return undefined;
+  const rows = await db
+    .select()
+    .from(t.findings)
+    .where(eq(t.findings.reviewId, review.id))
+    .orderBy(asc(t.findings.file), asc(t.findings.startLine));
+  return { review, findings: rows };
+}
+
+// ---- post-back outcomes (SPEC-06 — AC-39, NFR-12) -------------------------
+
+export type ReviewPostbackRow = typeof t.reviewPostbacks.$inferSelect;
+
+/**
+ * Record how a run's post-back ended, REPLACING any earlier record for the same
+ * `(run_id, pr_id)`.
+ *
+ * Replace rather than append, because the question the UI asks — "how did this
+ * run's post-back end" — has exactly one current answer, and a re-post makes the
+ * previous one wrong rather than historical. The unique index is what makes the
+ * upsert atomic, so two writers cannot leave two answers behind.
+ */
+export async function recordPostBack(
+  db: Db,
+  values: {
+    runId: string;
+    prId: string;
+    outcome: string;
+    reason: string | null;
+    notesPublished: number;
+  },
+): Promise<ReviewPostbackRow> {
+  const [row] = await db
+    .insert(t.reviewPostbacks)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [t.reviewPostbacks.runId, t.reviewPostbacks.prId],
+      set: {
+        outcome: values.outcome,
+        reason: values.reason,
+        notesPublished: values.notesPublished,
+        createdAt: new Date(),
+      },
+    })
+    .returning();
+  return row!;
+}
+
+/** The recorded outcome for one run on one pull request, if it has one. */
+export async function getPostBack(
+  db: Db,
+  prId: string,
+  runId: string,
+): Promise<ReviewPostbackRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(t.reviewPostbacks)
+    .where(and(eq(t.reviewPostbacks.prId, prId), eq(t.reviewPostbacks.runId, runId)));
+  return row;
+}
+
 /** Delete a whole review (one agent's run) + its findings (cascade), scoped
  *  to the workspace. Returns false if not found in the workspace. */
 export async function deleteReview(

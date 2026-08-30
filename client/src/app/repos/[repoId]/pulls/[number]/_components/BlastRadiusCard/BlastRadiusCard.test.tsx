@@ -11,7 +11,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
 import type { BlastRadiusResponse } from "@devdigest/shared";
-import { githubBlobUrl } from "@/lib/github-urls";
+import { blobUrl } from "@/lib/forge-urls";
 import messages from "../../../../../../../../messages/en/blast.json";
 import briefMessages from "../../../../../../../../messages/en/brief.json";
 import { BlastRadiusCard } from "./BlastRadiusCard";
@@ -20,10 +20,14 @@ const DECL_A = "server/src/platform/limiter.ts";
 const DECL_B = "server/src/platform/clock.ts";
 /** In the PR's diff → an in-app button. */
 const CALLER_IN_DIFF = "server/src/app.ts";
-/** Outside the PR's diff → a GitHub link. */
+/** Outside the PR's diff → a link on the repository's own forge. */
 const CALLER_OUTSIDE = "server/src/modules/pulls/routes.ts";
 
-const REPO = "acme/dev-digest";
+const REPO = {
+  provider: "github" as const,
+  web_url: "https://github.com/acme/dev-digest",
+  instance_label: "github.com",
+};
 const SHA = "abc123";
 
 const FULL: BlastRadiusResponse = {
@@ -62,7 +66,7 @@ function renderCard(props: Partial<React.ComponentProps<typeof BlastRadiusCard>>
         blast={FULL}
         loading={false}
         changedPaths={new Set([DECL_A, DECL_B, CALLER_IN_DIFF])}
-        repoFullName={REPO}
+        repo={REPO}
         headSha={SHA}
         {...props}
         onOpenCaller={onOpenCaller}
@@ -112,18 +116,43 @@ describe("BlastRadiusCard", () => {
     expect(onOpenCaller).toHaveBeenCalledTimes(1);
   });
 
-  it("renders a caller OUTSIDE the diff as a GitHub link and never calls onOpenCaller", async () => {
+  it("renders a caller OUTSIDE the diff as a forge link and never calls onOpenCaller", async () => {
     const user = userEvent.setup();
     const { onOpenCaller } = renderCard();
 
     const link = screen.getByRole("link", {
-      name: `Open ${CALLER_OUTSIDE} line 49 on GitHub`,
+      name: `Open ${CALLER_OUTSIDE} line 49 on ${REPO.instance_label}`,
     });
-    expect(link).toHaveAttribute("href", githubBlobUrl(REPO, SHA, CALLER_OUTSIDE, 49));
+    expect(link).toHaveAttribute("href", blobUrl(REPO, SHA, CALLER_OUTSIDE, 49));
     expect(link).toHaveAttribute("target", "_blank");
 
     await user.click(link);
     expect(onOpenCaller).not.toHaveBeenCalled();
+  });
+
+  it("renders NO link when the repository's own URL fails the AC-25 origin check", () => {
+    // SPEC-06 (`specs/2026-08-28-gitlab-repositories.md`) AC-25: a target that is
+    // not https on the repository's registered origin is not rendered as a link
+    // at all. Here the repository itself is registered over cleartext, so every
+    // link built from it is rejected — and the caller must still be READABLE,
+    // as plain text, rather than a dead or disabled-looking anchor.
+    renderCard({
+      repo: { ...REPO, web_url: "http://internal-git.acme.dev/acme/dev-digest" },
+    });
+
+    expect(screen.getByText(`${CALLER_OUTSIDE}:49`)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", {
+        name: `Open ${CALLER_OUTSIDE} line 49 on ${REPO.instance_label}`,
+      }),
+    ).toBeNull();
+  });
+
+  it("renders no link before the head sha is known, rather than one to the wrong revision", () => {
+    renderCard({ headSha: null });
+
+    expect(screen.getByText(`${CALLER_OUTSIDE}:49`)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open .* on / })).toBeNull();
   });
 
   it("a symbol with zero callers is still listed, with a 0 badge", () => {
@@ -212,7 +241,7 @@ describe("BlastRadiusCard", () => {
           blast={undefined}
           loading
           changedPaths={new Set()}
-          repoFullName={null}
+          repo={null}
           headSha={null}
           onOpenCaller={vi.fn()}
         />

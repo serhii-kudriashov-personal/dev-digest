@@ -12,6 +12,7 @@ import { BriefBar } from "../BriefBar";
 import { PrBriefSection } from "../PrBriefSection";
 import { ReviewFocusSection } from "../ReviewFocusSection";
 import { s } from "./styles";
+import type { ForgeRepoRef } from "@/lib/forge-urls";
 
 interface OverviewTabProps {
   /** Null while the PR list is still resolving `number` → id; the hooks no-op. */
@@ -19,8 +20,8 @@ interface OverviewTabProps {
   /** The PR's CURRENT head sha — what a stored intent is judged stale against. */
   headSha: string | null | undefined;
   prBody: string | null | undefined;
-  /** "owner/repo", null until the repo is loaded — for github.com deep-links. */
-  repoFullName: string | null;
+  /** The owning repository, null until it is loaded — every deep-link derives from its `web_url` (AC-29). */
+  repo: ForgeRepoRef | null;
   /** The PR's changed files: which blast callers can be opened in the Diff tab. */
   files: PrFile[];
   /**
@@ -43,7 +44,7 @@ export function OverviewTab({
   prId,
   headSha,
   prBody,
-  repoFullName,
+  repo,
   files,
   latestReview,
   latestReviewCostUsd,
@@ -117,7 +118,7 @@ export function OverviewTab({
           blast={blast}
           loading={blastLoading}
           changedPaths={changedPaths}
-          repoFullName={repoFullName}
+          repo={repo}
           headSha={headSha ?? null}
           onOpenCaller={onOpenCaller}
         />

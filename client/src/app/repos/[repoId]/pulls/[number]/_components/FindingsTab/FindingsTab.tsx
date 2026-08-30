@@ -7,6 +7,7 @@ import { RunHistory } from "../RunHistory/RunHistory";
 import { ReviewRunAccordion } from "../ReviewRunAccordion";
 import { s } from "./styles";
 import type { FindingRecord, ReviewRecord, RunSummary, PrCommit, Severity } from "@devdigest/shared";
+import type { ForgeRepoRef } from "@/lib/forge-urls";
 
 interface FindingsTabProps {
   prId: string | null;
@@ -23,8 +24,8 @@ interface FindingsTabProps {
    */
   onCancelRuns: (runIds: string[]) => void;
   cancelling: boolean;
-  /** owner/repo + head sha — used to deep-link a finding's file:line to GitHub. */
-  repoFullName?: string | null;
+  /** The owning repository + head sha — deep-links a finding's file:line on its own forge (AC-29). */
+  repo?: ForgeRepoRef | null;
   headSha?: string | null;
   /** Page-wide severity selection (`?severity=`); counts stay per-run. */
   severities: Severity[];
@@ -51,7 +52,7 @@ export function FindingsTab({
   prCommits,
   onCancelRuns,
   cancelling,
-  repoFullName,
+  repo,
   headSha,
   severities,
   onToggleSeverity,
@@ -201,7 +202,7 @@ export function FindingsTab({
             prId={prId}
             defaultOpen={i === 0}
             costUsd={review.run_id ? costByRun.get(review.run_id) ?? null : null}
-            repoFullName={repoFullName}
+            repo={repo}
             headSha={headSha}
             targetRunId={target?.runId ?? null}
             targetNonce={target?.n ?? 0}

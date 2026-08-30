@@ -39,6 +39,19 @@ export class InstancesService {
     this.repo = container.instancesRepo;
   }
 
+  /**
+   * The operator's private-host opt-in (SPEC-06 AC-4), read from config on
+   * every use rather than captured in the constructor — a service instance
+   * outlives a request, and a security input latched at construction is the
+   * shape `server/INSIGHTS.md` 2026-08-28 records going wrong in the adapter.
+   *
+   * Read from `container.config`, never from `process.env`: config is the one
+   * place the environment is parsed (`backend-onion-architecture` §4).
+   */
+  private get allowedPrivateHosts(): readonly string[] {
+    return this.container.config.allowPrivateForgeHosts;
+  }
+
   async list(workspaceId: string): Promise<GitInstance[]> {
     const rows = await this.repo.list(workspaceId);
     return rows.map(toInstanceDto);
@@ -57,7 +70,7 @@ export class InstancesService {
     userId: string,
     input: GitInstanceInput,
   ): Promise<GitInstance> {
-    const admitted = normalizeBaseUrl(input.base_url);
+    const admitted = normalizeBaseUrl(input.base_url, this.allowedPrivateHosts);
     if (!admitted.ok) {
       throw rejection(admitted.code, admissionMessage(admitted.code, input.base_url));
     }
@@ -141,7 +154,7 @@ export class InstancesService {
       };
     }
 
-    const rejected = admitBaseUrl(row.baseUrl);
+    const rejected = admitBaseUrl(row.baseUrl, this.allowedPrivateHosts);
     if (rejected) {
       // A result, not a thrown 422: AC-12 asks for the test result "per
       // registered instance", and an error envelope carries no `instance_id`,

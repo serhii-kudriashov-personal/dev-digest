@@ -89,17 +89,58 @@ describe('tools/list', () => {
 
   it('get_blast_radius describes the real tool, verbatim from its spec', () => {
     // L05 shipped this as a placeholder whose description opened with a refusal;
-    // L06 implemented it. The string is verbatim from
-    // `specs/l06-blast-radius.md` §Contracts 5 — a paraphrase is a defect,
-    // because the token budget was computed from these exact bytes.
+    // L06 implemented it. The string stays asserted VERBATIM — a paraphrase is a
+    // defect, because the token budget was computed from these exact bytes.
+    //
+    // One word moved since L06: `specs/2026-08-28-gitlab-repositories.md`
+    // §Contract promises (MCP row) makes the tool vocabulary provider-neutral,
+    // so "pull request" became "change request". The budget still holds with
+    // room to spare — `test/token-budget.test.ts` measures the serialized
+    // payload rather than trusting this string's length — but the byte source of
+    // record has NOT caught up: `specs/l06-blast-radius.md:301` still reads
+    // "pull request", and `mcp/AGENTS.md` requires the spec to change first.
+    // That drift is reported, not papered over here.
     const blast = tools.find((t) => t.name === 'get_blast_radius');
     expect(blast?.description).toBe(
-      'Map what else a pull request can affect: the symbols its changed files declare, ' +
+      'Map what else a change request can affect: the symbols its changed files declare, ' +
         'who calls them, and which HTTP endpoints or scheduled jobs those callers serve. ' +
         'Served from a prebuilt index — no code is parsed and no model is called. When the ' +
         'index is missing or incomplete the result says so instead of guessing.',
     );
     expect(blast?.description).not.toContain('Not implemented');
+  });
+
+  it('never says "pull request" without naming the provider it belongs to', () => {
+    // SPEC-06 AC-26/AC-27/AC-28 in this package's dialect: a repository on a
+    // GitLab instance has merge requests, so an unqualified "pull request" in a
+    // tool definition is a confident falsehood for half the repositories this
+    // server can be pointed at. The provider-scoped strings are allowed and
+    // deliberate — they name GitHub and GitLab in the same breath — so the rule
+    // is "qualified or absent", not "absent".
+    //
+    // This runs on the ASSEMBLED strings, which is the whole point. The plan's
+    // own `Done when` check is `rg -ni "pull request" mcp/src/tools.ts`, and
+    // `rg` reads source lines: a description built by `+`-concatenation can
+    // split the phrase across the join ("…review of a pull " + "request, …") and
+    // satisfy the grep while shipping the exact bytes the grep exists to
+    // forbid. Only the runtime value can see it.
+    const strings = [
+      ...tools.map((t) => `${t.name} description: ${t.description}`),
+      ...tools.flatMap((t) => {
+        const properties = (t.inputSchema.properties ?? {}) as Record<
+          string,
+          { description?: string }
+        >;
+        return Object.entries(properties).map(
+          ([key, schema]) => `${t.name}.${key}: ${schema.description ?? ''}`,
+        );
+      }),
+      `INSTRUCTIONS: ${INSTRUCTIONS}`,
+    ];
+    for (const entry of strings) {
+      if (!/pull[- ]request/i.test(entry)) continue;
+      expect(entry, `${entry} names a pull request without naming GitLab`).toMatch(/GitLab/);
+    }
   });
 
   it('instructions are three lines and never restate a parameter description', () => {

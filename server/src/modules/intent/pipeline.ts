@@ -72,7 +72,7 @@ export async function collectSources(
   specChunks: { path: string; content: string }[] = [],
 ): Promise<CollectedSources> {
   const blocks: SourceBlock[] = [];
-  const ref: RepoRef = { owner: repo.owner, name: repo.name };
+  const ref: RepoRef = { owner: repo.owner, name: repo.name, instanceKey: repo.instanceKey };
 
   // 1. PR title + body — always present in some form.
   const body = (pull.body ?? '').trim().slice(0, MAX_BODY_CHARS);
@@ -86,7 +86,10 @@ export async function collectSources(
   if (issueNumbers.length > 0) {
     const texts: string[] = [];
     try {
-      const gh = await container.github();
+      // The repository's OWN forge (SPEC-06 AC-20) — GitHub behaviour is
+      // unchanged; a GitLab repository now reaches its instance instead of
+      // silently degrading to "no linked issue".
+      const gh = await container.forge(repo);
       for (const n of issueNumbers) {
         try {
           const issue = await gh.getIssue(ref, n);
@@ -97,7 +100,7 @@ export async function collectSources(
         }
       }
     } catch {
-      /* no GitHub key configured (ConfigError) — a normal degraded path */
+      /* no access token for this repository's forge (ConfigError) — degraded */
     }
     if (texts.length > 0) blocks.push({ label: 'linked_issue', text: texts.join('\n\n') });
   }

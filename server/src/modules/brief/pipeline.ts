@@ -138,7 +138,7 @@ export async function collectBlocks(
 ): Promise<CollectedBriefBlocks> {
   const blocks: BriefBlock[] = [];
   const missing: BriefInputLabel[] = [];
-  const ref: RepoRef = { owner: repo.owner, name: repo.name };
+  const ref: RepoRef = { owner: repo.owner, name: repo.name, instanceKey: repo.instanceKey };
 
   const rangesByPath = new Map<string, ChangedRange[]>();
   for (const f of files) rangesByPath.set(normalizeBriefPath(f.path), changedRanges(f.patch));
@@ -233,7 +233,10 @@ export async function collectBlocks(
   if (issueNumbers.length > 0) {
     const texts: string[] = [];
     try {
-      const gh = await container.github();
+      // The repository's OWN forge (SPEC-06 AC-20) — GitHub behaviour is
+      // unchanged; a GitLab repository now reaches its instance instead of
+      // silently dropping the label.
+      const gh = await container.forge(repo);
       for (const n of issueNumbers) {
         try {
           const issue = await gh.getIssue(ref, n);
@@ -244,7 +247,7 @@ export async function collectBlocks(
         }
       }
     } catch {
-      /* no GitHub key configured (ConfigError) — a normal degraded path */
+      /* no access token for this repository's forge (ConfigError) — degraded */
     }
     if (texts.length > 0) {
       blocks.push({ label: 'linked_issue', text: texts.join('\n\n') });

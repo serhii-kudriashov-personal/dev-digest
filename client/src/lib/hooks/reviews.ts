@@ -9,6 +9,7 @@ import { notify } from "../toast";
 import type {
   FindingActionKind,
   PrReviewComment,
+  ReviewPostBack,
   ReviewRecord,
   ReviewRunResponse,
   RunEvent,
@@ -113,7 +114,7 @@ export interface CreateCommentInput {
   line: number;
   side?: "LEFT" | "RIGHT";
   body: string;
-  in_reply_to?: number;
+  in_reply_to?: string;
 }
 
 /** Post one inline comment (or reply) to GitHub; refreshes the thread list. */
@@ -123,6 +124,58 @@ export function useCreatePrComment(prId: string | null | undefined) {
     mutationFn: (input: CreateCommentInput) =>
       api.post<PrReviewComment>(`/pulls/${prId}/comments`, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pr-comments", prId] }),
+  });
+}
+
+// ---- Posting a run's review back onto its change request ----
+/** Query key for one run's post-back outcome — shared by the read and the
+ *  mutation that records a new one, so they cannot go stale against each other. */
+function postBackKey(prId: string | null | undefined, runId: string | null | undefined) {
+  return ["post-back", prId, runId] as const;
+}
+
+/**
+ * The recorded outcome of posting one run's review, or `null` when this run has
+ * never been posted (SPEC-06 — AC-39, NFR-12).
+ *
+ * Read from the server rather than kept beside the mutation on purpose: NFR-12
+ * asks for the outcome to still be visible after a page reload, and the row
+ * behind `GET /pulls/:id/post-review/:runId` is the only thing that survives
+ * one. A run that was never posted answers 200 with `null`, not a 404, so
+ * nothing here caches a miss (`client/INSIGHTS.md` 2026-08-09).
+ */
+export function usePostBackOutcome(
+  prId: string | null | undefined,
+  runId: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: postBackKey(prId, runId),
+    queryFn: () => api.get<ReviewPostBack | null>(`/pulls/${prId}/post-review/${runId}`),
+    enabled: !!prId && !!runId,
+  });
+}
+
+/**
+ * Publish one run's review onto the change request it reviewed.
+ *
+ * The server answers **200 with a stated outcome** for every publication that
+ * did not fully work out — a refused approval, an offline instance, a post that
+ * stopped halfway — and only an unknown pull or run is an error. So the result
+ * of this mutation is `data.outcome`, never `isError`; a caller that branches on
+ * `isError` would report a posted-but-not-approved review as a failure.
+ */
+export function usePostReview(prId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) =>
+      api.post<ReviewPostBack>(`/pulls/${prId}/post-review`, { run_id: runId }),
+    onSuccess: (data, runId) => {
+      // The response IS the newly recorded row, so seed it before invalidating —
+      // otherwise the panel flickers back to "not posted yet" until the refetch
+      // lands.
+      qc.setQueryData(postBackKey(prId, runId), data);
+      qc.invalidateQueries({ queryKey: postBackKey(prId, runId) });
+    },
   });
 }
 

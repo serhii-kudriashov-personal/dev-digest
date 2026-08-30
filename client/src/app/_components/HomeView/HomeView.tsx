@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { EmptyState, Button, Skeleton } from "@devdigest/ui";
 import { AppShell } from "@/components/app-shell";
 import { PageContainer } from "@/components/page-shell";
+import { RepoIdentity } from "@/components/repo-identity";
 import { useRepos } from "@/lib/hooks";
 import { s } from "./styles";
 
@@ -40,6 +41,10 @@ export function HomeView() {
         ) : (
           <div>
             <p style={s.redirectNote}>Taking you to your repository…</p>
+            {/* AC-31 / AC-33: which repository, on which forge, as text. */}
+            <div style={s.repoIdentity}>
+              <RepoIdentity repo={repos[0]!} />
+            </div>
             <Button kind="primary" onClick={() => router.push(`/repos/${repos[0]!.id}/pulls`)}>
               Open {repos[0]!.full_name}
             </Button>

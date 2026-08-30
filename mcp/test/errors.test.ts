@@ -57,7 +57,7 @@ describe('run_agent_on_pr errors', () => {
     );
   });
 
-  it('tells the user to import a pull request that is not there', async () => {
+  it('tells the user to import a change request that is not there', async () => {
     const handlers = handlersWith({
       'GET /agents': agents,
       'GET /repos': repos,
@@ -71,7 +71,11 @@ describe('run_agent_on_pr errors', () => {
 
     expect(result.isError).toBe(true);
     expect(text(result)).toBe(
-      'Pull request #42 is not imported for acme/widgets. Open the repository in the web UI to import its pull requests, then retry.',
+      // Provider-neutral wording (SPEC-06 — `specs/2026-08-28-gitlab-repositories.md`
+      // §Contract promises, MCP row): a GitLab repository's change requests are
+      // merge requests, so a message naming "pull request" is wrong for half the
+      // repositories this server can be pointed at.
+      'Change request #42 is not imported for acme/widgets. Open the repository in the web UI to import its change requests, then retry.',
     );
   });
 
@@ -85,7 +89,7 @@ describe('run_agent_on_pr errors', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(text(result)).toContain('whole pull-request number');
+    expect(text(result)).toContain('whole change-request number');
     expect(api.calls).toEqual([]);
   });
 });
@@ -324,7 +328,7 @@ describe('get_blast_radius', () => {
     const result = await handlers.get_blast_radius!({ repo: 'acme/widgets', pr: 1.5 });
 
     expect(result.isError).toBe(true);
-    expect(text(result)).toContain('whole pull-request number');
+    expect(text(result)).toContain('whole change-request number');
     expect(api.calls).toEqual([]);
   });
 });

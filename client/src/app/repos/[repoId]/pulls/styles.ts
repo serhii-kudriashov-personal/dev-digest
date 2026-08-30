@@ -31,6 +31,8 @@ export const s = {
     color: hover ? "var(--accent-text)" : "var(--text-primary)",
   }),
   rowNumber: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  /** AC-31 — the instance name is TEXT beside the identifier, not an icon or a colour. */
+  rowInstance: { fontSize: 12, color: "var(--text-muted)", marginLeft: 6 } satisfies CSSProperties,
   authorCell: {
     display: "flex",
     alignItems: "center",
@@ -81,6 +83,14 @@ export const s = {
     fontSize: 14,
     color: "var(--text-secondary)",
     marginTop: 4,
+  } satisfies CSSProperties,
+  /** AC-44 — the "last sync failed, this is a snapshot" band above the list. */
+  syncErrorBanner: {
+    padding: "10px 16px",
+    fontSize: 13,
+    color: "var(--text-secondary)",
+    background: "var(--warn-bg)",
+    borderBottom: "1px solid var(--border)",
   } satisfies CSSProperties,
   headerActions: {
     marginLeft: "auto",
